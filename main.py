@@ -38,6 +38,7 @@ REPLACE_DICT = {
     "]": ""
 }
 
+# 🔥 MARKDOWN MODE ENABLED (Danda laane ke liye)
 app = Client(
     "my_multibot",
     api_id=API_ID,
@@ -46,7 +47,7 @@ app = Client(
     workers=4, 
     max_concurrent_transmissions=2,
     ipv6=False,
-    parse_mode=enums.ParseMode.HTML 
+    parse_mode=enums.ParseMode.MARKDOWN  # <-- Changed to Markdown
 )
 
 batch_data = {}
@@ -100,6 +101,14 @@ def get_extension(filename):
     if not ext: return ".mkv"
     return ext
 
+# 🔥 NEW: Markdown Escape (Error bachane ke liye)
+def escape_md(text):
+    # Markdown me ye characters problem karte hain, inhe ignore karwayenge
+    chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    for c in chars:
+        text = text.replace(c, f"\\{c}")
+    return text
+
 async def progress(current, total, message, start_time, task_type):
     now = time.time()
     diff = now - start_time
@@ -114,9 +123,9 @@ async def progress(current, total, message, start_time, task_type):
             round(percentage, 2))
         tmp = (f"{task_type}\n"
                f"{progress_str}\n"
-               f"💾 <b>Size:</b> {humanbytes(current)} / {humanbytes(total)}\n"
-               f"🚀 <b>Speed:</b> {humanbytes(speed)}/s\n"
-               f"⏳ <b>ETA:</b> {time_left_str}")
+               f"💾 *Size:* {humanbytes(current)} / {humanbytes(total)}\n"
+               f"🚀 *Speed:* {humanbytes(speed)}/s\n"
+               f"⏳ *ETA:* {time_left_str}")
         try:
             await message.edit(tmp)
         except:
@@ -151,30 +160,30 @@ def get_video_attributes(file_path):
     return width, height, duration
 
 # ==========================================
-# 🔥 COMMANDS & MODES
+# 🔥 COMMANDS
 # ==========================================
 
 @app.on_message(filters.command("start") & filters.private)
 async def start_msg(client, message):
     await message.reply_text(
-        f"👋 <b>Hello {message.from_user.first_name}!</b>\n\n"
-        "🤖 <b>Filmy Flip Hub Bot</b>\n"
-        "✨ <b>Style:</b> Blockquote Box (White Line)\n\n"
-        "⚙️ <b>Manage:</b> <code>/add</code>, <code>/del</code>, <code>/words</code>\n"
-        "📝 <b>Caption:</b> <code>/caption</code>\n"
-        "📁 <b>Rename:</b> <code>/rename</code>"
+        f"👋 *Hello {message.from_user.first_name}!*\n\n"
+        "🤖 *Filmy Flip Hub Bot*\n"
+        "✨ *Style:* Vertical Line Quote (Danda)\n\n"
+        "⚙️ *Manage:* `/add`, `/del`, `/words`\n"
+        "📝 *Caption:* `/caption`\n"
+        "📁 *Rename:* `/rename`"
     )
 
 @app.on_message(filters.command("add") & filters.private)
 async def add_word(client, message):
-    if len(message.command) < 2: return await message.reply_text("❌ Usage: <code>/add word</code>")
+    if len(message.command) < 2: return await message.reply_text("❌ Usage: `/add word`")
     new_words = message.command[1:]
     for word in new_words: REPLACE_DICT[word] = "Filmy Flip Hub"
     await message.reply_text(f"✅ Added {len(new_words)} words.")
 
 @app.on_message(filters.command("del") & filters.private)
 async def del_word(client, message):
-    if len(message.command) < 2: return await message.reply_text("❌ Usage: <code>/del word</code>")
+    if len(message.command) < 2: return await message.reply_text("❌ Usage: `/del word`")
     words = message.command[1:]
     deleted = [w for w in words if REPLACE_DICT.pop(w, None)]
     await message.reply_text(f"🗑 Deleted: {', '.join(deleted)}" if deleted else "❌ Not found.")
@@ -182,29 +191,29 @@ async def del_word(client, message):
 @app.on_message(filters.command("words") & filters.private)
 async def view_words(client, message):
     if not REPLACE_DICT: return await message.reply_text("📭 Empty List.")
-    disp = "\n".join([f"🔹 <code>{k}</code> ➡ <code>{v}</code>" for k, v in REPLACE_DICT.items()])
-    await message.reply_text(f"📋 <b>Filter List:</b>\n\n{disp}")
+    disp = "\n".join([f"🔹 `{k}` ➡ `{v}`" for k, v in REPLACE_DICT.items()])
+    await message.reply_text(f"📋 *Filter List:*\n\n{disp}")
 
 @app.on_message(filters.command("link") & filters.private)
 async def set_link_mode(client, message):
     user_modes[message.from_user.id] = "blogger_link"
-    await message.reply_text("🔗 <b>Link Mode ON!</b>")
+    await message.reply_text("🔗 *Link Mode ON!*")
 
 @app.on_message(filters.command("rename") & filters.private)
 async def set_rename_mode(client, message):
     user_modes[message.from_user.id] = "renamer"
-    await message.reply_text("📁 <b>Renamer Mode ON!</b>")
+    await message.reply_text("📁 *Renamer Mode ON!*")
 
 @app.on_message(filters.command("caption") & filters.private)
 async def set_caption_mode(client, message):
     user_modes[message.from_user.id] = "caption_only"
-    await message.reply_text("📝 <b>Caption Mode ON!</b>")
+    await message.reply_text("📝 *Caption Mode ON!*")
 
 @app.on_message(filters.private & filters.photo)
 async def save_thumbnail(client, message):
     path = f"thumbnails/{message.from_user.id}.jpg"
     await client.download_media(message=message, file_name=path)
-    await message.reply_text("✅ <b>Thumbnail Saved!</b>")
+    await message.reply_text("✅ *Thumbnail Saved!*")
 
 @app.on_message(filters.command("delthumb") & filters.private)
 async def delete_thumb(client, message):
@@ -213,19 +222,18 @@ async def delete_thumb(client, message):
         os.remove(path)
         await message.reply_text("🗑 Thumbnail Deleted.")
 
-# --- Batch Mode ---
 @app.on_message(filters.command("batch") & filters.private)
 async def batch_start(client, message):
     user_modes[message.from_user.id] = "renamer"
     batch_data[message.from_user.id] = {'status': 'collecting', 'files': []}
-    await message.reply_text("🚀 <b>Batch Mode ON!</b> Files forward karein, fir <b>/done</b> bhejein.")
+    await message.reply_text("🚀 *Batch Mode ON!* Files forward karein, fir */done* bhejein.")
 
 @app.on_message(filters.command("done") & filters.private)
 async def batch_done(client, message):
     user_id = message.from_user.id
     if user_id in batch_data and batch_data[user_id]['files']:
         batch_data[user_id]['status'] = 'naming'
-        prompt_msg = await message.reply_text("✅ Files received. Ab <b>Series Name</b> bhejein.")
+        prompt_msg = await message.reply_text("✅ Files received. Ab *Series Name* bhejein.")
         batch_data[user_id]['prompt_msg_id'] = prompt_msg.id
     else:
         await message.reply_text("Pehle files bhejein!")
@@ -250,27 +258,36 @@ async def handle_files(client, message):
             clean_filename = auto_clean(org_filename)
             s_num, e_num = get_media_info(clean_filename)
             
-            # 🔥 BLOCKQUOTE BOX STYLE (White Line Wala)
-            caption = f"<b>{clean_filename}</b>\n\n"
+            # 🔥 VERTICAL LINE LOGIC (Markdown V2)
+            # 1. Filename Bold me
+            caption = f"**{escape_md(clean_filename)}**\n\n"
+            
+            # 2. Season/Episode (Normal)
             if s_num: caption += f"💿 Season ➥ {s_num}\n"
             if e_num: caption += f"📺 Episode ➥ {e_num}\n\n"
             
-            # 👇 Yahan change kiya hai: <blockquote>
-            caption += f"<blockquote>File Size ♻️ ➥ {file_size}</blockquote>\n"
+            # 3. Quote Lines (Danda)
+            # Ye '>' sign hi wo white line banata hai
+            caption += f"> File Size ♻️ ➥ {file_size}\n"
             
             if duration_sec > 0:
-                caption += f"<blockquote>Duration ⏰ ➥ {duration_str}</blockquote>\n"
+                caption += f"> Duration ⏰ ➥ {duration_str}\n"
                 
-            caption += f"<blockquote>Powered By ➥ {CREDIT_NAME}</blockquote>"
+            caption += f"> Powered By ➥ {escape_md(CREDIT_NAME)}"
             
-            await message.reply_cached_media(file_id, caption=caption)
+            # Parse mode explicitly Markdown set karein just in case
+            await message.reply_cached_media(
+                file_id, 
+                caption=caption,
+                parse_mode=enums.ParseMode.MARKDOWN
+            )
         except Exception as e:
             await message.reply_text(f"❌ Error: {e}")
         return
 
     # --- Renamer Logic ---
     if ACTIVE_TASKS >= MAX_TASK_LIMIT:
-        w = await message.reply_text("⚠️ <b>OVERLOAD!</b> Wait...")
+        w = await message.reply_text("⚠️ *OVERLOAD!* Wait...")
         await asyncio.sleep(5)
         try: await w.delete()
         except: pass
@@ -287,7 +304,7 @@ async def handle_files(client, message):
         InlineKeyboardButton("🎥 Video", callback_data="mode_video"),
         InlineKeyboardButton("📁 Document", callback_data="mode_document")
     ]])
-    await message.reply_text("<b>Upload Mode Select Karein:</b>", reply_to_message_id=message.id, reply_markup=buttons)
+    await message.reply_text("*Upload Mode Select Karein:*", reply_to_message_id=message.id, reply_markup=buttons)
 
 @app.on_callback_query(filters.regex("mode_"))
 async def mode_selection(client, callback_query):
@@ -306,7 +323,7 @@ async def mode_selection(client, callback_query):
     
     await client.send_message(
         chat_id=user_id,
-        text=f"<b>File:</b> <code>{clean_display}</code>\nMode: <b>{data.split('_')[1].title()}</b>\nAb naya naam bhejein:",
+        text=f"*File:* `{clean_display}`\nMode: *{data.split('_')[1].title()}*\nAb naya naam bhejein:",
         reply_to_message_id=file_msg.id,
         reply_markup=ForceReply(True)
     )
@@ -324,16 +341,16 @@ async def handle_text(client, message):
                 start_code = text.split("?start=")[1].split()[0]
                 encoded = base64.b64encode(start_code.encode("utf-8")).decode("utf-8")
                 final_link = f"{BLOGGER_URL}?data={encoded}"
-                await message.reply_text(f"✅ <b>Link:</b>\n<code>{final_link}</code>", disable_web_page_preview=True)
+                await message.reply_text(f"✅ *Link:*\n`{final_link}`", disable_web_page_preview=True)
             except: await message.reply_text("❌ Error.")
-        else: await message.reply_text("❌ No <code>?start=</code> found.")
+        else: await message.reply_text("❌ No `?start=` found.")
         return
 
     # RENAMER LOGIC
     if user_id in batch_data and batch_data[user_id]['status'] == 'naming':
         batch_data[user_id]['status'] = 'processing'
         ACTIVE_TASKS += 1
-        status_msg = await message.reply_text(f"⏳ <b>Batch Processing...</b>")
+        status_msg = await message.reply_text(f"⏳ *Batch Processing...*")
         
         try:
             base_name = auto_clean(message.text.strip())
@@ -353,23 +370,31 @@ async def handle_text(client, message):
                     if not new_name.endswith(ext): new_name += ext
                     
                     start_time = time.time()
-                    dl_path = await client.download_media(media, file_name=f"downloads/{new_name}", progress=progress, progress_args=(status_msg, start_time, f"📥 <b>Down</b> ({idx+1}/{len(files)})"))
+                    dl_path = await client.download_media(media, file_name=f"downloads/{new_name}", progress=progress, progress_args=(status_msg, start_time, f"📥 *Down* ({idx+1}/{len(files)})"))
                     
                     width, height, duration = get_video_attributes(dl_path)
                     file_size = humanbytes(os.path.getsize(dl_path))
                     duration_str = get_duration_str(duration)
                     
-                    # 🔥 BLOCKQUOTE BOX STYLE (Batch)
-                    caption = f"<b>{new_name}</b>\n\n"
+                    # 🔥 VERTICAL LINE QUOTE (Batch)
+                    caption = f"**{escape_md(new_name)}**\n\n"
                     if s_num: caption += f"💿 Season ➥ {s_num}\n"
                     if e_num: caption += f"📺 Episode ➥ {e_num}\n\n"
                     
-                    caption += f"<blockquote>File Size ♻️ ➥ {file_size}</blockquote>\n"
-                    if duration > 0: caption += f"<blockquote>Duration ⏰ ➥ {duration_str}</blockquote>\n"
-                    caption += f"<blockquote>Powered By ➥ {CREDIT_NAME}</blockquote>"
+                    caption += f"> File Size ♻️ ➥ {file_size}\n"
+                    if duration > 0: caption += f"> Duration ⏰ ➥ {duration_str}\n"
+                    caption += f"> Powered By ➥ {escape_md(CREDIT_NAME)}"
 
                     start_time = time.time()
-                    await client.send_document(message.chat.id, document=dl_path, caption=caption, force_document=True, progress=progress, progress_args=(status_msg, start_time, f"📤 <b>Up</b> ({idx+1})"))
+                    await client.send_document(
+                        message.chat.id, 
+                        document=dl_path, 
+                        caption=caption, 
+                        force_document=True, 
+                        parse_mode=enums.ParseMode.MARKDOWN, # Explicit
+                        progress=progress, 
+                        progress_args=(status_msg, start_time, f"📤 *Up* ({idx+1})")
+                    )
                     os.remove(dl_path)
                 except Exception as e: print(e)
             
@@ -386,7 +411,7 @@ async def handle_text(client, message):
     if message.reply_to_message and user_id in user_data:
         user_task = user_data.pop(user_id)
         ACTIVE_TASKS += 1
-        status_msg = await message.reply_text("⏳ <b>Starting...</b>")
+        status_msg = await message.reply_text("⏳ *Starting...*")
         
         try:
             original_msg = user_task['file_msg']
@@ -404,30 +429,44 @@ async def handle_text(client, message):
             
             path = f"downloads/{new_name}"
             start_time = time.time()
-            dl_path = await client.download_media(original_msg, file_name=path, progress=progress, progress_args=(status_msg, start_time, "📥 <b>Downloading...</b>"))
+            dl_path = await client.download_media(original_msg, file_name=path, progress=progress, progress_args=(status_msg, start_time, "📥 *Downloading...*"))
             
             width, height, duration = get_video_attributes(dl_path)
             file_size = humanbytes(os.path.getsize(dl_path))
             duration_str = get_duration_str(duration)
             s_num, e_num = get_media_info(new_name)
             
-            # 🔥 BLOCKQUOTE BOX STYLE (Single)
-            caption = f"<b>{new_name}</b>\n\n"
+            # 🔥 VERTICAL LINE QUOTE (Single)
+            caption = f"**{escape_md(new_name)}**\n\n"
             if s_num: caption += f"💿 Season ➥ {s_num}\n"
             if e_num: caption += f"📺 Episode ➥ {e_num}\n\n"
             
-            caption += f"<blockquote>File Size ♻️ ➥ {file_size}</blockquote>\n"
-            
-            if duration > 0:
-                caption += f"<blockquote>Duration ⏰ ➥ {duration_str}</blockquote>\n"
-                
-            caption += f"<blockquote>Powered By ➥ {CREDIT_NAME}</blockquote>"
+            caption += f"> File Size ♻️ ➥ {file_size}\n"
+            if duration > 0: caption += f"> Duration ⏰ ➥ {duration_str}\n"
+            caption += f"> Powered By ➥ {escape_md(CREDIT_NAME)}"
 
             start_time = time.time()
             if mode == 'video':
-                await client.send_video(message.chat.id, video=dl_path, caption=caption, thumb=thumb_path, supports_streaming=True, duration=duration, width=width, height=height, progress=progress, progress_args=(status_msg, start_time, "📤 <b>Up Video</b>"))
+                await client.send_video(
+                    message.chat.id, 
+                    video=dl_path, 
+                    caption=caption, 
+                    thumb=thumb_path, 
+                    supports_streaming=True, 
+                    duration=duration, width=width, height=height, 
+                    parse_mode=enums.ParseMode.MARKDOWN, # Explicit
+                    progress=progress, progress_args=(status_msg, start_time, "📤 *Up Video*")
+                )
             else:
-                await client.send_document(message.chat.id, document=dl_path, caption=caption, thumb=thumb_path, force_document=True, progress=progress, progress_args=(status_msg, start_time, "📤 <b>Up File</b>"))
+                await client.send_document(
+                    message.chat.id, 
+                    document=dl_path, 
+                    caption=caption, 
+                    thumb=thumb_path, 
+                    force_document=True, 
+                    parse_mode=enums.ParseMode.MARKDOWN, # Explicit
+                    progress=progress, progress_args=(status_msg, start_time, "📤 *Up File*")
+                )
             
             os.remove(dl_path)
             await status_msg.delete()
@@ -443,7 +482,7 @@ async def main():
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    print("Bot with Blockquote Box Started!")
+    print("Markdown V2 Box Mode Started!")
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
         

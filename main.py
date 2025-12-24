@@ -18,8 +18,8 @@ API_HASH = os.environ.get("API_HASH", "hash")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "token")
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
-# 🔥 BRAND NAME
-CREDIT_NAME = "Filmy Flip Hub"
+# 🔥 BRAND NAME (Butterflies ke saath)
+CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"
 
 # --- SERVER SETTINGS ---
 MAX_TASK_LIMIT = 2
@@ -27,11 +27,11 @@ ACTIVE_TASKS = 0
 
 # --- 🗑️ AUTO REPLACE LIST ---
 REPLACE_DICT = {
-    "hdhub": CREDIT_NAME,
-    "mkvcinemas": CREDIT_NAME,
-    "bolly4u": CREDIT_NAME,
-    "djpunjab": CREDIT_NAME,
-    "mp4moviez": CREDIT_NAME,
+    "hdhub": "Filmy Flip Hub",
+    "mkvcinemas": "Filmy Flip Hub",
+    "bolly4u": "Filmy Flip Hub",
+    "djpunjab": "Filmy Flip Hub",
+    "mp4moviez": "Filmy Flip Hub",
     "www.": "",
     ".com": "",
     "[": "",
@@ -144,34 +144,29 @@ def get_video_attributes(file_path):
     return width, height, duration
 
 # ==========================================
-# 🔥 MANAGER COMMANDS (Multi-Word)
+# 🔥 MANAGER COMMANDS
 # ==========================================
 
 @app.on_message(filters.command("add") & filters.private)
 async def add_word(client, message):
     if len(message.command) < 2:
         return await message.reply_text("❌ Usage: `/add word1 word2`")
-    
     new_words = message.command[1:]
     for word in new_words:
-        REPLACE_DICT[word] = CREDIT_NAME
-        
+        REPLACE_DICT[word] = "Filmy Flip Hub"
     added_list = ", ".join([f"`{w}`" for w in new_words])
-    await message.reply_text(f"✅ **Added:** {added_list}\nYe sab **{CREDIT_NAME}** ban jayenge.")
+    await message.reply_text(f"✅ **Added:** {added_list}\nYe sab **Filmy Flip Hub** ban jayenge.")
 
 @app.on_message(filters.command("del") & filters.private)
 async def del_word(client, message):
     if len(message.command) < 2:
         return await message.reply_text("❌ Usage: `/del word1 word2`")
-    
     words_to_delete = message.command[1:]
     deleted_list = []
-    
     for word in words_to_delete:
         if word in REPLACE_DICT:
             del REPLACE_DICT[word]
             deleted_list.append(f"`{word}`")
-            
     if deleted_list:
         await message.reply_text(f"🗑 **Deleted:** {', '.join(deleted_list)}")
     else:
@@ -184,7 +179,7 @@ async def view_words(client, message):
         return
     words_display = "\n".join([f"🔹 `{k}` ➡ `{v}`" for k, v in REPLACE_DICT.items()])
     await message.reply_text(f"📋 **Auto-Filter List:**\n\n{words_display}")
-        # ==========================================
+    # ==========================================
 # STANDARD COMMANDS & LOGIC
 # ==========================================
 
@@ -193,8 +188,9 @@ async def start_msg(client, message):
     await message.reply_text(
         f"👋 **Hello {message.from_user.first_name}!**\n\n"
         "🤖 **Filmy Flip Hub Bot**\n"
+        "✨ **Style:** Box Caption (Gray Dibba)\n"
         "⚙️ **Manage:** `/add`, `/del`, `/words`\n"
-        "📝 **Caption:** `/caption` (Instant)\n"
+        "📝 **Caption:** `/caption`\n"
         "📁 **Rename:** `/rename`"
     )
 
@@ -264,12 +260,18 @@ async def handle_files(client, message):
             clean_filename = auto_clean(org_filename)
             s_num, e_num = get_media_info(clean_filename)
             
+            # 🔥 BOX STYLE + SMART DURATION
             caption = f"**{clean_filename}**\n\n"
             if s_num: caption += f"💿 Season ➥ {s_num}\n"
-            if e_num: caption += f"📺 Episode ➥ {e_num}\n"
-            caption += f"📁 Size ♻️ ➥ {file_size}\n"
-            caption += f"⏰ Duration ➥ {duration_str}\n"
-            caption += f"⚡ Powered By ➥ {CREDIT_NAME}"
+            if e_num: caption += f"📺 Episode ➥ {e_num}\n\n"
+            
+            caption += f"`File Size ♻️ ➥ {file_size}`\n"
+            
+            # 🟢 DURATION HIDE IF 0
+            if duration_sec and duration_sec > 0:
+                caption += f"`Duration ⏰ ➥ {duration_str}`\n"
+                
+            caption += f"`Powered By ➥ {CREDIT_NAME}`"
             
             await message.reply_cached_media(file_id, caption=caption)
         except Exception as e:
@@ -383,12 +385,18 @@ async def handle_text(client, message):
                     file_size = humanbytes(os.path.getsize(dl_path))
                     duration_str = get_duration_str(duration)
                     
+                    # 🔥 BOX STYLE + SMART DURATION (Batch)
                     caption = f"**{new_name}**\n\n"
                     if s_num: caption += f"💿 Season ➥ {s_num}\n"
-                    if e_num: caption += f"📺 Episode ➥ {e_num}\n"
-                    caption += f"📁 Size ♻️ ➥ {file_size}\n"
-                    caption += f"⏰ Duration ➥ {duration_str}\n"
-                    caption += f"⚡ Powered By ➥ {CREDIT_NAME}"
+                    if e_num: caption += f"📺 Episode ➥ {e_num}\n\n"
+                    
+                    caption += f"`File Size ♻️ ➥ {file_size}`\n"
+                    
+                    # 🟢 CHECK DURATION > 0
+                    if duration and duration > 0:
+                        caption += f"`Duration ⏰ ➥ {duration_str}`\n"
+                        
+                    caption += f"`Powered By ➥ {CREDIT_NAME}`"
 
                     start_time = time.time()
                     await client.send_document(
@@ -443,12 +451,18 @@ async def handle_text(client, message):
             duration_str = get_duration_str(duration)
             s_num, e_num = get_media_info(new_name)
             
+            # 🔥 BOX STYLE + SMART DURATION (Single)
             caption = f"**{new_name}**\n\n"
             if s_num: caption += f"💿 Season ➥ {s_num}\n"
-            if e_num: caption += f"📺 Episode ➥ {e_num}\n"
-            caption += f"📁 Size ♻️ ➥ {file_size}\n"
-            caption += f"⏰ Duration ➥ {duration_str}\n"
-            caption += f"⚡ Powered By ➥ {CREDIT_NAME}"
+            if e_num: caption += f"📺 Episode ➥ {e_num}\n\n"
+            
+            caption += f"`File Size ♻️ ➥ {file_size}`\n"
+            
+            # 🟢 CHECK DURATION > 0
+            if duration and duration > 0:
+                caption += f"`Duration ⏰ ➥ {duration_str}`\n"
+                
+            caption += f"`Powered By ➥ {CREDIT_NAME}`"
 
             start_time = time.time()
             if mode == 'video':
@@ -485,7 +499,7 @@ async def main():
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    print("Final Bot Started!")
+    print("Bot with Smart Duration Started!")
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
     

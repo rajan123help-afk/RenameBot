@@ -6,7 +6,7 @@ import math
 import shutil
 import base64
 import datetime
-import html # 🔥 HTML library add ki hai safety ke liye
+import html
 from pyrogram import Client, filters, enums
 from pyrogram.types import ForceReply, InlineKeyboardMarkup, InlineKeyboardButton
 from aiohttp import web
@@ -39,7 +39,7 @@ REPLACE_DICT = {
     "]": ""
 }
 
-# 🔥 HTML MODE (Ye zaroori hai Box ke liye)
+# 🔥 HTML MODE (Zaroori hai)
 app = Client(
     "my_multibot",
     api_id=API_ID,
@@ -161,7 +161,7 @@ async def start_msg(client, message):
     await message.reply_text(
         f"👋 <b>Hello {message.from_user.first_name}!</b>\n\n"
         "🤖 <b>Filmy Flip Hub Bot</b>\n"
-        "✨ <b>Fixed:</b> No Backslash & Quote Box\n\n"
+        "✨ <b>Style:</b> Premium Box (Update Required)\n\n"
         "⚙️ <b>Manage:</b> <code>/add</code>, <code>/del</code>, <code>/words</code>\n"
         "📝 <b>Caption:</b> <code>/caption</code>\n"
         "📁 <b>Rename:</b> <code>/rename</code>"
@@ -230,7 +230,8 @@ async def batch_done(client, message):
         batch_data[user_id]['prompt_msg_id'] = prompt_msg.id
     else:
         await message.reply_text("Pehle files bhejein!")
-        # --- Main Handler ---
+
+# --- Main Handler ---
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio))
 async def handle_files(client, message):
     global ACTIVE_TASKS
@@ -238,7 +239,7 @@ async def handle_files(client, message):
     
     current_mode = user_modes.get(user_id, "renamer")
     
-    # --- CAPTION ONLY MODE ---
+    # --- 🔥 CAPTION ONLY MODE ---
     if current_mode == "caption_only":
         try:
             media = message.document or message.video or message.audio
@@ -251,21 +252,22 @@ async def handle_files(client, message):
             clean_filename = auto_clean(org_filename)
             s_num, e_num = get_media_info(clean_filename)
             
-            # 🔥 HTML MODE (No Backslash Issue)
-            # <b>Filename</b> = Bold
+            # 🔥 PREMIUM BOX STYLE (Quote + Code)
+            # 1. Filename Bold
             caption = f"<b>{clean_filename}</b>\n\n"
             
+            # 2. Season/Episode (Normal)
             if s_num: caption += f"💿 Season ➥ {s_num}\n"
             if e_num: caption += f"📺 Episode ➥ {e_num}\n\n"
             
-            # 🔥 BLOCKQUOTE (White Vertical Line Box)
-            # Sabko ek sath blockquote me daal diya taaki ek bada box bane
-            caption += f"<blockquote>File Size ♻️ ➥ {file_size}\n"
+            # 3. BOX PART
+            # <blockquote> layega 'Line' aur <code> layega 'Gray Background'
+            caption += f"<blockquote><code>File Size ♻️ ➥ {file_size}</code></blockquote>\n"
             
             if duration_sec > 0:
-                caption += f"Duration ⏰ ➥ {duration_str}\n"
+                caption += f"<blockquote><code>Duration ⏰ ➥ {duration_str}</code></blockquote>\n"
                 
-            caption += f"Powered By ➥ {CREDIT_NAME}</blockquote>"
+            caption += f"<blockquote><code>Powered By ➥ {CREDIT_NAME}</code></blockquote>"
             
             await message.reply_cached_media(file_id, caption=caption)
         except Exception as e:
@@ -363,14 +365,14 @@ async def handle_text(client, message):
                     file_size = humanbytes(os.path.getsize(dl_path))
                     duration_str = get_duration_str(duration)
                     
-                    # 🔥 HTML + BLOCKQUOTE (Batch)
+                    # 🔥 PREMIUM BOX STYLE (Batch)
                     caption = f"<b>{new_name}</b>\n\n"
                     if s_num: caption += f"💿 Season ➥ {s_num}\n"
                     if e_num: caption += f"📺 Episode ➥ {e_num}\n\n"
                     
-                    caption += f"<blockquote>File Size ♻️ ➥ {file_size}\n"
-                    if duration > 0: caption += f"Duration ⏰ ➥ {duration_str}\n"
-                    caption += f"Powered By ➥ {CREDIT_NAME}</blockquote>"
+                    caption += f"<blockquote><code>File Size ♻️ ➥ {file_size}</code></blockquote>\n"
+                    if duration > 0: caption += f"<blockquote><code>Duration ⏰ ➥ {duration_str}</code></blockquote>\n"
+                    caption += f"<blockquote><code>Powered By ➥ {CREDIT_NAME}</code></blockquote>"
 
                     start_time = time.time()
                     await client.send_document(message.chat.id, document=dl_path, caption=caption, force_document=True, progress=progress, progress_args=(status_msg, start_time, f"📤 <b>Up</b> ({idx+1})"))
@@ -415,14 +417,14 @@ async def handle_text(client, message):
             duration_str = get_duration_str(duration)
             s_num, e_num = get_media_info(new_name)
             
-            # 🔥 HTML + BLOCKQUOTE (Single)
+            # 🔥 PREMIUM BOX STYLE (Single)
             caption = f"<b>{new_name}</b>\n\n"
             if s_num: caption += f"💿 Season ➥ {s_num}\n"
             if e_num: caption += f"📺 Episode ➥ {e_num}\n\n"
             
-            caption += f"<blockquote>File Size ♻️ ➥ {file_size}\n"
-            if duration > 0: caption += f"Duration ⏰ ➥ {duration_str}\n"
-            caption += f"Powered By ➥ {CREDIT_NAME}</blockquote>"
+            caption += f"<blockquote><code>File Size ♻️ ➥ {file_size}</code></blockquote>\n"
+            if duration > 0: caption += f"<blockquote><code>Duration ⏰ ➥ {duration_str}</code></blockquote>\n"
+            caption += f"<blockquote><code>Powered By ➥ {CREDIT_NAME}</code></blockquote>"
 
             start_time = time.time()
             if mode == 'video':
@@ -444,6 +446,6 @@ async def main():
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    print("HTML Box Mode Corrected!")
+    print("Premium Box Mode Started!")
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())

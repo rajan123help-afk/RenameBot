@@ -2,11 +2,12 @@ import os
 import re
 import asyncio
 from pyrogram import Client, filters
+from aiohttp import web
 
-# --- Configs (Ye hum Server par settings me dalenge) ---
-API_ID = int(os.environ.get("API_ID"))
-API_HASH = os.environ.get("API_HASH")
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
+# --- Configs ---
+API_ID = int(os.environ.get("API_ID", "12345"))
+API_HASH = os.environ.get("API_HASH", "hash")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "token")
 
 app = Client("my_renamer_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
@@ -16,7 +17,19 @@ batch_data = {}
 if not os.path.exists("downloads"): os.makedirs("downloads")
 if not os.path.exists("thumbnails"): os.makedirs("thumbnails")
 
-# --- Episode Detection Logic ---
+# --- Web Server for Koyeb (Jugaad) ---
+async def web_server():
+    async def handle(request):
+        return web.Response(text="Bot is Running!")
+
+    app = web.Application()
+    app.router.add_get('/', handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 8000)
+    await site.start()
+
+# --- Helper Functions & Bot Logic ---
 def extract_season_episode(filename):
     pattern = r"[sS](\d+)[eE](\d+)|[eE]([pP])?(\d+)|(\d+)[xX](\d+)"
     match = re.search(pattern, filename)
@@ -26,12 +39,10 @@ def extract_season_episode(filename):
         elif match.group(5) and match.group(6): return f"S{match.group(5)}E{match.group(6)}"
     return None
 
-# --- Thumbnail Logic ---
 @app.on_message(filters.private & filters.photo)
 async def save_thumbnail(client, message):
     user_id = message.from_user.id
     if user_id in batch_data and batch_data[user_id].get('status') == 'collecting': return
-    
     path = f"thumbnails/{user_id}.jpg"
     await client.download_media(message=message, file_name=path)
     await message.reply_text("✅ Thumbnail Saved!")
@@ -43,7 +54,6 @@ async def delete_thumb(client, message):
         os.remove(path)
         await message.reply_text("🗑 Thumbnail Deleted.")
 
-# --- Batch Logic ---
 @app.on_message(filters.command("batch") & filters.private)
 async def batch_start(client, message):
     user_id = message.from_user.id
@@ -65,7 +75,6 @@ async def collect_files(client, message):
     if user_id in batch_data and batch_data[user_id]['status'] == 'collecting':
         batch_data[user_id]['files'].append(message)
 
-# --- Rename Process ---
 @app.on_message(filters.private & filters.text)
 async def start_renaming(client, message):
     user_id = message.from_user.id
@@ -98,5 +107,13 @@ async def start_renaming(client, message):
         await status_msg.edit("✅ **All Done!**")
         del batch_data[user_id]
 
-print("Bot Deployed!")
-app.run()
+# --- Main Loop to Run Both ---
+async def main():
+    await asyncio.gather(web_server(), app.start())
+    await asyncio.Event().wait() # Keep running
+
+if __name__ == "__main__":
+    print("Bot with Web Server Started!")
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main())
+    

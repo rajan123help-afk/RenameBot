@@ -4,7 +4,8 @@ import asyncio
 import time
 import math
 import shutil
-import base64  # <--- 🔥 YEH NAYA ADD KIYA HAI
+import base64
+import datetime
 from pyrogram import Client, filters
 from pyrogram.types import ForceReply, InlineKeyboardMarkup, InlineKeyboardButton
 from aiohttp import web
@@ -17,9 +18,25 @@ API_HASH = os.environ.get("API_HASH", "hash")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "token")
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
+# 🔥 BRAND NAME
+CREDIT_NAME = "Filmy Flip Hub"
+
 # --- SERVER SETTINGS ---
 MAX_TASK_LIMIT = 2
 ACTIVE_TASKS = 0
+
+# --- 🗑️ AUTO REPLACE LIST ---
+REPLACE_DICT = {
+    "hdhub": CREDIT_NAME,
+    "mkvcinemas": CREDIT_NAME,
+    "bolly4u": CREDIT_NAME,
+    "djpunjab": CREDIT_NAME,
+    "mp4moviez": CREDIT_NAME,
+    "www.": "",
+    ".com": "",
+    "[": "",
+    "]": ""
+}
 
 app = Client(
     "my_multibot",
@@ -61,6 +78,21 @@ def humanbytes(size):
         n += 1
     return str(round(size, 2)) + " " + dic_power[n] + 'B'
 
+def get_duration_str(seconds):
+    if not seconds: return "0s"
+    try:
+        seconds = int(seconds)
+        return str(datetime.timedelta(seconds=seconds))
+    except:
+        return "0s"
+
+def auto_clean(text):
+    for bad_word, new_word in REPLACE_DICT.items():
+        pattern = re.compile(re.escape(bad_word), re.IGNORECASE)
+        text = pattern.sub(new_word, text)
+    text = " ".join(text.split())
+    return text.strip()
+
 async def progress(current, total, message, start_time, task_type):
     now = time.time()
     diff = now - start_time
@@ -83,14 +115,17 @@ async def progress(current, total, message, start_time, task_type):
         except:
             pass
 
-def extract_season_episode(filename):
+def get_media_info(filename):
     pattern = r"[sS](\d+)[eE](\d+)|[eE]([pP])?(\d+)|(\d+)[xX](\d+)"
     match = re.search(pattern, filename)
     if match:
-        if match.group(1) and match.group(2): return f"S{match.group(1)}E{match.group(2)}"
-        elif match.group(4): return f"E{match.group(4)}"
-        elif match.group(5) and match.group(6): return f"S{match.group(5)}E{match.group(6)}"
-    return None
+        if match.group(1) and match.group(2): 
+            return match.group(1), match.group(2)
+        elif match.group(4): 
+            return None, match.group(4)
+        elif match.group(5) and match.group(6): 
+            return match.group(5), match.group(6)
+    return None, None
 
 def get_video_attributes(file_path):
     width = 0
@@ -108,28 +143,75 @@ def get_video_attributes(file_path):
         pass
     return width, height, duration
 
-# --- Commands ---
+# ==========================================
+# 🔥 MANAGER COMMANDS (Multi-Word)
+# ==========================================
+
+@app.on_message(filters.command("add") & filters.private)
+async def add_word(client, message):
+    if len(message.command) < 2:
+        return await message.reply_text("❌ Usage: `/add word1 word2`")
+    
+    new_words = message.command[1:]
+    for word in new_words:
+        REPLACE_DICT[word] = CREDIT_NAME
+        
+    added_list = ", ".join([f"`{w}`" for w in new_words])
+    await message.reply_text(f"✅ **Added:** {added_list}\nYe sab **{CREDIT_NAME}** ban jayenge.")
+
+@app.on_message(filters.command("del") & filters.private)
+async def del_word(client, message):
+    if len(message.command) < 2:
+        return await message.reply_text("❌ Usage: `/del word1 word2`")
+    
+    words_to_delete = message.command[1:]
+    deleted_list = []
+    
+    for word in words_to_delete:
+        if word in REPLACE_DICT:
+            del REPLACE_DICT[word]
+            deleted_list.append(f"`{word}`")
+            
+    if deleted_list:
+        await message.reply_text(f"🗑 **Deleted:** {', '.join(deleted_list)}")
+    else:
+        await message.reply_text("❌ Koi word nahi mila.")
+
+@app.on_message(filters.command("words") & filters.private)
+async def view_words(client, message):
+    if not REPLACE_DICT:
+        await message.reply_text("📭 List khali hai.")
+        return
+    words_display = "\n".join([f"🔹 `{k}` ➡ `{v}`" for k, v in REPLACE_DICT.items()])
+    await message.reply_text(f"📋 **Auto-Filter List:**\n\n{words_display}")
+        # ==========================================
+# STANDARD COMMANDS & LOGIC
+# ==========================================
+
 @app.on_message(filters.command("start") & filters.private)
 async def start_msg(client, message):
     await message.reply_text(
         f"👋 **Hello {message.from_user.first_name}!**\n\n"
-        "🤖 **Features:**\n"
-        "1️⃣ **Renamer:** Correct Duration ✅\n"
-        "2️⃣ **Link Gen:** Blogger Timer Fix ✅\n\n"
-        "👇 **Select Mode:**\n"
-        "🔗 `/link` - Link Converter\n"
-        "📁 `/rename` - File Renamer"
+        "🤖 **Filmy Flip Hub Bot**\n"
+        "⚙️ **Manage:** `/add`, `/del`, `/words`\n"
+        "📝 **Caption:** `/caption` (Instant)\n"
+        "📁 **Rename:** `/rename`"
     )
 
 @app.on_message(filters.command("link") & filters.private)
 async def set_link_mode(client, message):
     user_modes[message.from_user.id] = "blogger_link"
-    await message.reply_text("🔗 **Link Mode ON!** Link bhejein.")
+    await message.reply_text("🔗 **Link Mode ON!**")
 
 @app.on_message(filters.command("rename") & filters.private)
 async def set_rename_mode(client, message):
     user_modes[message.from_user.id] = "renamer"
-    await message.reply_text("📁 **Renamer Mode ON!** Files bhejein.")
+    await message.reply_text("📁 **Renamer Mode ON!**")
+
+@app.on_message(filters.command("caption") & filters.private)
+async def set_caption_mode(client, message):
+    user_modes[message.from_user.id] = "caption_only"
+    await message.reply_text("📝 **Caption Mode ON!** (Files Bhejein)")
 
 @app.on_message(filters.private & filters.photo)
 async def save_thumbnail(client, message):
@@ -167,6 +249,34 @@ async def handle_files(client, message):
     global ACTIVE_TASKS
     user_id = message.from_user.id
     
+    # --- INSTANT CAPTION ---
+    current_mode = user_modes.get(user_id, "renamer")
+    
+    if current_mode == "caption_only":
+        try:
+            media = message.document or message.video or message.audio
+            org_filename = media.file_name or "video.mkv"
+            file_id = media.file_id
+            file_size = humanbytes(media.file_size)
+            duration_sec = getattr(media, "duration", 0)
+            duration_str = get_duration_str(duration_sec)
+            
+            clean_filename = auto_clean(org_filename)
+            s_num, e_num = get_media_info(clean_filename)
+            
+            caption = f"**{clean_filename}**\n\n"
+            if s_num: caption += f"💿 Season ➥ {s_num}\n"
+            if e_num: caption += f"📺 Episode ➥ {e_num}\n"
+            caption += f"📁 Size ♻️ ➥ {file_size}\n"
+            caption += f"⏰ Duration ➥ {duration_str}\n"
+            caption += f"⚡ Powered By ➥ {CREDIT_NAME}"
+            
+            await message.reply_cached_media(file_id, caption=caption)
+        except Exception as e:
+            await message.reply_text(f"❌ Error: {e}")
+        return
+
+    # --- Renamer Logic ---
     if ACTIVE_TASKS >= MAX_TASK_LIMIT:
         try: await message.delete()
         except: pass
@@ -200,10 +310,11 @@ async def mode_selection(client, callback_query):
     
     file_msg = user_data[user_id]['file_msg']
     filename = file_msg.document.file_name if file_msg.document else (file_msg.video.file_name if file_msg.video else "file.mkv")
+    clean_display = auto_clean(filename)
     
     await client.send_message(
         chat_id=user_id,
-        text=f"**File:** `{filename}`\nMode: **{data.split('_')[1].title()}**\nAb naya naam bhejein:",
+        text=f"**File:** `{clean_display}`\nMode: **{data.split('_')[1].title()}**\nAb naya naam bhejein:",
         reply_to_message_id=file_msg.id,
         reply_markup=ForceReply(True)
     )
@@ -212,36 +323,24 @@ async def mode_selection(client, callback_query):
 async def handle_text(client, message):
     global ACTIVE_TASKS
     user_id = message.from_user.id
-    text = message.text.strip() # Strip lagaya taaki spaces ka issue na ho
+    text = message.text.strip()
     current_mode = user_modes.get(user_id, "renamer")
 
-    # 🔗 LINK CONVERTER LOGIC (With Base64 Fix)
+    # LINK
     if current_mode == "blogger_link":
         if "?start=" in text:
             try:
-                # 1. Start parameter nikalo
                 start_code = text.split("?start=")[1].split()[0]
-                
-                # 2. Base64 Encode karo (Website ke liye zaroori)
                 encoded = base64.b64encode(start_code.encode("utf-8")).decode("utf-8")
-                
-                # 3. Final Link banao (?data= use karke)
                 final_link = f"{BLOGGER_URL}?data={encoded}"
-                
-                await message.reply_text(
-                    f"✅ **Blogger Link Ready!**\n\n"
-                    f"`{final_link}`\n\n"
-                    "👉 Ab Website par **Timer aur Button** sahi chalenge.",
-                    disable_web_page_preview=True
-                )
+                await message.reply_text(f"✅ **Blogger Link:**\n\n`{final_link}`", disable_web_page_preview=True)
             except Exception as e:
                 await message.reply_text(f"❌ Error: {e}")
         else:
             await message.reply_text("❌ Link me `?start=` nahi hai.")
         return
 
-    # 📁 RENAMER LOGIC
-    # --- Batch ---
+    # RENAMER
     if user_id in batch_data and batch_data[user_id]['status'] == 'naming':
         batch_data[user_id]['status'] = 'processing'
         if ACTIVE_TASKS >= MAX_TASK_LIMIT:
@@ -253,10 +352,9 @@ async def handle_text(client, message):
         status_msg = await message.reply_text(f"⏳ **Batch Processing...**")
         
         try:
-            base_name = message.text.strip()
+            base_name = auto_clean(message.text.strip())
             files = batch_data[user_id]['files']
-            thumb_path = f"thumbnails/{user_id}.jpg"
-            if not os.path.exists(thumb_path): thumb_path = None
+            thumb_path = None
             
             for idx, media in enumerate(files):
                 try:
@@ -264,8 +362,16 @@ async def handle_text(client, message):
                     org_name = file.file_name or "vid.mkv"
                     _, ext = os.path.splitext(org_name)
                     if not ext: ext = ".mkv"
-                    ep_tag = extract_season_episode(org_name)
-                    new_name = f"{base_name} - {ep_tag}{ext}" if ep_tag else f"{base_name} - {org_name}"
+                    
+                    s_num, e_num = get_media_info(org_name)
+                    if s_num and e_num:
+                        tag = f"S{s_num}E{e_num}"
+                        new_name = f"{base_name} - {tag}{ext}"
+                    elif e_num:
+                        tag = f"E{e_num}"
+                        new_name = f"{base_name} - {tag}{ext}"
+                    else:
+                        new_name = f"{base_name}{ext}"
                     
                     start_time = time.time()
                     dl_path = await client.download_media(
@@ -274,10 +380,19 @@ async def handle_text(client, message):
                     )
                     
                     width, height, duration = get_video_attributes(dl_path)
+                    file_size = humanbytes(os.path.getsize(dl_path))
+                    duration_str = get_duration_str(duration)
+                    
+                    caption = f"**{new_name}**\n\n"
+                    if s_num: caption += f"💿 Season ➥ {s_num}\n"
+                    if e_num: caption += f"📺 Episode ➥ {e_num}\n"
+                    caption += f"📁 Size ♻️ ➥ {file_size}\n"
+                    caption += f"⏰ Duration ➥ {duration_str}\n"
+                    caption += f"⚡ Powered By ➥ {CREDIT_NAME}"
 
                     start_time = time.time()
                     await client.send_document(
-                        message.chat.id, document=dl_path, caption=f"**{new_name}**", thumb=thumb_path, force_document=True,
+                        message.chat.id, document=dl_path, caption=caption, thumb=thumb_path, force_document=True,
                         progress=progress, progress_args=(status_msg, start_time, f"📤 **Up** ({idx+1}/{len(files)})")
                     )
                     os.remove(dl_path)
@@ -312,7 +427,7 @@ async def handle_text(client, message):
         try:
             original_msg = user_task['file_msg']
             mode = user_task.get('mode', 'document')
-            new_name = message.text
+            new_name = auto_clean(message.text.strip())
             thumb_path = f"thumbnails/{user_id}.jpg"
             if not os.path.exists(thumb_path): thumb_path = None
             
@@ -324,13 +439,23 @@ async def handle_text(client, message):
             )
             
             width, height, duration = get_video_attributes(dl_path)
+            file_size = humanbytes(os.path.getsize(dl_path))
+            duration_str = get_duration_str(duration)
+            s_num, e_num = get_media_info(new_name)
+            
+            caption = f"**{new_name}**\n\n"
+            if s_num: caption += f"💿 Season ➥ {s_num}\n"
+            if e_num: caption += f"📺 Episode ➥ {e_num}\n"
+            caption += f"📁 Size ♻️ ➥ {file_size}\n"
+            caption += f"⏰ Duration ➥ {duration_str}\n"
+            caption += f"⚡ Powered By ➥ {CREDIT_NAME}"
 
             start_time = time.time()
             if mode == 'video':
                 await client.send_video(
                     message.chat.id, 
                     video=dl_path, 
-                    caption=f"**{new_name}**", 
+                    caption=caption, 
                     thumb=thumb_path, 
                     supports_streaming=True,
                     duration=duration, width=width, height=height,
@@ -338,7 +463,7 @@ async def handle_text(client, message):
                 )
             else:
                 await client.send_document(
-                    message.chat.id, document=dl_path, caption=f"**{new_name}**", thumb=thumb_path, force_document=True,
+                    message.chat.id, document=dl_path, caption=caption, thumb=thumb_path, force_document=True,
                     progress=progress, progress_args=(status_msg, start_time, "📤 **Uploading File...**")
                 )
             
@@ -360,7 +485,7 @@ async def main():
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    print("Bot with Base64 Logic Started!")
+    print("Final Bot Started!")
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
-            
+    

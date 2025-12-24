@@ -7,6 +7,9 @@ import shutil
 from pyrogram import Client, filters
 from pyrogram.types import ForceReply, InlineKeyboardMarkup, InlineKeyboardButton
 from aiohttp import web
+# 🔥 NEW LIBRARY FOR DURATION
+from hachoir.metadata import extractMetadata
+from hachoir.parser import createParser
 
 # --- Configs ---
 API_ID = int(os.environ.get("API_ID", "12345"))
@@ -47,7 +50,7 @@ async def web_server():
     site = web.TCPSite(runner, '0.0.0.0', 8000)
     await site.start()
 
-# --- Helpers ---
+# --- Helper Functions ---
 def humanbytes(size):
     if not size: return ""
     power = 2**10
@@ -89,21 +92,37 @@ def extract_season_episode(filename):
         elif match.group(5) and match.group(6): return f"S{match.group(5)}E{match.group(6)}"
     return None
 
+# 🔥 NEW FUNCTION: Video Duration Nikalne ke liye
+def get_video_attributes(file_path):
+    width = 0
+    height = 0
+    duration = 0
+    try:
+        metadata = extractMetadata(createParser(file_path))
+        if metadata.has("duration"):
+            duration = metadata.get('duration').seconds
+        if metadata.has("width"):
+            width = metadata.get("width")
+        if metadata.has("height"):
+            height = metadata.get("height")
+    except:
+        pass
+    return width, height, duration
+
 # --- Commands ---
 @app.on_message(filters.command("start") & filters.private)
 async def start_msg(client, message):
     await message.reply_text(
         f"👋 **Hello {message.from_user.first_name}!**\n\n"
         "🤖 **Features:**\n"
-        "1️⃣ **Renamer:** File/Video bhejein.\n"
-        "2️⃣ **Link Gen:** `/link` dabayein.\n\n"
-        "✨ **Auto-Clean:** Main faaltu messages khud delete kar dunga."
+        "1️⃣ **Renamer:** Correct Duration ✅\n"
+        "2️⃣ **Link Gen:** `/link` command.\n\n"
     )
 
 @app.on_message(filters.command("link") & filters.private)
 async def set_link_mode(client, message):
     user_modes[message.from_user.id] = "blogger_link"
-    await message.reply_text("🔗 **Link Mode ON!** Telegram Link bhejein.")
+    await message.reply_text("🔗 **Link Mode ON!** Link bhejein.")
 
 @app.on_message(filters.command("rename") & filters.private)
 async def set_rename_mode(client, message):
@@ -135,7 +154,6 @@ async def batch_done(client, message):
     user_id = message.from_user.id
     if user_id in batch_data and batch_data[user_id]['files']:
         batch_data[user_id]['status'] = 'naming'
-        # 🟢 Prompt Message save kar rahe hain taaki baad me delete kar sakein
         prompt_msg = await message.reply_text("✅ Files received. Ab **Series Name** bhejein.")
         batch_data[user_id]['prompt_msg_id'] = prompt_msg.id
     else:
@@ -176,7 +194,7 @@ async def mode_selection(client, callback_query):
         await callback_query.answer("Session expired.", show_alert=True)
         return
     user_data[user_id]['mode'] = 'video' if data == "mode_video" else 'document'
-    await callback_query.message.delete() # Button message delete
+    await callback_query.message.delete()
     
     file_msg = user_data[user_id]['file_msg']
     filename = file_msg.document.file_name if file_msg.document else (file_msg.video.file_name if file_msg.video else "file.mkv")
@@ -241,7 +259,11 @@ async def handle_text(client, message):
                         progress=progress, progress_args=(status_msg, start_time, f"📥 **Down** ({idx+1}/{len(files)})")
                     )
                     
+                    # 🔥 DURATION CHECK
+                    width, height, duration = get_video_attributes(dl_path)
+
                     start_time = time.time()
+                    # Batch defaults to Document (safe)
                     await client.send_document(
                         message.chat.id, document=dl_path, caption=f"**{new_name}**", thumb=thumb_path, force_document=True,
                         progress=progress, progress_args=(status_msg, start_time, f"📤 **Up** ({idx+1}/{len(files)})")
@@ -249,22 +271,18 @@ async def handle_text(client, message):
                     os.remove(dl_path)
                 except Exception as e: print(e)
             
-            await status_msg.delete() # Success Cleanup
+            await status_msg.delete()
 
         except Exception as e:
             await status_msg.edit(f"Error: {e}")
         
         finally:
-            # 🔥 BATCH CLEANUP (Ye line sab delete karegi)
-            try: await message.delete() # User Name Message
+            try: await message.delete()
             except: pass
-            
             try: 
-                # Delete Bot Prompt ("Ab Series name bhejein")
                 if 'prompt_msg_id' in batch_data[user_id]:
                     await client.delete_messages(user_id, batch_data[user_id]['prompt_msg_id'])
             except: pass
-            
             del batch_data[user_id]
             ACTIVE_TASKS -= 1
         return
@@ -293,10 +311,21 @@ async def handle_text(client, message):
                 progress=progress, progress_args=(status_msg, start_time, "📥 **Downloading...**")
             )
             
+            # 🔥 DURATION & SIZE NIKALNA
+            width, height, duration = get_video_attributes(dl_path)
+
             start_time = time.time()
             if mode == 'video':
                 await client.send_video(
-                    message.chat.id, video=dl_path, caption=f"**{new_name}**", thumb=thumb_path, supports_streaming=True,
+                    message.chat.id, 
+                    video=dl_path, 
+                    caption=f"**{new_name}**", 
+                    thumb=thumb_path, 
+                    supports_streaming=True,
+                    # 👇 Yeh values Video ko Sahi Dikhati hain
+                    duration=duration,
+                    width=width,
+                    height=height,
                     progress=progress, progress_args=(status_msg, start_time, "📤 **Uploading Video...**")
                 )
             else:
@@ -306,19 +335,16 @@ async def handle_text(client, message):
                 )
             
             os.remove(dl_path)
-            await status_msg.delete() # Success Cleanup
+            await status_msg.delete()
 
         except Exception as e:
             await status_msg.edit(f"❌ Error: {e}")
             
         finally:
-            # 🔥 SINGLE CLEANUP (Aggressive)
-            try: await message.delete() # User ka Name Message
+            try: await message.delete()
             except: pass
-            
-            try: await message.reply_to_message.delete() # Bot ka Question
+            try: await message.reply_to_message.delete()
             except: pass
-            
             ACTIVE_TASKS -= 1
 
 async def main():
@@ -326,7 +352,7 @@ async def main():
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    print("Bot Started!")
+    print("Bot with Metadata Started!")
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
-    
+            

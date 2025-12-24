@@ -6,7 +6,7 @@ import math
 import shutil
 import base64
 import datetime
-from pyrogram import Client, filters, enums # 🔥 ENUMS ADDED
+from pyrogram import Client, filters, enums
 from pyrogram.types import ForceReply, InlineKeyboardMarkup, InlineKeyboardButton
 from aiohttp import web
 from hachoir.metadata import extractMetadata
@@ -18,7 +18,7 @@ API_HASH = os.environ.get("API_HASH", "hash")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "token")
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
-# 🔥 BRAND NAME (Butterflies ke saath)
+# 🔥 BRAND NAME
 CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"
 
 # --- SERVER SETTINGS ---
@@ -38,7 +38,6 @@ REPLACE_DICT = {
     "]": ""
 }
 
-# 🔥 HTML MODE ENABLED (Box fix karne ke liye)
 app = Client(
     "my_multibot",
     api_id=API_ID,
@@ -95,7 +94,6 @@ def auto_clean(text):
     text = " ".join(text.split())
     return text.strip()
 
-# 🔥 NEW: Extension Fixer
 def get_extension(filename):
     if not filename: return ".mkv"
     _, ext = os.path.splitext(filename)
@@ -161,9 +159,9 @@ async def start_msg(client, message):
     await message.reply_text(
         f"👋 <b>Hello {message.from_user.first_name}!</b>\n\n"
         "🤖 <b>Filmy Flip Hub Bot</b>\n"
-        "✨ <b>Mode:</b> HTML (Box Fixed)\n\n"
+        "✨ <b>Style:</b> Blockquote Box (White Line)\n\n"
         "⚙️ <b>Manage:</b> <code>/add</code>, <code>/del</code>, <code>/words</code>\n"
-        "📝 <b>Caption:</b> <code>/caption</code> (Instant)\n"
+        "📝 <b>Caption:</b> <code>/caption</code>\n"
         "📁 <b>Rename:</b> <code>/rename</code>"
     )
 
@@ -231,7 +229,7 @@ async def batch_done(client, message):
         batch_data[user_id]['prompt_msg_id'] = prompt_msg.id
     else:
         await message.reply_text("Pehle files bhejein!")
-    # --- Main Handler ---
+        # --- Main Handler ---
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio))
 async def handle_files(client, message):
     global ACTIVE_TASKS
@@ -239,7 +237,7 @@ async def handle_files(client, message):
     
     current_mode = user_modes.get(user_id, "renamer")
     
-    # --- 🔥 CAPTION ONLY MODE ---
+    # --- CAPTION ONLY MODE ---
     if current_mode == "caption_only":
         try:
             media = message.document or message.video or message.audio
@@ -252,15 +250,18 @@ async def handle_files(client, message):
             clean_filename = auto_clean(org_filename)
             s_num, e_num = get_media_info(clean_filename)
             
-            # 🔥 HTML BOX STYLE
+            # 🔥 BLOCKQUOTE BOX STYLE (White Line Wala)
             caption = f"<b>{clean_filename}</b>\n\n"
             if s_num: caption += f"💿 Season ➥ {s_num}\n"
             if e_num: caption += f"📺 Episode ➥ {e_num}\n\n"
             
-            caption += f"<code>File Size ♻️ ➥ {file_size}</code>\n"
+            # 👇 Yahan change kiya hai: <blockquote>
+            caption += f"<blockquote>File Size ♻️ ➥ {file_size}</blockquote>\n"
+            
             if duration_sec > 0:
-                caption += f"<code>Duration ⏰ ➥ {duration_str}</code>\n"
-            caption += f"<code>Powered By ➥ {CREDIT_NAME}</code>"
+                caption += f"<blockquote>Duration ⏰ ➥ {duration_str}</blockquote>\n"
+                
+            caption += f"<blockquote>Powered By ➥ {CREDIT_NAME}</blockquote>"
             
             await message.reply_cached_media(file_id, caption=caption)
         except Exception as e:
@@ -358,13 +359,14 @@ async def handle_text(client, message):
                     file_size = humanbytes(os.path.getsize(dl_path))
                     duration_str = get_duration_str(duration)
                     
-                    # 🔥 HTML BOX STYLE
+                    # 🔥 BLOCKQUOTE BOX STYLE (Batch)
                     caption = f"<b>{new_name}</b>\n\n"
                     if s_num: caption += f"💿 Season ➥ {s_num}\n"
                     if e_num: caption += f"📺 Episode ➥ {e_num}\n\n"
-                    caption += f"<code>File Size ♻️ ➥ {file_size}</code>\n"
-                    if duration > 0: caption += f"<code>Duration ⏰ ➥ {duration_str}</code>\n"
-                    caption += f"<code>Powered By ➥ {CREDIT_NAME}</code>"
+                    
+                    caption += f"<blockquote>File Size ♻️ ➥ {file_size}</blockquote>\n"
+                    if duration > 0: caption += f"<blockquote>Duration ⏰ ➥ {duration_str}</blockquote>\n"
+                    caption += f"<blockquote>Powered By ➥ {CREDIT_NAME}</blockquote>"
 
                     start_time = time.time()
                     await client.send_document(message.chat.id, document=dl_path, caption=caption, force_document=True, progress=progress, progress_args=(status_msg, start_time, f"📤 <b>Up</b> ({idx+1})"))
@@ -409,12 +411,17 @@ async def handle_text(client, message):
             duration_str = get_duration_str(duration)
             s_num, e_num = get_media_info(new_name)
             
+            # 🔥 BLOCKQUOTE BOX STYLE (Single)
             caption = f"<b>{new_name}</b>\n\n"
             if s_num: caption += f"💿 Season ➥ {s_num}\n"
             if e_num: caption += f"📺 Episode ➥ {e_num}\n\n"
-            caption += f"<code>File Size ♻️ ➥ {file_size}</code>\n"
-            if duration > 0: caption += f"<code>Duration ⏰ ➥ {duration_str}</code>\n"
-            caption += f"<code>Powered By ➥ {CREDIT_NAME}</code>"
+            
+            caption += f"<blockquote>File Size ♻️ ➥ {file_size}</blockquote>\n"
+            
+            if duration > 0:
+                caption += f"<blockquote>Duration ⏰ ➥ {duration_str}</blockquote>\n"
+                
+            caption += f"<blockquote>Powered By ➥ {CREDIT_NAME}</blockquote>"
 
             start_time = time.time()
             if mode == 'video':
@@ -436,7 +443,7 @@ async def main():
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    print("HTML Box Mode Started!")
+    print("Bot with Blockquote Box Started!")
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
         

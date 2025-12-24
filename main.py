@@ -4,10 +4,10 @@ import asyncio
 import time
 import math
 import shutil
+import base64  # <--- 🔥 YEH NAYA ADD KIYA HAI
 from pyrogram import Client, filters
 from pyrogram.types import ForceReply, InlineKeyboardMarkup, InlineKeyboardButton
 from aiohttp import web
-# 🔥 NEW LIBRARY FOR DURATION
 from hachoir.metadata import extractMetadata
 from hachoir.parser import createParser
 
@@ -92,7 +92,6 @@ def extract_season_episode(filename):
         elif match.group(5) and match.group(6): return f"S{match.group(5)}E{match.group(6)}"
     return None
 
-# 🔥 NEW FUNCTION: Video Duration Nikalne ke liye
 def get_video_attributes(file_path):
     width = 0
     height = 0
@@ -116,7 +115,10 @@ async def start_msg(client, message):
         f"👋 **Hello {message.from_user.first_name}!**\n\n"
         "🤖 **Features:**\n"
         "1️⃣ **Renamer:** Correct Duration ✅\n"
-        "2️⃣ **Link Gen:** `/link` command.\n\n"
+        "2️⃣ **Link Gen:** Blogger Timer Fix ✅\n\n"
+        "👇 **Select Mode:**\n"
+        "🔗 `/link` - Link Converter\n"
+        "📁 `/rename` - File Renamer"
     )
 
 @app.on_message(filters.command("link") & filters.private)
@@ -210,23 +212,35 @@ async def mode_selection(client, callback_query):
 async def handle_text(client, message):
     global ACTIVE_TASKS
     user_id = message.from_user.id
-    text = message.text
+    text = message.text.strip() # Strip lagaya taaki spaces ka issue na ho
     current_mode = user_modes.get(user_id, "renamer")
 
-    # Link Mode
+    # 🔗 LINK CONVERTER LOGIC (With Base64 Fix)
     if current_mode == "blogger_link":
         if "?start=" in text:
             try:
-                code = text.split("?start=")[1]
-                final_link = f"{BLOGGER_URL}?id={code}"
-                await message.reply_text(f"✅ **Permanent Link:**\n`{final_link}`", disable_web_page_preview=True)
-            except:
-                await message.reply_text("❌ Invalid Link")
+                # 1. Start parameter nikalo
+                start_code = text.split("?start=")[1].split()[0]
+                
+                # 2. Base64 Encode karo (Website ke liye zaroori)
+                encoded = base64.b64encode(start_code.encode("utf-8")).decode("utf-8")
+                
+                # 3. Final Link banao (?data= use karke)
+                final_link = f"{BLOGGER_URL}?data={encoded}"
+                
+                await message.reply_text(
+                    f"✅ **Blogger Link Ready!**\n\n"
+                    f"`{final_link}`\n\n"
+                    "👉 Ab Website par **Timer aur Button** sahi chalenge.",
+                    disable_web_page_preview=True
+                )
+            except Exception as e:
+                await message.reply_text(f"❌ Error: {e}")
         else:
             await message.reply_text("❌ Link me `?start=` nahi hai.")
         return
 
-    # Renamer Logic
+    # 📁 RENAMER LOGIC
     # --- Batch ---
     if user_id in batch_data and batch_data[user_id]['status'] == 'naming':
         batch_data[user_id]['status'] = 'processing'
@@ -259,11 +273,9 @@ async def handle_text(client, message):
                         progress=progress, progress_args=(status_msg, start_time, f"📥 **Down** ({idx+1}/{len(files)})")
                     )
                     
-                    # 🔥 DURATION CHECK
                     width, height, duration = get_video_attributes(dl_path)
 
                     start_time = time.time()
-                    # Batch defaults to Document (safe)
                     await client.send_document(
                         message.chat.id, document=dl_path, caption=f"**{new_name}**", thumb=thumb_path, force_document=True,
                         progress=progress, progress_args=(status_msg, start_time, f"📤 **Up** ({idx+1}/{len(files)})")
@@ -311,7 +323,6 @@ async def handle_text(client, message):
                 progress=progress, progress_args=(status_msg, start_time, "📥 **Downloading...**")
             )
             
-            # 🔥 DURATION & SIZE NIKALNA
             width, height, duration = get_video_attributes(dl_path)
 
             start_time = time.time()
@@ -322,10 +333,7 @@ async def handle_text(client, message):
                     caption=f"**{new_name}**", 
                     thumb=thumb_path, 
                     supports_streaming=True,
-                    # 👇 Yeh values Video ko Sahi Dikhati hain
-                    duration=duration,
-                    width=width,
-                    height=height,
+                    duration=duration, width=width, height=height,
                     progress=progress, progress_args=(status_msg, start_time, "📤 **Uploading Video...**")
                 )
             else:
@@ -352,7 +360,7 @@ async def main():
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    print("Bot with Metadata Started!")
+    print("Bot with Base64 Logic Started!")
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
             

@@ -6,7 +6,7 @@ import math
 import shutil
 import base64
 import datetime
-from pyrogram import Client, filters
+from pyrogram import Client, filters, enums # 🔥 ENUMS ADDED
 from pyrogram.types import ForceReply, InlineKeyboardMarkup, InlineKeyboardButton
 from aiohttp import web
 from hachoir.metadata import extractMetadata
@@ -18,7 +18,7 @@ API_HASH = os.environ.get("API_HASH", "hash")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "token")
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
-# 🔥 BRAND NAME
+# 🔥 BRAND NAME (Butterflies ke saath)
 CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"
 
 # --- SERVER SETTINGS ---
@@ -38,6 +38,7 @@ REPLACE_DICT = {
     "]": ""
 }
 
+# 🔥 HTML MODE ENABLED (Box fix karne ke liye)
 app = Client(
     "my_multibot",
     api_id=API_ID,
@@ -45,12 +46,13 @@ app = Client(
     bot_token=BOT_TOKEN,
     workers=4, 
     max_concurrent_transmissions=2,
-    ipv6=False
+    ipv6=False,
+    parse_mode=enums.ParseMode.HTML 
 )
 
 batch_data = {}
 user_data = {}
-user_modes = {} # Default mode "renamer" rahega
+user_modes = {}
 
 if os.path.exists("downloads"): shutil.rmtree("downloads")
 os.makedirs("downloads")
@@ -93,7 +95,7 @@ def auto_clean(text):
     text = " ".join(text.split())
     return text.strip()
 
-# 🔥 NEW: Extension Fixer (Jisse .Application error nahi aayega)
+# 🔥 NEW: Extension Fixer
 def get_extension(filename):
     if not filename: return ".mkv"
     _, ext = os.path.splitext(filename)
@@ -114,9 +116,9 @@ async def progress(current, total, message, start_time, task_type):
             round(percentage, 2))
         tmp = (f"{task_type}\n"
                f"{progress_str}\n"
-               f"💾 **Size:** {humanbytes(current)} / {humanbytes(total)}\n"
-               f"🚀 **Speed:** {humanbytes(speed)}/s\n"
-               f"⏳ **ETA:** {time_left_str}")
+               f"💾 <b>Size:</b> {humanbytes(current)} / {humanbytes(total)}\n"
+               f"🚀 <b>Speed:</b> {humanbytes(speed)}/s\n"
+               f"⏳ <b>ETA:</b> {time_left_str}")
         try:
             await message.edit(tmp)
         except:
@@ -157,24 +159,24 @@ def get_video_attributes(file_path):
 @app.on_message(filters.command("start") & filters.private)
 async def start_msg(client, message):
     await message.reply_text(
-        f"👋 **Hello {message.from_user.first_name}!**\n\n"
-        "🤖 **Filmy Flip Hub Bot**\n"
-        "✨ **Current Mode:** Check with commands below.\n\n"
-        "⚙️ **Manage:** `/add`, `/del`, `/words`\n"
-        "📝 **Caption:** `/caption` (Instant)\n"
-        "📁 **Rename:** `/rename` (Download/Upload)"
+        f"👋 <b>Hello {message.from_user.first_name}!</b>\n\n"
+        "🤖 <b>Filmy Flip Hub Bot</b>\n"
+        "✨ <b>Mode:</b> HTML (Box Fixed)\n\n"
+        "⚙️ <b>Manage:</b> <code>/add</code>, <code>/del</code>, <code>/words</code>\n"
+        "📝 <b>Caption:</b> <code>/caption</code> (Instant)\n"
+        "📁 <b>Rename:</b> <code>/rename</code>"
     )
 
 @app.on_message(filters.command("add") & filters.private)
 async def add_word(client, message):
-    if len(message.command) < 2: return await message.reply_text("❌ Usage: `/add word1 word2`")
+    if len(message.command) < 2: return await message.reply_text("❌ Usage: <code>/add word</code>")
     new_words = message.command[1:]
     for word in new_words: REPLACE_DICT[word] = "Filmy Flip Hub"
     await message.reply_text(f"✅ Added {len(new_words)} words.")
 
 @app.on_message(filters.command("del") & filters.private)
 async def del_word(client, message):
-    if len(message.command) < 2: return await message.reply_text("❌ Usage: `/del word1`")
+    if len(message.command) < 2: return await message.reply_text("❌ Usage: <code>/del word</code>")
     words = message.command[1:]
     deleted = [w for w in words if REPLACE_DICT.pop(w, None)]
     await message.reply_text(f"🗑 Deleted: {', '.join(deleted)}" if deleted else "❌ Not found.")
@@ -182,29 +184,29 @@ async def del_word(client, message):
 @app.on_message(filters.command("words") & filters.private)
 async def view_words(client, message):
     if not REPLACE_DICT: return await message.reply_text("📭 Empty List.")
-    disp = "\n".join([f"🔹 `{k}` ➡ `{v}`" for k, v in REPLACE_DICT.items()])
-    await message.reply_text(f"📋 **Filter List:**\n\n{disp}")
+    disp = "\n".join([f"🔹 <code>{k}</code> ➡ <code>{v}</code>" for k, v in REPLACE_DICT.items()])
+    await message.reply_text(f"📋 <b>Filter List:</b>\n\n{disp}")
 
 @app.on_message(filters.command("link") & filters.private)
 async def set_link_mode(client, message):
     user_modes[message.from_user.id] = "blogger_link"
-    await message.reply_text("🔗 **Link Mode ON!**")
+    await message.reply_text("🔗 <b>Link Mode ON!</b>")
 
 @app.on_message(filters.command("rename") & filters.private)
 async def set_rename_mode(client, message):
     user_modes[message.from_user.id] = "renamer"
-    await message.reply_text("📁 **Renamer Mode ON!** (Send file to rename)")
+    await message.reply_text("📁 <b>Renamer Mode ON!</b>")
 
 @app.on_message(filters.command("caption") & filters.private)
 async def set_caption_mode(client, message):
     user_modes[message.from_user.id] = "caption_only"
-    await message.reply_text("📝 **Caption Mode ON!** (Send file for instant caption)")
+    await message.reply_text("📝 <b>Caption Mode ON!</b>")
 
 @app.on_message(filters.private & filters.photo)
 async def save_thumbnail(client, message):
     path = f"thumbnails/{message.from_user.id}.jpg"
     await client.download_media(message=message, file_name=path)
-    await message.reply_text("✅ **Thumbnail Saved!**")
+    await message.reply_text("✅ <b>Thumbnail Saved!</b>")
 
 @app.on_message(filters.command("delthumb") & filters.private)
 async def delete_thumb(client, message):
@@ -218,26 +220,26 @@ async def delete_thumb(client, message):
 async def batch_start(client, message):
     user_modes[message.from_user.id] = "renamer"
     batch_data[message.from_user.id] = {'status': 'collecting', 'files': []}
-    await message.reply_text("🚀 **Batch Mode ON!** Files forward karein, fir **/done** bhejein.")
+    await message.reply_text("🚀 <b>Batch Mode ON!</b> Files forward karein, fir <b>/done</b> bhejein.")
 
 @app.on_message(filters.command("done") & filters.private)
 async def batch_done(client, message):
     user_id = message.from_user.id
     if user_id in batch_data and batch_data[user_id]['files']:
         batch_data[user_id]['status'] = 'naming'
-        prompt_msg = await message.reply_text("✅ Files received. Ab **Series Name** bhejein.")
+        prompt_msg = await message.reply_text("✅ Files received. Ab <b>Series Name</b> bhejein.")
         batch_data[user_id]['prompt_msg_id'] = prompt_msg.id
     else:
         await message.reply_text("Pehle files bhejein!")
-# --- Main Handler ---
+    # --- Main Handler ---
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio))
 async def handle_files(client, message):
     global ACTIVE_TASKS
     user_id = message.from_user.id
     
-    # 🛑 1. CHECK MODE: Agar Caption Mode hai to YAHIN SE return ho jao
     current_mode = user_modes.get(user_id, "renamer")
     
+    # --- 🔥 CAPTION ONLY MODE ---
     if current_mode == "caption_only":
         try:
             media = message.document or message.video or message.audio
@@ -247,39 +249,36 @@ async def handle_files(client, message):
             duration_sec = getattr(media, "duration", 0)
             duration_str = get_duration_str(duration_sec)
             
-            # Name Clean & Info
             clean_filename = auto_clean(org_filename)
             s_num, e_num = get_media_info(clean_filename)
             
-            # Caption Make
-            caption = f"**{clean_filename}**\n\n"
+            # 🔥 HTML BOX STYLE
+            caption = f"<b>{clean_filename}</b>\n\n"
             if s_num: caption += f"💿 Season ➥ {s_num}\n"
             if e_num: caption += f"📺 Episode ➥ {e_num}\n\n"
             
-            caption += f"`File Size ♻️ ➥ {file_size}`\n"
-            if duration_sec and duration_sec > 0:
-                caption += f"`Duration ⏰ ➥ {duration_str}`\n"
-            caption += f"`Powered By ➥ {CREDIT_NAME}`"
+            caption += f"<code>File Size ♻️ ➥ {file_size}</code>\n"
+            if duration_sec > 0:
+                caption += f"<code>Duration ⏰ ➥ {duration_str}</code>\n"
+            caption += f"<code>Powered By ➥ {CREDIT_NAME}</code>"
             
             await message.reply_cached_media(file_id, caption=caption)
         except Exception as e:
             await message.reply_text(f"❌ Error: {e}")
-        return  # 🔴 IMPORTNAT: Yahan se wapas jao, niche mat jao!
+        return
 
-    # 🛑 2. RENAMER LOGIC STARTS HERE
+    # --- Renamer Logic ---
     if ACTIVE_TASKS >= MAX_TASK_LIMIT:
-        w = await message.reply_text("⚠️ **OVERLOAD!** Wait...")
+        w = await message.reply_text("⚠️ <b>OVERLOAD!</b> Wait...")
         await asyncio.sleep(5)
         try: await w.delete()
         except: pass
         return
 
-    # Batch Collection
     if user_id in batch_data and batch_data[user_id]['status'] == 'collecting':
         batch_data[user_id]['files'].append(message)
         return
 
-    # Single File Rename Setup
     user_modes[user_id] = "renamer"
     user_data[user_id] = {'file_msg': message, 'mode': None}
     
@@ -287,7 +286,7 @@ async def handle_files(client, message):
         InlineKeyboardButton("🎥 Video", callback_data="mode_video"),
         InlineKeyboardButton("📁 Document", callback_data="mode_document")
     ]])
-    await message.reply_text("**Upload Mode Select Karein:**", reply_to_message_id=message.id, reply_markup=buttons)
+    await message.reply_text("<b>Upload Mode Select Karein:</b>", reply_to_message_id=message.id, reply_markup=buttons)
 
 @app.on_callback_query(filters.regex("mode_"))
 async def mode_selection(client, callback_query):
@@ -306,7 +305,7 @@ async def mode_selection(client, callback_query):
     
     await client.send_message(
         chat_id=user_id,
-        text=f"**File:** `{clean_display}`\nMode: **{data.split('_')[1].title()}**\nAb naya naam bhejein:",
+        text=f"<b>File:</b> <code>{clean_display}</code>\nMode: <b>{data.split('_')[1].title()}</b>\nAb naya naam bhejein:",
         reply_to_message_id=file_msg.id,
         reply_markup=ForceReply(True)
     )
@@ -324,17 +323,16 @@ async def handle_text(client, message):
                 start_code = text.split("?start=")[1].split()[0]
                 encoded = base64.b64encode(start_code.encode("utf-8")).decode("utf-8")
                 final_link = f"{BLOGGER_URL}?data={encoded}"
-                await message.reply_text(f"✅ **Link:**\n`{final_link}`", disable_web_page_preview=True)
+                await message.reply_text(f"✅ <b>Link:</b>\n<code>{final_link}</code>", disable_web_page_preview=True)
             except: await message.reply_text("❌ Error.")
-        else: await message.reply_text("❌ No `?start=` found.")
+        else: await message.reply_text("❌ No <code>?start=</code> found.")
         return
 
     # RENAMER LOGIC
     if user_id in batch_data and batch_data[user_id]['status'] == 'naming':
         batch_data[user_id]['status'] = 'processing'
-        # ... (Active Task Check Omitted for Brevity - Same as before)
         ACTIVE_TASKS += 1
-        status_msg = await message.reply_text(f"⏳ **Batch Processing...**")
+        status_msg = await message.reply_text(f"⏳ <b>Batch Processing...</b>")
         
         try:
             base_name = auto_clean(message.text.strip())
@@ -344,8 +342,6 @@ async def handle_text(client, message):
                 try:
                     file = media.document or media.video or media.audio
                     org_name = file.file_name or "vid.mkv"
-                    
-                    # 🔥 EXTENSION SAFEGUARD
                     ext = get_extension(org_name)
                     
                     s_num, e_num = get_media_info(org_name)
@@ -353,25 +349,25 @@ async def handle_text(client, message):
                     elif e_num: new_name = f"{base_name} - E{e_num}{ext}"
                     else: new_name = f"{base_name}{ext}"
 
-                    # Ensure extension exists
                     if not new_name.endswith(ext): new_name += ext
                     
                     start_time = time.time()
-                    dl_path = await client.download_media(media, file_name=f"downloads/{new_name}", progress=progress, progress_args=(status_msg, start_time, f"📥 **Down** ({idx+1}/{len(files)})"))
+                    dl_path = await client.download_media(media, file_name=f"downloads/{new_name}", progress=progress, progress_args=(status_msg, start_time, f"📥 <b>Down</b> ({idx+1}/{len(files)})"))
                     
                     width, height, duration = get_video_attributes(dl_path)
                     file_size = humanbytes(os.path.getsize(dl_path))
                     duration_str = get_duration_str(duration)
                     
-                    caption = f"**{new_name}**\n\n"
+                    # 🔥 HTML BOX STYLE
+                    caption = f"<b>{new_name}</b>\n\n"
                     if s_num: caption += f"💿 Season ➥ {s_num}\n"
                     if e_num: caption += f"📺 Episode ➥ {e_num}\n\n"
-                    caption += f"`File Size ♻️ ➥ {file_size}`\n"
-                    if duration > 0: caption += f"`Duration ⏰ ➥ {duration_str}`\n"
-                    caption += f"`Powered By ➥ {CREDIT_NAME}`"
+                    caption += f"<code>File Size ♻️ ➥ {file_size}</code>\n"
+                    if duration > 0: caption += f"<code>Duration ⏰ ➥ {duration_str}</code>\n"
+                    caption += f"<code>Powered By ➥ {CREDIT_NAME}</code>"
 
                     start_time = time.time()
-                    await client.send_document(message.chat.id, document=dl_path, caption=caption, force_document=True, progress=progress, progress_args=(status_msg, start_time, f"📤 **Up** ({idx+1})"))
+                    await client.send_document(message.chat.id, document=dl_path, caption=caption, force_document=True, progress=progress, progress_args=(status_msg, start_time, f"📤 <b>Up</b> ({idx+1})"))
                     os.remove(dl_path)
                 except Exception as e: print(e)
             
@@ -388,18 +384,16 @@ async def handle_text(client, message):
     if message.reply_to_message and user_id in user_data:
         user_task = user_data.pop(user_id)
         ACTIVE_TASKS += 1
-        status_msg = await message.reply_text("⏳ **Starting...**")
+        status_msg = await message.reply_text("⏳ <b>Starting...</b>")
         
         try:
             original_msg = user_task['file_msg']
             mode = user_task.get('mode', 'document')
             media = original_msg.document or original_msg.video or original_msg.audio
             
-            # 🔥 EXTENSION SAFEGUARD
             org_ext = get_extension(media.file_name)
             new_name = auto_clean(message.text.strip())
             
-            # Agar user ne extension nahi lagaya, to hum laga denge
             if not new_name.endswith(org_ext):
                 new_name += org_ext
             
@@ -408,25 +402,25 @@ async def handle_text(client, message):
             
             path = f"downloads/{new_name}"
             start_time = time.time()
-            dl_path = await client.download_media(original_msg, file_name=path, progress=progress, progress_args=(status_msg, start_time, "📥 **Downloading...**"))
+            dl_path = await client.download_media(original_msg, file_name=path, progress=progress, progress_args=(status_msg, start_time, "📥 <b>Downloading...</b>"))
             
             width, height, duration = get_video_attributes(dl_path)
             file_size = humanbytes(os.path.getsize(dl_path))
             duration_str = get_duration_str(duration)
             s_num, e_num = get_media_info(new_name)
             
-            caption = f"**{new_name}**\n\n"
+            caption = f"<b>{new_name}</b>\n\n"
             if s_num: caption += f"💿 Season ➥ {s_num}\n"
             if e_num: caption += f"📺 Episode ➥ {e_num}\n\n"
-            caption += f"`File Size ♻️ ➥ {file_size}`\n"
-            if duration > 0: caption += f"`Duration ⏰ ➥ {duration_str}`\n"
-            caption += f"`Powered By ➥ {CREDIT_NAME}`"
+            caption += f"<code>File Size ♻️ ➥ {file_size}</code>\n"
+            if duration > 0: caption += f"<code>Duration ⏰ ➥ {duration_str}</code>\n"
+            caption += f"<code>Powered By ➥ {CREDIT_NAME}</code>"
 
             start_time = time.time()
             if mode == 'video':
-                await client.send_video(message.chat.id, video=dl_path, caption=caption, thumb=thumb_path, supports_streaming=True, duration=duration, width=width, height=height, progress=progress, progress_args=(status_msg, start_time, "📤 **Up Video**"))
+                await client.send_video(message.chat.id, video=dl_path, caption=caption, thumb=thumb_path, supports_streaming=True, duration=duration, width=width, height=height, progress=progress, progress_args=(status_msg, start_time, "📤 <b>Up Video</b>"))
             else:
-                await client.send_document(message.chat.id, document=dl_path, caption=caption, thumb=thumb_path, force_document=True, progress=progress, progress_args=(status_msg, start_time, "📤 **Up File**"))
+                await client.send_document(message.chat.id, document=dl_path, caption=caption, thumb=thumb_path, force_document=True, progress=progress, progress_args=(status_msg, start_time, "📤 <b>Up File</b>"))
             
             os.remove(dl_path)
             await status_msg.delete()
@@ -442,7 +436,7 @@ async def main():
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    print("Fixed Bot Started!")
+    print("HTML Box Mode Started!")
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
-    
+        

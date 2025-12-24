@@ -12,11 +12,9 @@ from aiohttp import web
 API_ID = int(os.environ.get("API_ID", "12345"))
 API_HASH = os.environ.get("API_HASH", "hash")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "token")
-
-# Aapka Blogger Page
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
-# --- ⚙️ SERVER SETTINGS ---
+# --- SERVER SETTINGS ---
 MAX_TASK_LIMIT = 2
 ACTIVE_TASKS = 0
 
@@ -30,12 +28,10 @@ app = Client(
     ipv6=False
 )
 
-# Data Storage
 batch_data = {}
 user_data = {}
-user_modes = {}  # Track karega ki user kaunse mode me hai
+user_modes = {}
 
-# Startup Cleaning
 if os.path.exists("downloads"): shutil.rmtree("downloads")
 os.makedirs("downloads")
 if not os.path.exists("thumbnails"): os.makedirs("thumbnails")
@@ -51,7 +47,7 @@ async def web_server():
     site = web.TCPSite(runner, '0.0.0.0', 8000)
     await site.start()
 
-# --- Helper Functions ---
+# --- Helpers ---
 def humanbytes(size):
     if not size: return ""
     power = 2**10
@@ -93,37 +89,26 @@ def extract_season_episode(filename):
         elif match.group(5) and match.group(6): return f"S{match.group(5)}E{match.group(6)}"
     return None
 
-# ==========================================
-# 🔥 MODE SWITCHING & COMMANDS
-# ==========================================
-
+# --- Commands ---
 @app.on_message(filters.command("start") & filters.private)
 async def start_msg(client, message):
     await message.reply_text(
         f"👋 **Hello {message.from_user.first_name}!**\n\n"
-        "🤖 **2-in-1 Features:**\n"
-        "1️⃣ **File Renamer** (Video/File)\n"
-        "2️⃣ **Permanent Link Generator** (Blogger)\n\n"
-        "👇 **Modes Change Karein:**\n"
-        "🔗 `/link` - Link Converter Mode\n"
-        "📁 `/rename` - Renamer Mode (Default)"
+        "🤖 **Features:**\n"
+        "1️⃣ **Renamer:** File/Video bhejein.\n"
+        "2️⃣ **Link Gen:** `/link` dabayein.\n\n"
+        "✨ **Auto-Clean:** Main faaltu messages khud delete kar dunga."
     )
 
 @app.on_message(filters.command("link") & filters.private)
 async def set_link_mode(client, message):
-    user_id = message.from_user.id
-    user_modes[user_id] = "blogger_link"
-    await message.reply_text(
-        "🔗 **Link Mode ON!**\n\n"
-        "Ab mujhe **Telegram Bot ka Link** bhejein.\n"
-        "Main use **Permanent Blogger Link** bana dunga."
-    )
+    user_modes[message.from_user.id] = "blogger_link"
+    await message.reply_text("🔗 **Link Mode ON!** Telegram Link bhejein.")
 
 @app.on_message(filters.command("rename") & filters.private)
 async def set_rename_mode(client, message):
-    user_id = message.from_user.id
-    user_modes[user_id] = "renamer"
-    await message.reply_text("📁 **Renamer Mode ON!**\nAb Files bhejein.")
+    user_modes[message.from_user.id] = "renamer"
+    await message.reply_text("📁 **Renamer Mode ON!** Files bhejein.")
 
 @app.on_message(filters.private & filters.photo)
 async def save_thumbnail(client, message):
@@ -141,9 +126,8 @@ async def delete_thumb(client, message):
 # --- Batch Mode ---
 @app.on_message(filters.command("batch") & filters.private)
 async def batch_start(client, message):
-    user_modes[message.from_user.id] = "renamer" # Batch always renamer
-    user_id = message.from_user.id
-    batch_data[user_id] = {'status': 'collecting', 'files': []}
+    user_modes[message.from_user.id] = "renamer"
+    batch_data[message.from_user.id] = {'status': 'collecting', 'files': []}
     await message.reply_text("🚀 **Batch Mode ON!** Files forward karein, fir **/done** bhejein.")
 
 @app.on_message(filters.command("done") & filters.private)
@@ -151,35 +135,31 @@ async def batch_done(client, message):
     user_id = message.from_user.id
     if user_id in batch_data and batch_data[user_id]['files']:
         batch_data[user_id]['status'] = 'naming'
-        await message.reply_text("✅ Files received. Ab **Series Name** bhejein.")
+        # 🟢 Prompt Message save kar rahe hain taaki baad me delete kar sakein
+        prompt_msg = await message.reply_text("✅ Files received. Ab **Series Name** bhejein.")
+        batch_data[user_id]['prompt_msg_id'] = prompt_msg.id
     else:
         await message.reply_text("Pehle files bhejein!")
 
-# ==========================================
-# 🔥 MAIN HANDLER (TEXT & FILES)
-# ==========================================
-
+# --- Main Handler ---
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio))
 async def handle_files(client, message):
     global ACTIVE_TASKS
     user_id = message.from_user.id
     
-    # Check Overload
     if ACTIVE_TASKS >= MAX_TASK_LIMIT:
         try: await message.delete()
         except: pass
-        warning = await message.reply_text("⚠️ **OVERLOAD!** Wait for ongoing tasks.")
+        w = await message.reply_text("⚠️ **OVERLOAD!** Wait...")
         await asyncio.sleep(5)
-        await warning.delete()
+        await w.delete()
         return
 
-    # Batch Collection
     if user_id in batch_data and batch_data[user_id]['status'] == 'collecting':
         batch_data[user_id]['files'].append(message)
         return
 
-    # Single Rename Setup
-    user_modes[user_id] = "renamer" # File aayi hai to Rename mode hi hoga
+    user_modes[user_id] = "renamer"
     user_data[user_id] = {'file_msg': message, 'mode': None}
     
     buttons = InlineKeyboardMarkup([[
@@ -196,7 +176,7 @@ async def mode_selection(client, callback_query):
         await callback_query.answer("Session expired.", show_alert=True)
         return
     user_data[user_id]['mode'] = 'video' if data == "mode_video" else 'document'
-    await callback_query.message.delete()
+    await callback_query.message.delete() # Button message delete
     
     file_msg = user_data[user_id]['file_msg']
     filename = file_msg.document.file_name if file_msg.document else (file_msg.video.file_name if file_msg.video else "file.mkv")
@@ -213,54 +193,38 @@ async def handle_text(client, message):
     global ACTIVE_TASKS
     user_id = message.from_user.id
     text = message.text
-    
-    # Mode Check
     current_mode = user_modes.get(user_id, "renamer")
 
-    # ---------------------------
-    # 🔗 LINK CONVERTER LOGIC
-    # ---------------------------
+    # Link Mode
     if current_mode == "blogger_link":
         if "?start=" in text:
             try:
-                # Telegram Link se Code nikalna (e.g., ?start=File123 -> File123)
                 code = text.split("?start=")[1]
-                
-                # Blogger Link banana (Assuming ?id= is your parameter)
                 final_link = f"{BLOGGER_URL}?id={code}"
-                
-                await message.reply_text(
-                    f"✅ **Permanent Link Generated!**\n\n"
-                    f"`{final_link}`\n\n"
-                    "👉 Yeh link tab bhi chalega jab Store Bot delete ho jayega.",
-                    disable_web_page_preview=True
-                )
-            except Exception as e:
-                await message.reply_text(f"❌ Error: {e}")
+                await message.reply_text(f"✅ **Permanent Link:**\n`{final_link}`", disable_web_page_preview=True)
+            except:
+                await message.reply_text("❌ Invalid Link")
         else:
-            await message.reply_text("❌ Is link me `?start=` nahi hai. Sahi Bot Link bhejein.")
+            await message.reply_text("❌ Link me `?start=` nahi hai.")
         return
 
-    # ---------------------------
-    # 📁 RENAMER LOGIC
-    # ---------------------------
-    
-    # Batch Rename
+    # Renamer Logic
+    # --- Batch ---
     if user_id in batch_data and batch_data[user_id]['status'] == 'naming':
-        batch_data[user_id]['status'] = 'processing' 
+        batch_data[user_id]['status'] = 'processing'
         if ACTIVE_TASKS >= MAX_TASK_LIMIT:
-            await message.reply_text("⚠️ Server busy. Try later.")
+            await message.reply_text("Busy. Try later.")
             del batch_data[user_id]
             return
         
         ACTIVE_TASKS += 1
+        status_msg = await message.reply_text(f"⏳ **Batch Processing...**")
+        
         try:
             base_name = message.text.strip()
             files = batch_data[user_id]['files']
             thumb_path = f"thumbnails/{user_id}.jpg"
             if not os.path.exists(thumb_path): thumb_path = None
-            
-            status_msg = await message.reply_text(f"⏳ **Batch Processing {len(files)} Files...**")
             
             for idx, media in enumerate(files):
                 try:
@@ -285,21 +249,36 @@ async def handle_text(client, message):
                     os.remove(dl_path)
                 except Exception as e: print(e)
             
-            await status_msg.delete()
-            await message.delete()
-            del batch_data[user_id]
+            await status_msg.delete() # Success Cleanup
+
+        except Exception as e:
+            await status_msg.edit(f"Error: {e}")
+        
         finally:
+            # 🔥 BATCH CLEANUP (Ye line sab delete karegi)
+            try: await message.delete() # User Name Message
+            except: pass
+            
+            try: 
+                # Delete Bot Prompt ("Ab Series name bhejein")
+                if 'prompt_msg_id' in batch_data[user_id]:
+                    await client.delete_messages(user_id, batch_data[user_id]['prompt_msg_id'])
+            except: pass
+            
+            del batch_data[user_id]
             ACTIVE_TASKS -= 1
         return
 
-    # Single Rename
+    # --- Single ---
     if message.reply_to_message and user_id in user_data:
-        user_task = user_data.pop(user_id) 
+        user_task = user_data.pop(user_id)
         if ACTIVE_TASKS >= MAX_TASK_LIMIT:
-            await message.reply_text("⚠️ Server busy. Try later.")
+            await message.reply_text("Busy. Try later.")
             return
 
         ACTIVE_TASKS += 1
+        status_msg = await message.reply_text("⏳ **Starting...**")
+        
         try:
             original_msg = user_task['file_msg']
             mode = user_task.get('mode', 'document')
@@ -307,7 +286,6 @@ async def handle_text(client, message):
             thumb_path = f"thumbnails/{user_id}.jpg"
             if not os.path.exists(thumb_path): thumb_path = None
             
-            status_msg = await message.reply_text("⏳ **Starting...**")
             path = f"downloads/{new_name}"
             start_time = time.time()
             dl_path = await client.download_media(
@@ -326,13 +304,21 @@ async def handle_text(client, message):
                     message.chat.id, document=dl_path, caption=f"**{new_name}**", thumb=thumb_path, force_document=True,
                     progress=progress, progress_args=(status_msg, start_time, "📤 **Uploading File...**")
                 )
+            
             os.remove(dl_path)
-            await status_msg.delete()
-            await message.delete()
-            await message.reply_to_message.delete()
+            await status_msg.delete() # Success Cleanup
+
         except Exception as e:
             await status_msg.edit(f"❌ Error: {e}")
+            
         finally:
+            # 🔥 SINGLE CLEANUP (Aggressive)
+            try: await message.delete() # User ka Name Message
+            except: pass
+            
+            try: await message.reply_to_message.delete() # Bot ka Question
+            except: pass
+            
             ACTIVE_TASKS -= 1
 
 async def main():
@@ -340,6 +326,7 @@ async def main():
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    print("All-in-One Bot Started!")
+    print("Bot Started!")
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+    

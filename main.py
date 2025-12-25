@@ -224,7 +224,7 @@ async def watermark_menu(client, message):
         btn = InlineKeyboardButton("📤 Upload Image (AS FILE)", callback_data="wm_upload_info")
     await message.reply_text(f"<b>Watermark Manager</b>\nStatus: {status}", reply_markup=InlineKeyboardMarkup([[btn]]))
 
-@app.on_callback_query(filters.regex("wm_"))
+@app.on_callback_query(filters.regex("^wm_"))
 async def wm_callback(client, callback):
     data = callback.data
     user_id = callback.from_user.id
@@ -237,7 +237,7 @@ async def wm_callback(client, callback):
         await callback.message.reply_text("📤 <b>Apni PNG Logo ko FILE (Document) banakar bhejein.</b>\n(Taaki background transparent rahe)")
 
 # --- Photo/Document Callback Handler ---
-@app.on_callback_query(filters.regex("save_as_"))
+@app.on_callback_query(filters.regex("^save_as_"))
 async def save_photo_callback(client, callback):
     await callback.answer()
     data = callback.data
@@ -295,7 +295,7 @@ async def position_menu(client, message):
     ]
     await message.reply_text(f"📍 <b>Select Position:</b>", reply_markup=InlineKeyboardMarkup(buttons))
 
-@app.on_callback_query(filters.regex("pos_"))
+@app.on_callback_query(filters.regex("^pos_"))
 async def pos_callback(client, callback):
     user_id = callback.from_user.id
     new_pos = callback.data.replace("pos_", "")
@@ -353,7 +353,7 @@ async def search_movie_ask(client, message):
         except: pass
 
 # --- MOVIE SEARCH 2: COUNT SELECTION ---
-@app.on_callback_query(filters.regex("ask_count|"))
+@app.on_callback_query(filters.regex("^ask_count"))
 async def ask_count_callback(client, callback):
     await callback.answer()
     data = callback.data.split("|") # ask_count | type | id
@@ -372,8 +372,8 @@ async def ask_count_callback(client, callback):
         reply_markup=buttons
     )
 
-# --- MOVIE SEARCH 3: FINAL SENDING ---
-@app.on_callback_query(filters.regex("final_img|"))
+# --- MOVIE SEARCH 3: FINAL SENDING (Fixed Regex) ---
+@app.on_callback_query(filters.regex("^final_img"))
 async def final_image_callback(client, callback):
     await callback.answer()
     user_id = callback.from_user.id
@@ -412,7 +412,7 @@ async def final_image_callback(client, callback):
             pos = user_watermarks[user_id]["position"]
         
         for img in images_list:
-            if current_count >= count_needed: break # 🔥 User ke count par ruk jao
+            if current_count >= count_needed: break 
             full_url = f"https://image.tmdb.org/t/p/w1280{img['file_path']}"
             
             if has_watermark:
@@ -431,7 +431,7 @@ async def final_image_callback(client, callback):
         await asyncio.sleep(5)
         try: await status_msg.delete()
         except: pass
-# --- Renamer Commands ---
+            # --- Renamer Commands ---
 @app.on_message(filters.command("add") & filters.private)
 async def add_word(client, message):
     if len(message.command) < 2: return await message.reply_text("❌ Usage: <code>/add word</code>")

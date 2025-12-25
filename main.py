@@ -215,7 +215,7 @@ async def start_msg(client, message):
 # --- Watermark Commands ---
 @app.on_message(filters.command("watermark"))
 async def watermark_menu(client, message):
-    try: await message.delete() # User command delete
+    try: await message.delete() 
     except: pass
 
     user_id = message.from_user.id
@@ -254,7 +254,6 @@ async def save_photo_callback(client, callback):
     status_msg = await callback.message.edit_text("⏳ <b>Saving...</b>")
 
     try:
-        # File Download Logic
         if data == "save_as_thumb":
             if not os.path.exists("thumbnails"): os.makedirs("thumbnails")
             path = f"thumbnails/{user_id}.jpg"
@@ -276,7 +275,6 @@ async def save_photo_callback(client, callback):
             
             os.remove(dl_path)
 
-        # 🔥 CLEANUP: Delete User File & Bot Status
         try: await original_msg.delete() 
         except: pass
         
@@ -292,7 +290,7 @@ async def save_photo_callback(client, callback):
 
 @app.on_message(filters.command("position"))
 async def position_menu(client, message):
-    try: await message.delete() # User command delete
+    try: await message.delete() 
     except: pass
 
     user_id = message.from_user.id
@@ -394,7 +392,7 @@ async def ask_count_callback(client, callback):
         reply_markup=buttons
     )
 
-# --- MOVIE SEARCH 3: FINAL SENDING (Title Priority) ---
+# --- MOVIE SEARCH 3: FINAL SENDING (TEXT PRIORITY) ---
 @app.on_callback_query(filters.regex("^final_img"))
 async def final_image_callback(client, callback):
     await callback.answer()
@@ -411,7 +409,8 @@ async def final_image_callback(client, callback):
         details_resp = requests.get(details_url).json()
         movie_title = details_resp.get("title", "Movie")
 
-        images_url = f"https://api.themoviedb.org/3/movie/{movie_id}/images?api_key={TMDB_API_KEY}&include_image_language=en,null"
+        # 🔥 UPDATE: Added 'hi' (Hindi) support for Indian Movies
+        images_url = f"https://api.themoviedb.org/3/movie/{movie_id}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi,null"
         img_response = requests.get(images_url).json()
         
         raw_list = []
@@ -426,20 +425,17 @@ async def final_image_callback(client, callback):
             await status_msg.delete()
             return
 
-        # 🔥 LOGIC UPDATED:
-        # 1. Filter English images (Jinme Text hota hai)
-        # 2. Sort by Rating (Sabse popular upar)
-        
-        title_images = [img for img in raw_list if img.get('iso_639_1') == 'en']
-        title_images.sort(key=lambda x: x.get('vote_average', 0), reverse=True) # Sort Best First
+        # 🔥 LOGIC: Pehle Text wali (English/Hindi) images dhundo, fir bina text wali.
+        text_images = [img for img in raw_list if img.get('iso_639_1') in ['en', 'hi']]
+        clean_images = [img for img in raw_list if img.get('iso_639_1') is None]
 
-        other_images = [img for img in raw_list if img.get('iso_639_1') != 'en']
-        other_images.sort(key=lambda x: x.get('vote_average', 0), reverse=True)
+        # Sort Best Rated First
+        text_images.sort(key=lambda x: x.get('vote_average', 0), reverse=True)
+        clean_images.sort(key=lambda x: x.get('vote_average', 0), reverse=True)
 
-        # Final Priority: English > Others
-        final_list = title_images + other_images
+        # Final List: Text First -> Clean Second
+        final_list = text_images + clean_images
         
-        # Agar koi filter nahi chala to raw list use karo
         if not final_list: final_list = raw_list
 
         media_group = []
@@ -463,7 +459,6 @@ async def final_image_callback(client, callback):
             
         await callback.message.reply_media_group(media_group)
         
-        # Cleanup
         try: await status_msg.delete()
         except: pass
 
@@ -472,7 +467,7 @@ async def final_image_callback(client, callback):
         await asyncio.sleep(5)
         try: await status_msg.delete()
         except: pass
-# --- Renamer Commands ---
+    # --- Renamer Commands ---
 @app.on_message(filters.command("add") & filters.private)
 async def add_word(client, message):
     try: await message.delete()
@@ -717,3 +712,4 @@ if __name__ == "__main__":
     print("All-in-One Bot Started!")
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+                                

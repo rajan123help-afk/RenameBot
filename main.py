@@ -316,7 +316,7 @@ async def pos_callback(client, callback):
         await callback.message.delete()
     except Exception as e: await callback.message.reply_text(str(e))
 
-# --- MOVIE SEARCH ---
+# --- MOVIE SEARCH 1: TYPE SELECTION ---
 @app.on_message(filters.command("search"))
 async def search_movie_ask(client, message):
     if len(message.command) < 2: return await message.reply_text("❌ Usage: <code>/search Movie Name</code>")
@@ -336,8 +336,8 @@ async def search_movie_ask(client, message):
         movie_title = response['results'][0]['title']
         
         buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎬 Posters (Vertical)", callback_data=f"search_type_poster|{movie_id}")],
-            [InlineKeyboardButton("🖼 Thumbnails (Horizontal)", callback_data=f"search_type_thumb|{movie_id}")]
+            [InlineKeyboardButton("🎬 Posters (Vertical)", callback_data=f"ask_count|poster|{movie_id}")],
+            [InlineKeyboardButton("🖼 Thumbnails (Horizontal)", callback_data=f"ask_count|thumb|{movie_id}")]
         ])
         await status_msg.delete()
         await message.reply_text(
@@ -352,15 +352,37 @@ async def search_movie_ask(client, message):
         try: await status_msg.delete()
         except: pass
 
-@app.on_callback_query(filters.regex("search_type_"))
-async def search_image_callback(client, callback):
+# --- MOVIE SEARCH 2: COUNT SELECTION ---
+@app.on_callback_query(filters.regex("ask_count|"))
+async def ask_count_callback(client, callback):
+    await callback.answer()
+    data = callback.data.split("|") # ask_count | type | id
+    img_type = data[1]
+    movie_id = data[2]
+    
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("1️⃣", callback_data=f"final_img|{img_type}|{movie_id}|1"),
+         InlineKeyboardButton("2️⃣", callback_data=f"final_img|{img_type}|{movie_id}|2")],
+        [InlineKeyboardButton("3️⃣", callback_data=f"final_img|{img_type}|{movie_id}|3"),
+         InlineKeyboardButton("4️⃣", callback_data=f"final_img|{img_type}|{movie_id}|4")]
+    ])
+    
+    await callback.message.edit_text(
+        f"🔢 <b>Kitni photos chahiye?</b>\n(Type: {img_type.title()})",
+        reply_markup=buttons
+    )
+
+# --- MOVIE SEARCH 3: FINAL SENDING ---
+@app.on_callback_query(filters.regex("final_img|"))
+async def final_image_callback(client, callback):
     await callback.answer()
     user_id = callback.from_user.id
-    data_parts = callback.data.split("|")
-    img_type = data_parts[0].replace("search_type_", "")
-    movie_id = data_parts[1]
+    data = callback.data.split("|") # final_img | type | id | count
+    img_type = data[1]
+    movie_id = data[2]
+    count_needed = int(data[3])
 
-    status_msg = await callback.message.edit_text("⏳ <b>Fetching Images...</b>")
+    status_msg = await callback.message.edit_text(f"⏳ <b>Fetching {count_needed} Images...</b>")
     
     try:
         details_url = f"https://api.themoviedb.org/3/movie/{movie_id}?api_key={TMDB_API_KEY}"
@@ -382,7 +404,7 @@ async def search_image_callback(client, callback):
             return
 
         media_group = []
-        count = 0
+        current_count = 0
         has_watermark = user_id in user_watermarks and user_watermarks[user_id].get("image")
         if has_watermark:
             await status_msg.edit("💧 <b>Processing...</b>")
@@ -390,7 +412,7 @@ async def search_image_callback(client, callback):
             pos = user_watermarks[user_id]["position"]
         
         for img in images_list:
-            if count >= 4: break
+            if current_count >= count_needed: break # 🔥 User ke count par ruk jao
             full_url = f"https://image.tmdb.org/t/p/w1280{img['file_path']}"
             
             if has_watermark:
@@ -398,7 +420,7 @@ async def search_image_callback(client, callback):
                 media_group.append(InputMediaPhoto(processed_bytes, caption=f"🎬 <b>{movie_title}</b>"))
             else:
                 media_group.append(InputMediaPhoto(full_url, caption=f"🎬 <b>{movie_title}</b>"))
-            count += 1
+            current_count += 1
             
         await callback.message.reply_media_group(media_group)
         try: await status_msg.delete()
@@ -409,7 +431,7 @@ async def search_image_callback(client, callback):
         await asyncio.sleep(5)
         try: await status_msg.delete()
         except: pass
-            # --- Renamer Commands ---
+# --- Renamer Commands ---
 @app.on_message(filters.command("add") & filters.private)
 async def add_word(client, message):
     if len(message.command) < 2: return await message.reply_text("❌ Usage: <code>/add word</code>")

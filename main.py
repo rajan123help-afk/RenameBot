@@ -196,8 +196,8 @@ def apply_watermark(base_image_url, watermark_img, position):
     transparent.save(output, format="PNG") 
     output.seek(0)
     return output
-    # ==========================================
-# 🔥 COMMANDS & SMART LOGIC
+     # ==========================================
+# 🔥 COMMANDS & CLEANER LOGIC
 # ==========================================
 
 @app.on_message(filters.command("start") & filters.private)
@@ -215,6 +215,9 @@ async def start_msg(client, message):
 # --- Watermark Commands ---
 @app.on_message(filters.command("watermark"))
 async def watermark_menu(client, message):
+    try: await message.delete() # User command delete
+    except: pass
+
     user_id = message.from_user.id
     if user_id in user_watermarks and user_watermarks[user_id].get("image"):
         status = "✅ <b>Set Hai!</b>"
@@ -234,9 +237,9 @@ async def wm_callback(client, callback):
         await callback.message.edit_text("❌ <b>Watermark Deleted.</b>")
     elif data == "wm_upload_info":
         await callback.answer()
-        await callback.message.reply_text("📤 <b>Apni PNG Logo ko FILE (Document) banakar bhejein.</b>\n(Taaki background transparent rahe)")
+        await callback.message.edit_text("📤 <b>Apni PNG Logo ko FILE (Document) banakar bhejein.</b>\n(Taaki background transparent rahe)")
 
-# --- Photo/Document Callback Handler ---
+# --- Photo/Document Callback Handler (Auto Clean) ---
 @app.on_callback_query(filters.regex("^save_as_"))
 async def save_photo_callback(client, callback):
     await callback.answer()
@@ -256,8 +259,7 @@ async def save_photo_callback(client, callback):
             if not os.path.exists("thumbnails"): os.makedirs("thumbnails")
             path = f"thumbnails/{user_id}.jpg"
             await client.download_media(original_msg, file_name=path)
-            await status_msg.edit("✅ <b>Thumbnail Saved!</b>")
-        
+            
         elif data == "save_as_wm":
             path = f"wm_{user_id}.png"
             dl_path = await client.download_media(original_msg, file_name=path)
@@ -266,7 +268,6 @@ async def save_photo_callback(client, callback):
                 await status_msg.edit("❌ <b>Error:</b> Download failed.")
                 return
             
-            # 🔥 Ensure RGBA (Transparency)
             img = Image.open(dl_path).convert("RGBA")
             if user_id not in user_watermarks: user_watermarks[user_id] = {}
             user_watermarks[user_id]["image"] = img
@@ -274,7 +275,14 @@ async def save_photo_callback(client, callback):
                 user_watermarks[user_id]["position"] = "center"
             
             os.remove(dl_path)
-            await status_msg.edit("✅ <b>Watermark Saved!</b>\n(Transparent PNG)\n\n📍 Position: <code>/position</code>")
+
+        # 🔥 CLEANUP: Delete User File & Bot Status
+        try: await original_msg.delete() 
+        except: pass
+        
+        await status_msg.edit("✅ <b>Saved!</b>")
+        await asyncio.sleep(2)
+        await status_msg.delete()
 
     except Exception as e:
         await status_msg.edit(f"❌ Error: {e}")
@@ -284,9 +292,15 @@ async def save_photo_callback(client, callback):
 
 @app.on_message(filters.command("position"))
 async def position_menu(client, message):
+    try: await message.delete() # User command delete
+    except: pass
+
     user_id = message.from_user.id
     if user_id not in user_watermarks or not user_watermarks[user_id].get("image"):
-        return await message.reply_text("❌ Pehle Watermark upload karein.")
+        msg = await message.reply_text("❌ Pehle Watermark upload karein.")
+        await asyncio.sleep(3)
+        await msg.delete()
+        return
     
     buttons = [
         [InlineKeyboardButton("↖️ Top Left", callback_data="pos_top_left"), InlineKeyboardButton("⬆️ Top Center", callback_data="pos_top_center"), InlineKeyboardButton("↗️ Top Right", callback_data="pos_top_right")],
@@ -307,21 +321,32 @@ async def pos_callback(client, callback):
     await callback.answer(f"Position: {new_pos}")
     
     try:
-        # HD Demo
         demo_url = "https://image.tmdb.org/t/p/w1280/jXJxMcVoEuXzym3vFnjqDW4ifo6.jpg"
         wm_img = user_watermarks[user_id]["image"]
         demo_bytes = apply_watermark(demo_url, wm_img, new_pos)
         
+        # Send Demo then delete menu
         await callback.message.reply_photo(photo=demo_bytes, caption=f"✅ <b>Demo:</b> {new_pos}")
-        await callback.message.delete()
+        await callback.message.delete() 
     except Exception as e: await callback.message.reply_text(str(e))
 
 # --- MOVIE SEARCH 1: TYPE SELECTION ---
 @app.on_message(filters.command("search"))
 async def search_movie_ask(client, message):
-    if len(message.command) < 2: return await message.reply_text("❌ Usage: <code>/search Movie Name</code>")
+    if len(message.command) < 2: 
+        msg = await message.reply_text("❌ Usage: <code>/search Movie Name</code>")
+        await asyncio.sleep(3)
+        await msg.delete()
+        try: await message.delete()
+        except: pass
+        return
+
     query = " ".join(message.command[1:])
     status_msg = await message.reply_text(f"🔎 <b>Searching:</b> <code>{query}</code>...")
+    
+    # 🔥 Delete User Command Immediately
+    try: await message.delete()
+    except: pass
     
     try:
         search_url = f"https://api.themoviedb.org/3/search/movie?api_key={TMDB_API_KEY}&query={query}"
@@ -339,11 +364,10 @@ async def search_movie_ask(client, message):
             [InlineKeyboardButton("🎬 Posters (Vertical)", callback_data=f"ask_count|poster|{movie_id}")],
             [InlineKeyboardButton("🖼 Thumbnails (Horizontal)", callback_data=f"ask_count|thumb|{movie_id}")]
         ])
-        await status_msg.delete()
-        await message.reply_text(
+        
+        await status_msg.edit(
             f"🍿 <b>Found:</b> {movie_title}\n\nKya chahiye?",
-            reply_markup=buttons,
-            quote=True
+            reply_markup=buttons
         )
 
     except Exception as e:
@@ -372,7 +396,7 @@ async def ask_count_callback(client, callback):
         reply_markup=buttons
     )
 
-# --- MOVIE SEARCH 3: FINAL SENDING (Fixed Regex) ---
+# --- MOVIE SEARCH 3: FINAL SENDING & CLEANUP ---
 @app.on_callback_query(filters.regex("^final_img"))
 async def final_image_callback(client, callback):
     await callback.answer()
@@ -392,16 +416,22 @@ async def final_image_callback(client, callback):
         images_url = f"https://api.themoviedb.org/3/movie/{movie_id}/images?api_key={TMDB_API_KEY}&include_image_language=en,null"
         img_response = requests.get(images_url).json()
         
+        raw_list = []
         if img_type == "poster":
-            images_list = img_response.get('posters', [])
+            raw_list = img_response.get('posters', [])
         else:
-            images_list = img_response.get('backdrops', [])
-            
-        if not images_list:
+            raw_list = img_response.get('backdrops', [])
+
+        if not raw_list:
             await status_msg.edit(f"❌ No {img_type}s found.")
             await asyncio.sleep(3)
             await status_msg.delete()
             return
+
+        title_images = [img for img in raw_list if img.get('iso_639_1') == 'en']
+        other_images = [img for img in raw_list if img.get('iso_639_1') != 'en']
+        final_list = title_images + other_images
+        if not final_list: final_list = raw_list
 
         media_group = []
         current_count = 0
@@ -411,7 +441,7 @@ async def final_image_callback(client, callback):
             wm_img = user_watermarks[user_id]["image"]
             pos = user_watermarks[user_id]["position"]
         
-        for img in images_list:
+        for img in final_list:
             if current_count >= count_needed: break 
             full_url = f"https://image.tmdb.org/t/p/w1280{img['file_path']}"
             
@@ -423,6 +453,8 @@ async def final_image_callback(client, callback):
             current_count += 1
             
         await callback.message.reply_media_group(media_group)
+        
+        # 🔥 CLEANUP: Delete Bot Status Message
         try: await status_msg.delete()
         except: pass
 
@@ -431,56 +463,84 @@ async def final_image_callback(client, callback):
         await asyncio.sleep(5)
         try: await status_msg.delete()
         except: pass
-            # --- Renamer Commands ---
+           # --- Renamer Commands ---
 @app.on_message(filters.command("add") & filters.private)
 async def add_word(client, message):
-    if len(message.command) < 2: return await message.reply_text("❌ Usage: <code>/add word</code>")
+    try: await message.delete()
+    except: pass
+    if len(message.command) < 2: return 
     for word in message.command[1:]: REPLACE_DICT[word] = CREDIT_NAME
-    await message.reply_text(f"✅ Added {len(message.command[1:])} words.")
+    msg = await message.reply_text(f"✅ Added {len(message.command[1:])} words.")
+    await asyncio.sleep(3)
+    await msg.delete()
 
 @app.on_message(filters.command("del") & filters.private)
 async def del_word(client, message):
-    if len(message.command) < 2: return await message.reply_text("❌ Usage: <code>/del word</code>")
+    try: await message.delete()
+    except: pass
+    if len(message.command) < 2: return 
     deleted = [w for w in message.command[1:] if REPLACE_DICT.pop(w, None)]
-    await message.reply_text(f"🗑 Deleted: {', '.join(deleted)}" if deleted else "❌ Not found.")
+    msg = await message.reply_text(f"🗑 Deleted: {', '.join(deleted)}" if deleted else "❌ Not found.")
+    await asyncio.sleep(3)
+    await msg.delete()
 
 @app.on_message(filters.command("words") & filters.private)
 async def view_words(client, message):
+    try: await message.delete()
+    except: pass
     disp = "\n".join([f"🔹 <code>{k}</code> ➡ <code>{v}</code>" for k, v in REPLACE_DICT.items()])
-    await message.reply_text(f"📋 <b>Filter List:</b>\n\n{disp}" if REPLACE_DICT else "📭 Empty List.")
+    msg = await message.reply_text(f"📋 <b>Filter List:</b>\n\n{disp}" if REPLACE_DICT else "📭 Empty List.")
+    await asyncio.sleep(10)
+    await msg.delete()
 
 @app.on_message(filters.command("rename") & filters.private)
 async def set_rename_mode(client, message):
     user_modes[message.from_user.id] = "renamer"
-    await message.reply_text("📁 <b>Renamer Mode ON!</b>")
+    try: await message.delete()
+    except: pass
+    msg = await message.reply_text("📁 <b>Renamer Mode ON!</b>")
+    await asyncio.sleep(3)
+    await msg.delete()
 
 @app.on_message(filters.command("link") & filters.private)
 async def set_link_mode(client, message):
     user_modes[message.from_user.id] = "blogger_link"
-    await message.reply_text("🔗 <b>Link Mode ON!</b>")
+    try: await message.delete()
+    except: pass
+    msg = await message.reply_text("🔗 <b>Link Mode ON!</b>")
+    await asyncio.sleep(3)
+    await msg.delete()
 
 @app.on_message(filters.command("caption") & filters.private)
 async def set_caption_mode(client, message):
     user_modes[message.from_user.id] = "caption_only"
-    await message.reply_text("📝 <b>Caption Mode ON!</b>")
+    try: await message.delete()
+    except: pass
+    msg = await message.reply_text("📝 <b>Caption Mode ON!</b>")
+    await asyncio.sleep(3)
+    await msg.delete()
 
 # --- Batch Mode ---
 @app.on_message(filters.command("batch") & filters.private)
 async def batch_start(client, message):
     user_modes[message.from_user.id] = "renamer"
     batch_data[message.from_user.id] = {'status': 'collecting', 'files': []}
+    try: await message.delete()
+    except: pass
     await message.reply_text("🚀 <b>Batch Mode ON!</b> Files bhejein, fir <b>/done</b> karein.")
 
 @app.on_message(filters.command("done") & filters.private)
 async def batch_done(client, message):
     user_id = message.from_user.id
+    try: await message.delete()
+    except: pass
     if user_id in batch_data and batch_data[user_id]['files']:
         batch_data[user_id]['status'] = 'naming'
         prompt = await message.reply_text("✅ Files mili. Ab <b>Series Name</b> bhejein.")
         batch_data[user_id]['prompt_msg_id'] = prompt.id
     else: await message.reply_text("Pehle files bhejein!")
 
-# --- 🔥 MAIN HANDLER (Smart Logic) ---
+# --- 🔥 MAIN HANDLER (Smart Logic & Cleanup) ---
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo))
 async def handle_files(client, message):
     
@@ -565,6 +625,9 @@ async def handle_text(client, message):
                 encoded = base64.b64encode(start_code.encode("utf-8")).decode("utf-8")
                 final_link = f"{BLOGGER_URL}?data={encoded}"
                 await message.reply_text(f"✅ <b>Link:</b>\n<code>{final_link}</code>", disable_web_page_preview=True)
+                # 🔥 Link Generate karne ke baad Input link delete
+                try: await message.delete() 
+                except: pass
             except: await message.reply_text("❌ Error.")
         else: await message.reply_text("❌ No <code>?start=</code> found.")
         return
@@ -626,16 +689,16 @@ async def handle_text(client, message):
                 await client.send_document(user_id, dl_path, caption=caption, thumb=thumb_path, force_document=True, progress=progress, progress_args=(status_msg, time.time(), "📤 Uploading"))
             
             os.remove(dl_path)
-            # 🔥 AUTO-CLEAN: File bhejne ke baad original msg aur "Wait" delete
+            # 🔥 AUTO-CLEAN: File bhejne ke baad original File aur "Name" command delete
             try:
-                await user_task['file_msg'].delete() 
-                await message.delete() 
+                await user_task['file_msg'].delete() # Original File delete
+                await message.delete() # Name command delete
             except: pass
 
         except Exception as e: await message.reply_text(f"Error: {e}")
         finally:
             ACTIVE_TASKS -= 1
-            await status_msg.delete()
+            await status_msg.delete() # Bot ka status msg delete
 
 async def main():
     await asyncio.gather(web_server(), app.start())
@@ -645,4 +708,4 @@ if __name__ == "__main__":
     print("All-in-One Bot Started!")
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
-    
+            

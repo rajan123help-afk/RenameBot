@@ -196,8 +196,8 @@ def apply_watermark(base_image_url, watermark_img, position):
     transparent.save(output, format="PNG") 
     output.seek(0)
     return output
-     # ==========================================
-# 🔥 COMMANDS & CLEANER LOGIC
+    # ==========================================
+# 🔥 COMMANDS & SMART LOGIC
 # ==========================================
 
 @app.on_message(filters.command("start") & filters.private)
@@ -325,7 +325,6 @@ async def pos_callback(client, callback):
         wm_img = user_watermarks[user_id]["image"]
         demo_bytes = apply_watermark(demo_url, wm_img, new_pos)
         
-        # Send Demo then delete menu
         await callback.message.reply_photo(photo=demo_bytes, caption=f"✅ <b>Demo:</b> {new_pos}")
         await callback.message.delete() 
     except Exception as e: await callback.message.reply_text(str(e))
@@ -344,7 +343,6 @@ async def search_movie_ask(client, message):
     query = " ".join(message.command[1:])
     status_msg = await message.reply_text(f"🔎 <b>Searching:</b> <code>{query}</code>...")
     
-    # 🔥 Delete User Command Immediately
     try: await message.delete()
     except: pass
     
@@ -396,7 +394,7 @@ async def ask_count_callback(client, callback):
         reply_markup=buttons
     )
 
-# --- MOVIE SEARCH 3: FINAL SENDING & CLEANUP ---
+# --- MOVIE SEARCH 3: FINAL SENDING (Title Priority) ---
 @app.on_callback_query(filters.regex("^final_img"))
 async def final_image_callback(client, callback):
     await callback.answer()
@@ -406,7 +404,7 @@ async def final_image_callback(client, callback):
     movie_id = data[2]
     count_needed = int(data[3])
 
-    status_msg = await callback.message.edit_text(f"⏳ <b>Fetching {count_needed} Images...</b>")
+    status_msg = await callback.message.edit_text(f"⏳ <b>Fetching {count_needed} Images with Text...</b>")
     
     try:
         details_url = f"https://api.themoviedb.org/3/movie/{movie_id}?api_key={TMDB_API_KEY}"
@@ -428,9 +426,20 @@ async def final_image_callback(client, callback):
             await status_msg.delete()
             return
 
+        # 🔥 LOGIC UPDATED:
+        # 1. Filter English images (Jinme Text hota hai)
+        # 2. Sort by Rating (Sabse popular upar)
+        
         title_images = [img for img in raw_list if img.get('iso_639_1') == 'en']
+        title_images.sort(key=lambda x: x.get('vote_average', 0), reverse=True) # Sort Best First
+
         other_images = [img for img in raw_list if img.get('iso_639_1') != 'en']
+        other_images.sort(key=lambda x: x.get('vote_average', 0), reverse=True)
+
+        # Final Priority: English > Others
         final_list = title_images + other_images
+        
+        # Agar koi filter nahi chala to raw list use karo
         if not final_list: final_list = raw_list
 
         media_group = []
@@ -454,7 +463,7 @@ async def final_image_callback(client, callback):
             
         await callback.message.reply_media_group(media_group)
         
-        # 🔥 CLEANUP: Delete Bot Status Message
+        # Cleanup
         try: await status_msg.delete()
         except: pass
 
@@ -463,7 +472,7 @@ async def final_image_callback(client, callback):
         await asyncio.sleep(5)
         try: await status_msg.delete()
         except: pass
-           # --- Renamer Commands ---
+# --- Renamer Commands ---
 @app.on_message(filters.command("add") & filters.private)
 async def add_word(client, message):
     try: await message.delete()
@@ -708,4 +717,3 @@ if __name__ == "__main__":
     print("All-in-One Bot Started!")
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
-            

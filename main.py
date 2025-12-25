@@ -201,7 +201,7 @@ async def start_msg(client, message):
         "🤖 <b>Filmy Flip All-in-One Bot</b>\n\n"
         "📁 <b>Renamer:</b> <code>/rename</code>, <code>/caption</code>\n"
         "🔗 <b>Link Convert:</b> <code>/link</code>\n"
-        "🎬 <b>Poster:</b> <code>/search MovieName</code>\n"
+        "🎬 <b>Poster:</b> <code>/search MovieName</code> (Thumbnail Size)\n"
         "💧 <b>Watermark:</b> <code>/watermark</code>, <code>/position</code>\n"
         "⚙️ <b>Settings:</b> <code>/add</code>, <code>/del</code>, <code>/words</code>"
     )
@@ -285,14 +285,15 @@ async def pos_callback(client, callback):
     await callback.answer(f"Position: {new_pos}")
     
     try:
-        demo_url = "https://image.tmdb.org/t/p/original/7WsyChQLEftFiDOVTGkv3hFpyyt.jpg"
+        # Demo ke liye Backdrop (Thumbnail style) use kar rahe hain
+        demo_url = "https://image.tmdb.org/t/p/original/jXJxMcVoEuXzym3vFnjqDW4ifo6.jpg" 
         wm_img = user_watermarks[user_id]["image"]
         demo_bytes = apply_watermark(demo_url, wm_img, new_pos)
-        await callback.message.reply_photo(photo=demo_bytes, caption=f"✅ <b>Demo:</b> {new_pos}")
+        await callback.message.reply_photo(photo=demo_bytes, caption=f"✅ <b>Thumbnail Demo:</b> {new_pos}")
         await callback.message.delete()
     except Exception as e: await callback.message.reply_text(str(e))
 
-# --- Movie Search Command ---
+# --- Movie Search Command (FIXED FOR THUMBNAILS) ---
 @app.on_message(filters.command("search"))
 async def search_movie(client, message):
     if len(message.command) < 2: return await message.reply_text("❌ Usage: <code>/search Movie Name</code>")
@@ -313,8 +314,12 @@ async def search_movie(client, message):
         images_url = f"https://api.themoviedb.org/3/movie/{movie_id}/images?api_key={TMDB_API_KEY}&include_image_language=en,null"
         img_response = requests.get(images_url).json()
         
-        images_list = img_response.get('posters', [])
-        if len(images_list) < 4: images_list.extend(img_response.get('backdrops', []))
+        # 🔥 CHANGE IS HERE: Pehle 'backdrops' (Thumbnails) dhundho
+        images_list = img_response.get('backdrops', [])
+        
+        # Agar Backdrops nahi mile, tabhi Posters lo
+        if len(images_list) < 4: images_list.extend(img_response.get('posters', []))
+        
         if not images_list: return await status_msg.edit("❌ Images nahi mile.")
 
         media_group = []
@@ -524,3 +529,4 @@ if __name__ == "__main__":
     print("All-in-One Bot Started!")
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+        

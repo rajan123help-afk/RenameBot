@@ -151,7 +151,8 @@ async def progress(current, total, message, start_time, task_type):
                f"⏳ <b>ETA:</b> {time_left_str}")
         try: await message.edit(tmp)
         except: pass
-            # --- Helper Function (Watermark Fixed PNG & New Positions) ---
+
+# --- Helper Function (Watermark Fixed PNG) ---
 def apply_watermark(base_image_url, watermark_img, position):
     response = requests.get(base_image_url)
     base = Image.open(io.BytesIO(response.content)).convert("RGBA")
@@ -195,9 +196,8 @@ def apply_watermark(base_image_url, watermark_img, position):
     transparent.save(output, format="PNG") 
     output.seek(0)
     return output
-
-# ==========================================
-# 🔥 COMMANDS
+    # ==========================================
+# 🔥 COMMANDS & SMART LOGIC
 # ==========================================
 
 @app.on_message(filters.command("start") & filters.private)
@@ -221,7 +221,7 @@ async def watermark_menu(client, message):
         btn = InlineKeyboardButton("🗑 Delete", callback_data="wm_delete")
     else:
         status = "❌ <b>Set Nahi Hai.</b>"
-        btn = InlineKeyboardButton("📤 Upload Image", callback_data="wm_upload_info")
+        btn = InlineKeyboardButton("📤 Upload Image (AS FILE)", callback_data="wm_upload_info")
     await message.reply_text(f"<b>Watermark Manager</b>\nStatus: {status}", reply_markup=InlineKeyboardMarkup([[btn]]))
 
 @app.on_callback_query(filters.regex("wm_"))
@@ -234,20 +234,9 @@ async def wm_callback(client, callback):
         await callback.message.edit_text("❌ <b>Watermark Deleted.</b>")
     elif data == "wm_upload_info":
         await callback.answer()
-        await callback.message.reply_text("📤 <b>Ab apni Logo (PNG/JPG) bhejein.</b>")
+        await callback.message.reply_text("📤 <b>Apni PNG Logo ko FILE (Document) banakar bhejein.</b>\n(Taaki background transparent rahe)")
 
-# --- Photo Handler ---
-@app.on_message(filters.photo & filters.private)
-async def handle_photo(client, message):
-    await message.reply_text(
-        "📸 <b>Photo Received!</b>\n\nIs photo ka kya karna hai?",
-        quote=True,
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🖼 Set as Thumbnail", callback_data="save_as_thumb")],
-            [InlineKeyboardButton("💧 Set as Watermark", callback_data="save_as_wm")]
-        ])
-    )
-
+# --- Photo/Document Callback Handler ---
 @app.on_callback_query(filters.regex("save_as_"))
 async def save_photo_callback(client, callback):
     await callback.answer()
@@ -255,13 +244,14 @@ async def save_photo_callback(client, callback):
     user_id = callback.from_user.id
     
     original_msg = callback.message.reply_to_message
-    if not original_msg or not original_msg.photo:
-        await callback.message.edit_text("❌ <b>Error:</b> Photo purani ho gayi hai.")
+    if not original_msg or (not original_msg.photo and not original_msg.document):
+        await callback.message.edit_text("❌ <b>Error:</b> File purani ho gayi hai.")
         return
 
     status_msg = await callback.message.edit_text("⏳ <b>Saving...</b>")
 
     try:
+        # File Download Logic
         if data == "save_as_thumb":
             if not os.path.exists("thumbnails"): os.makedirs("thumbnails")
             path = f"thumbnails/{user_id}.jpg"
@@ -276,6 +266,7 @@ async def save_photo_callback(client, callback):
                 await status_msg.edit("❌ <b>Error:</b> Download failed.")
                 return
             
+            # 🔥 Ensure RGBA (Transparency)
             img = Image.open(dl_path).convert("RGBA")
             if user_id not in user_watermarks: user_watermarks[user_id] = {}
             user_watermarks[user_id]["image"] = img
@@ -283,7 +274,7 @@ async def save_photo_callback(client, callback):
                 user_watermarks[user_id]["position"] = "center"
             
             os.remove(dl_path)
-            await status_msg.edit("✅ <b>Watermark Saved!</b>\nUse <code>/position</code> to adjust.")
+            await status_msg.edit("✅ <b>Watermark Saved!</b>\n(Transparent PNG)\n\n📍 Position: <code>/position</code>")
 
     except Exception as e:
         await status_msg.edit(f"❌ Error: {e}")
@@ -316,6 +307,7 @@ async def pos_callback(client, callback):
     await callback.answer(f"Position: {new_pos}")
     
     try:
+        # HD Demo
         demo_url = "https://image.tmdb.org/t/p/w1280/jXJxMcVoEuXzym3vFnjqDW4ifo6.jpg"
         wm_img = user_watermarks[user_id]["image"]
         demo_bytes = apply_watermark(demo_url, wm_img, new_pos)
@@ -324,7 +316,7 @@ async def pos_callback(client, callback):
         await callback.message.delete()
     except Exception as e: await callback.message.reply_text(str(e))
 
-# --- 🔥 MOVIE SEARCH (ASK POSTER/THUMBNAIL) ---
+# --- MOVIE SEARCH ---
 @app.on_message(filters.command("search"))
 async def search_movie_ask(client, message):
     if len(message.command) < 2: return await message.reply_text("❌ Usage: <code>/search Movie Name</code>")
@@ -393,7 +385,7 @@ async def search_image_callback(client, callback):
         count = 0
         has_watermark = user_id in user_watermarks and user_watermarks[user_id].get("image")
         if has_watermark:
-            await status_msg.edit("💧 <b>Processing (Fast Mode)...</b>")
+            await status_msg.edit("💧 <b>Processing...</b>")
             wm_img = user_watermarks[user_id]["image"]
             pos = user_watermarks[user_id]["position"]
         
@@ -409,7 +401,6 @@ async def search_image_callback(client, callback):
             count += 1
             
         await callback.message.reply_media_group(media_group)
-        
         try: await status_msg.delete()
         except: pass
 
@@ -418,7 +409,7 @@ async def search_image_callback(client, callback):
         await asyncio.sleep(5)
         try: await status_msg.delete()
         except: pass
-    # --- Renamer Commands ---
+            # --- Renamer Commands ---
 @app.on_message(filters.command("add") & filters.private)
 async def add_word(client, message):
     if len(message.command) < 2: return await message.reply_text("❌ Usage: <code>/add word</code>")
@@ -467,11 +458,32 @@ async def batch_done(client, message):
         batch_data[user_id]['prompt_msg_id'] = prompt.id
     else: await message.reply_text("Pehle files bhejein!")
 
-# --- Main Renamer Handler (Auto-Clean Added) ---
-@app.on_message(filters.private & (filters.document | filters.video | filters.audio))
+# --- 🔥 MAIN HANDLER (Smart Logic) ---
+@app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo))
 async def handle_files(client, message):
-    if message.photo: return 
+    
+    # 1. Check if it's a PHOTO or IMAGE DOCUMENT (For Watermark)
+    is_image = False
+    if message.photo:
+        is_image = True
+    elif message.document:
+        # Check MIME type
+        if message.document.mime_type and message.document.mime_type.startswith("image/"):
+            is_image = True
+            
+    # Agar Image hai, toh Watermark Menu dikhao
+    if is_image:
+        await message.reply_text(
+            "📸 <b>Image Detected!</b>\n\nIska kya karna hai?",
+            quote=True,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🖼 Set as Thumbnail", callback_data="save_as_thumb")],
+                [InlineKeyboardButton("💧 Set as Watermark", callback_data="save_as_wm")]
+            ])
+        )
+        return
 
+    # 2. Agar Video/Audio hai, toh Renamer Logic chalao
     global ACTIVE_TASKS
     user_id = message.from_user.id
     current_mode = user_modes.get(user_id, "renamer")
@@ -601,7 +613,7 @@ async def handle_text(client, message):
         except Exception as e: await message.reply_text(f"Error: {e}")
         finally:
             ACTIVE_TASKS -= 1
-            await status_msg.delete() # Bot ka status msg delete
+            await status_msg.delete()
 
 async def main():
     await asyncio.gather(web_server(), app.start())

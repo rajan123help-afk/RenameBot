@@ -151,8 +151,7 @@ async def progress(current, total, message, start_time, task_type):
                f"⏳ <b>ETA:</b> {time_left_str}")
         try: await message.edit(tmp)
         except: pass
-
-# --- Helper Function (Watermark Fixed PNG & New Positions) ---
+            # --- Helper Function (Watermark Fixed PNG & New Positions) ---
 def apply_watermark(base_image_url, watermark_img, position):
     response = requests.get(base_image_url)
     base = Image.open(io.BytesIO(response.content)).convert("RGBA")
@@ -181,7 +180,6 @@ def apply_watermark(base_image_url, watermark_img, position):
     elif position == "bottom_right":
         x = width - wm_width - padding
         y = height - wm_height - padding
-    # 🔥 NEW POSITIONS ADDED
     elif position == "top_center":
         x = (width - wm_width) // 2
         y = padding
@@ -194,10 +192,11 @@ def apply_watermark(base_image_url, watermark_img, position):
     transparent.paste(wm, (x, y), mask=wm)
     
     output = io.BytesIO()
-    transparent.save(output, format="PNG") # Fixed Black Background
+    transparent.save(output, format="PNG") 
     output.seek(0)
     return output
-    # ==========================================
+
+# ==========================================
 # 🔥 COMMANDS
 # ==========================================
 
@@ -298,7 +297,6 @@ async def position_menu(client, message):
     if user_id not in user_watermarks or not user_watermarks[user_id].get("image"):
         return await message.reply_text("❌ Pehle Watermark upload karein.")
     
-    # 🔥 UPDATED BUTTONS
     buttons = [
         [InlineKeyboardButton("↖️ Top Left", callback_data="pos_top_left"), InlineKeyboardButton("⬆️ Top Center", callback_data="pos_top_center"), InlineKeyboardButton("↗️ Top Right", callback_data="pos_top_right")],
         [InlineKeyboardButton("⏺️ Center", callback_data="pos_center")],
@@ -318,7 +316,7 @@ async def pos_callback(client, callback):
     await callback.answer(f"Position: {new_pos}")
     
     try:
-        demo_url = "https://image.tmdb.org/t/p/original/jXJxMcVoEuXzym3vFnjqDW4ifo6.jpg"
+        demo_url = "https://image.tmdb.org/t/p/w1280/jXJxMcVoEuXzym3vFnjqDW4ifo6.jpg"
         wm_img = user_watermarks[user_id]["image"]
         demo_bytes = apply_watermark(demo_url, wm_img, new_pos)
         
@@ -326,57 +324,35 @@ async def pos_callback(client, callback):
         await callback.message.delete()
     except Exception as e: await callback.message.reply_text(str(e))
 
-# --- Movie Search Command (Auto-Clean Added) ---
+# --- 🔥 MOVIE SEARCH (ASK POSTER/THUMBNAIL) ---
 @app.on_message(filters.command("search"))
-async def search_movie(client, message):
+async def search_movie_ask(client, message):
     if len(message.command) < 2: return await message.reply_text("❌ Usage: <code>/search Movie Name</code>")
     query = " ".join(message.command[1:])
     status_msg = await message.reply_text(f"🔎 <b>Searching:</b> <code>{query}</code>...")
-    user_id = message.from_user.id
     
     try:
         search_url = f"https://api.themoviedb.org/3/search/movie?api_key={TMDB_API_KEY}&query={query}"
         response = requests.get(search_url).json()
         if not response.get('results'):
             await status_msg.edit("❌ <b>Movie nahi mili!</b>")
+            await asyncio.sleep(3)
+            await status_msg.delete()
             return
 
         movie_id = response['results'][0]['id']
         movie_title = response['results'][0]['title']
         
-        images_url = f"https://api.themoviedb.org/3/movie/{movie_id}/images?api_key={TMDB_API_KEY}&include_image_language=en,null"
-        img_response = requests.get(images_url).json()
-        
-        images_list = img_response.get('backdrops', [])
-        if len(images_list) < 4: images_list.extend(img_response.get('posters', []))
-        
-        if not images_list: return await status_msg.edit("❌ Images nahi mile.")
-
-        media_group = []
-        count = 0
-        has_watermark = user_id in user_watermarks and user_watermarks[user_id].get("image")
-        if has_watermark:
-            await status_msg.edit("💧 <b>Processing...</b>")
-            wm_img = user_watermarks[user_id]["image"]
-            pos = user_watermarks[user_id]["position"]
-        
-        for img in images_list:
-            if count >= 4: break
-            full_url = f"https://image.tmdb.org/t/p/original{img['file_path']}"
-            if has_watermark:
-                processed_bytes = apply_watermark(full_url, wm_img, pos)
-                media_group.append(InputMediaPhoto(processed_bytes, caption=f"🎬 <b>{movie_title}</b>"))
-            else:
-                media_group.append(InputMediaPhoto(full_url, caption=f"🎬 <b>{movie_title}</b>"))
-            count += 1
-            
-        await message.reply_media_group(media_group)
-        
-        # 🔥 AUTO-CLEAN LOGIC: Sab kuch delete karo, sirf result chhor do
-        try:
-            await status_msg.delete() # Bot ka "Searching" delete
-            await message.delete()    # User ka "/search" delete
-        except: pass
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎬 Posters (Vertical)", callback_data=f"search_type_poster|{movie_id}")],
+            [InlineKeyboardButton("🖼 Thumbnails (Horizontal)", callback_data=f"search_type_thumb|{movie_id}")]
+        ])
+        await status_msg.delete()
+        await message.reply_text(
+            f"🍿 <b>Found:</b> {movie_title}\n\nKya chahiye?",
+            reply_markup=buttons,
+            quote=True
+        )
 
     except Exception as e:
         await status_msg.edit(f"❌ Error: {e}")
@@ -384,7 +360,65 @@ async def search_movie(client, message):
         try: await status_msg.delete()
         except: pass
 
-# --- Renamer Commands ---
+@app.on_callback_query(filters.regex("search_type_"))
+async def search_image_callback(client, callback):
+    await callback.answer()
+    user_id = callback.from_user.id
+    data_parts = callback.data.split("|")
+    img_type = data_parts[0].replace("search_type_", "")
+    movie_id = data_parts[1]
+
+    status_msg = await callback.message.edit_text("⏳ <b>Fetching Images...</b>")
+    
+    try:
+        details_url = f"https://api.themoviedb.org/3/movie/{movie_id}?api_key={TMDB_API_KEY}"
+        details_resp = requests.get(details_url).json()
+        movie_title = details_resp.get("title", "Movie")
+
+        images_url = f"https://api.themoviedb.org/3/movie/{movie_id}/images?api_key={TMDB_API_KEY}&include_image_language=en,null"
+        img_response = requests.get(images_url).json()
+        
+        if img_type == "poster":
+            images_list = img_response.get('posters', [])
+        else:
+            images_list = img_response.get('backdrops', [])
+            
+        if not images_list:
+            await status_msg.edit(f"❌ No {img_type}s found.")
+            await asyncio.sleep(3)
+            await status_msg.delete()
+            return
+
+        media_group = []
+        count = 0
+        has_watermark = user_id in user_watermarks and user_watermarks[user_id].get("image")
+        if has_watermark:
+            await status_msg.edit("💧 <b>Processing (Fast Mode)...</b>")
+            wm_img = user_watermarks[user_id]["image"]
+            pos = user_watermarks[user_id]["position"]
+        
+        for img in images_list:
+            if count >= 4: break
+            full_url = f"https://image.tmdb.org/t/p/w1280{img['file_path']}"
+            
+            if has_watermark:
+                processed_bytes = apply_watermark(full_url, wm_img, pos)
+                media_group.append(InputMediaPhoto(processed_bytes, caption=f"🎬 <b>{movie_title}</b>"))
+            else:
+                media_group.append(InputMediaPhoto(full_url, caption=f"🎬 <b>{movie_title}</b>"))
+            count += 1
+            
+        await callback.message.reply_media_group(media_group)
+        
+        try: await status_msg.delete()
+        except: pass
+
+    except Exception as e:
+        await status_msg.edit(f"❌ Error: {e}")
+        await asyncio.sleep(5)
+        try: await status_msg.delete()
+        except: pass
+    # --- Renamer Commands ---
 @app.on_message(filters.command("add") & filters.private)
 async def add_word(client, message):
     if len(message.command) < 2: return await message.reply_text("❌ Usage: <code>/add word</code>")
@@ -458,7 +492,7 @@ async def handle_files(client, message):
             caption += f"<blockquote><code>Powered By ➥ {CREDIT_NAME}</code></blockquote>"
             
             await message.reply_cached_media(media.file_id, caption=caption)
-            try: await message.delete() # User input delete
+            try: await message.delete() 
             except: pass
         except Exception as e: await message.reply_text(f"❌ Error: {e}")
         return
@@ -560,8 +594,8 @@ async def handle_text(client, message):
             os.remove(dl_path)
             # 🔥 AUTO-CLEAN: File bhejne ke baad original msg aur "Wait" delete
             try:
-                await user_task['file_msg'].delete() # User ki file delete
-                await message.delete() # User ka naya naam msg delete
+                await user_task['file_msg'].delete() 
+                await message.delete() 
             except: pass
 
         except Exception as e: await message.reply_text(f"Error: {e}")
@@ -577,3 +611,4 @@ if __name__ == "__main__":
     print("All-in-One Bot Started!")
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+    

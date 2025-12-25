@@ -190,8 +190,8 @@ def apply_watermark(base_image_url, watermark_img, position):
     transparent.convert("RGB").save(output, format="JPEG", quality=95)
     output.seek(0)
     return output
-    # ==========================================
-# 🔥 COMMANDS
+        # ==========================================
+# 🔥 COMMANDS (Fixed Thumbnail & Watermark)
 # ==========================================
 
 @app.on_message(filters.command("start") & filters.private)
@@ -201,7 +201,7 @@ async def start_msg(client, message):
         "🤖 <b>Filmy Flip All-in-One Bot</b>\n\n"
         "📁 <b>Renamer:</b> <code>/rename</code>, <code>/caption</code>\n"
         "🔗 <b>Link Convert:</b> <code>/link</code>\n"
-        "🎬 <b>Poster:</b> <code>/search MovieName</code> (Thumbnail Size)\n"
+        "🎬 <b>Poster:</b> <code>/search MovieName</code>\n"
         "💧 <b>Watermark:</b> <code>/watermark</code>, <code>/position</code>\n"
         "⚙️ <b>Settings:</b> <code>/add</code>, <code>/del</code>, <code>/words</code>"
     )
@@ -228,41 +228,61 @@ async def wm_callback(client, callback):
         await callback.message.edit_text("❌ <b>Watermark Deleted.</b>")
     elif data == "wm_upload_info":
         await callback.answer()
-        await callback.message.reply_text("📤 <b>Apni Logo (PNG) bhejein.</b>")
+        await callback.message.reply_text("📤 <b>Ab apni Logo (PNG/JPG) bhejein.</b>")
 
+# --- 🔥 PHOTO HANDLER (FIXED) ---
 @app.on_message(filters.photo & filters.private)
 async def handle_photo(client, message):
-    user_id = message.from_user.id
-    btn = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🖼 As Thumbnail", callback_data="save_as_thumb")],
-        [InlineKeyboardButton("💧 As Watermark", callback_data="save_as_wm")]
-    ])
-    await message.reply_text("🤔 <b>Is photo ka kya karein?</b>", reply_markup=btn)
+    # User ko option do ki is photo ka kya karna hai
+    await message.reply_text(
+        "📸 <b>Photo Received!</b>\n\nIs photo ko kaise use karna hai?",
+        quote=True, # Ye zaroori hai link banaye rakhne ke liye
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🖼 Set as Thumbnail", callback_data="save_as_thumb")],
+            [InlineKeyboardButton("💧 Set as Watermark", callback_data="save_as_wm")]
+        ])
+    )
 
 @app.on_callback_query(filters.regex("save_as_"))
 async def save_photo_callback(client, callback):
+    # 1. Turant Answer karo taaki loading circle hate
+    await callback.answer()
+    
     data = callback.data
     user_id = callback.from_user.id
-    message = callback.message.reply_to_message
     
-    if not message or not message.photo:
-        return await callback.answer("Error: Photo nahi mili.")
-    
+    # 2. Original Photo dhundo (Jiske reply mein button tha)
+    original_msg = callback.message.reply_to_message
+    if not original_msg or not original_msg.photo:
+        await callback.message.edit_text("❌ <b>Error:</b> Photo nahi mili. Kripya photo dobara bhejein.")
+        return
+
+    # 3. Status update
     status_msg = await callback.message.edit_text("⏳ <b>Saving...</b>")
-    
-    if data == "save_as_thumb":
-        path = f"thumbnails/{user_id}.jpg"
-        await client.download_media(message, file_name=path)
-        await status_msg.edit("✅ <b>Thumbnail Saved!</b> (For Rename)")
+
+    try:
+        if data == "save_as_thumb":
+            path = f"thumbnails/{user_id}.jpg"
+            if not os.path.exists("thumbnails"): os.makedirs("thumbnails")
+            
+            await client.download_media(original_msg, file_name=path)
+            await status_msg.edit("✅ <b>Thumbnail Saved!</b>\n(Ab file rename karne par ye photo lagegi).")
         
-    elif data == "save_as_wm":
-        img_path = await client.download_media(message, file_name=f"wm_{user_id}.png")
-        pil_img = Image.open(img_path).convert("RGBA")
-        if user_id not in user_watermarks: user_watermarks[user_id] = {}
-        user_watermarks[user_id]["image"] = pil_img
-        user_watermarks[user_id]["position"] = user_watermarks[user_id].get("position", "center")
-        os.remove(img_path)
-        await status_msg.edit("✅ <b>Watermark Saved!</b> (For Posters)\nUse <code>/position</code> to adjust.")
+        elif data == "save_as_wm":
+            path = f"wm_{user_id}.png"
+            await client.download_media(original_msg, file_name=path)
+            
+            # Memory mein load karo
+            img = Image.open(path).convert("RGBA")
+            if user_id not in user_watermarks: user_watermarks[user_id] = {}
+            user_watermarks[user_id]["image"] = img
+            user_watermarks[user_id]["position"] = user_watermarks[user_id].get("position", "center")
+            
+            os.remove(path) # File delete kar do, memory mein aa gayi
+            await status_msg.edit("✅ <b>Watermark Saved!</b>\n(Ab /search par ye logo lagega).\n\n📍 <b>Position set karein:</b> /position")
+
+    except Exception as e:
+        await status_msg.edit(f"❌ Error: {e}")
 
 @app.on_message(filters.command("position"))
 async def position_menu(client, message):
@@ -281,19 +301,24 @@ async def position_menu(client, message):
 async def pos_callback(client, callback):
     user_id = callback.from_user.id
     new_pos = callback.data.replace("pos_", "")
+    
+    if user_id not in user_watermarks:
+        return await callback.answer("Watermark missing!", show_alert=True)
+
     user_watermarks[user_id]["position"] = new_pos
     await callback.answer(f"Position: {new_pos}")
     
     try:
-        # Demo ke liye Backdrop (Thumbnail style) use kar rahe hain
-        demo_url = "https://image.tmdb.org/t/p/original/jXJxMcVoEuXzym3vFnjqDW4ifo6.jpg" 
+        # Demo ke liye Backdrop use kar rahe hain (Thumbnail Size)
+        demo_url = "https://image.tmdb.org/t/p/original/jXJxMcVoEuXzym3vFnjqDW4ifo6.jpg"
         wm_img = user_watermarks[user_id]["image"]
         demo_bytes = apply_watermark(demo_url, wm_img, new_pos)
+        
         await callback.message.reply_photo(photo=demo_bytes, caption=f"✅ <b>Thumbnail Demo:</b> {new_pos}")
         await callback.message.delete()
     except Exception as e: await callback.message.reply_text(str(e))
 
-# --- Movie Search Command (FIXED FOR THUMBNAILS) ---
+# --- Movie Search Command (Thumbnail Size) ---
 @app.on_message(filters.command("search"))
 async def search_movie(client, message):
     if len(message.command) < 2: return await message.reply_text("❌ Usage: <code>/search Movie Name</code>")
@@ -314,10 +339,8 @@ async def search_movie(client, message):
         images_url = f"https://api.themoviedb.org/3/movie/{movie_id}/images?api_key={TMDB_API_KEY}&include_image_language=en,null"
         img_response = requests.get(images_url).json()
         
-        # 🔥 CHANGE IS HERE: Pehle 'backdrops' (Thumbnails) dhundho
+        # 🔥 Backdrops (Thumbnails) First
         images_list = img_response.get('backdrops', [])
-        
-        # Agar Backdrops nahi mile, tabhi Posters lo
         if len(images_list) < 4: images_list.extend(img_response.get('posters', []))
         
         if not images_list: return await status_msg.edit("❌ Images nahi mile.")
@@ -396,6 +419,7 @@ async def batch_done(client, message):
 # --- Main Renamer Handler ---
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio))
 async def handle_files(client, message):
+    # Photo ko ignore karo (Upas handle ho gaya hai)
     if message.photo: return 
 
     global ACTIVE_TASKS
@@ -529,4 +553,4 @@ if __name__ == "__main__":
     print("All-in-One Bot Started!")
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
-        
+            

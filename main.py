@@ -197,7 +197,7 @@ def apply_watermark(base_image_url, watermark_img, position):
     output.seek(0)
     return output
     # ==========================================
-# 🔥 COMMANDS & SMART LOGIC
+# 🔥 COMMANDS & STRICT TEXT LOGIC
 # ==========================================
 
 @app.on_message(filters.command("start") & filters.private)
@@ -392,7 +392,7 @@ async def ask_count_callback(client, callback):
         reply_markup=buttons
     )
 
-# --- MOVIE SEARCH 3: FINAL SENDING (TEXT PRIORITY) ---
+# --- MOVIE SEARCH 3: FINAL SENDING (STRICT TITLE MODE) ---
 @app.on_callback_query(filters.regex("^final_img"))
 async def final_image_callback(client, callback):
     await callback.answer()
@@ -402,14 +402,14 @@ async def final_image_callback(client, callback):
     movie_id = data[2]
     count_needed = int(data[3])
 
-    status_msg = await callback.message.edit_text(f"⏳ <b>Fetching {count_needed} Images with Text...</b>")
+    status_msg = await callback.message.edit_text(f"⏳ <b>Fetching {count_needed} Titled Images...</b>")
     
     try:
         details_url = f"https://api.themoviedb.org/3/movie/{movie_id}?api_key={TMDB_API_KEY}"
         details_resp = requests.get(details_url).json()
         movie_title = details_resp.get("title", "Movie")
 
-        # 🔥 UPDATE: Added 'hi' (Hindi) support for Indian Movies
+        # 🔥 UPDATE: Asking for ALL languages to filter manually
         images_url = f"https://api.themoviedb.org/3/movie/{movie_id}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi,null"
         img_response = requests.get(images_url).json()
         
@@ -425,16 +425,23 @@ async def final_image_callback(client, callback):
             await status_msg.delete()
             return
 
-        # 🔥 LOGIC: Pehle Text wali (English/Hindi) images dhundo, fir bina text wali.
+        # 🔥 STRICT LOGIC:
+        # 1. 'en' (English) = Best for Titles
+        # 2. 'hi' (Hindi) = Good for Indian movies
+        # 3. 'null' = No Text (Avoid if possible)
+
         text_images = [img for img in raw_list if img.get('iso_639_1') in ['en', 'hi']]
         clean_images = [img for img in raw_list if img.get('iso_639_1') is None]
 
-        # Sort Best Rated First
+        # Sort by Rating
         text_images.sort(key=lambda x: x.get('vote_average', 0), reverse=True)
-        clean_images.sort(key=lambda x: x.get('vote_average', 0), reverse=True)
 
-        # Final List: Text First -> Clean Second
-        final_list = text_images + clean_images
+        # ✅ AGAR TEXT IMAGE HAI, TOH SIRF WAHI DIKHAO
+        if text_images:
+            final_list = text_images
+        else:
+            # Agar text wali ek bhi nahi mili, tab majboori mein clean wali dikhao
+            final_list = clean_images
         
         if not final_list: final_list = raw_list
 
@@ -712,4 +719,4 @@ if __name__ == "__main__":
     print("All-in-One Bot Started!")
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
-                                
+                     

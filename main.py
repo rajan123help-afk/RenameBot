@@ -197,7 +197,7 @@ def apply_watermark(base_image_url, watermark_img, position):
     output.seek(0)
     return output
     # ==========================================
-# 🔥 COMMANDS & STRICT TEXT LOGIC
+# 🔥 COMMANDS & SEASON SUPPORT LOGIC
 # ==========================================
 
 @app.on_message(filters.command("start") & filters.private)
@@ -205,9 +205,9 @@ async def start_msg(client, message):
     await message.reply_text(
         f"👋 <b>Hello {message.from_user.first_name}!</b>\n\n"
         "🤖 <b>Filmy Flip All-in-One Bot</b>\n\n"
+        "🎬 <b>Movies:</b> <code>/search MovieName</code>\n"
+        "📺 <b>Series:</b> <code>/series Name S1</code>\n"
         "📁 <b>Renamer:</b> <code>/rename</code>, <code>/caption</code>\n"
-        "🔗 <b>Link Convert:</b> <code>/link</code>\n"
-        "🎬 <b>Poster:</b> <code>/search MovieName</code>\n"
         "💧 <b>Watermark:</b> <code>/watermark</code>, <code>/position</code>\n"
         "⚙️ <b>Settings:</b> <code>/add</code>, <code>/del</code>, <code>/words</code>"
     )
@@ -327,7 +327,7 @@ async def pos_callback(client, callback):
         await callback.message.delete() 
     except Exception as e: await callback.message.reply_text(str(e))
 
-# --- MOVIE SEARCH 1: TYPE SELECTION ---
+# --- 1️⃣ MOVIE SEARCH COMMAND ---
 @app.on_message(filters.command("search"))
 async def search_movie_ask(client, message):
     if len(message.command) < 2: 
@@ -339,8 +339,7 @@ async def search_movie_ask(client, message):
         return
 
     query = " ".join(message.command[1:])
-    status_msg = await message.reply_text(f"🔎 <b>Searching:</b> <code>{query}</code>...")
-    
+    status_msg = await message.reply_text(f"🔎 <b>Searching Movie:</b> <code>{query}</code>...")
     try: await message.delete()
     except: pass
     
@@ -356,15 +355,13 @@ async def search_movie_ask(client, message):
         movie_id = response['results'][0]['id']
         movie_title = response['results'][0]['title']
         
+        # '0' means no season (Movie)
         buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎬 Posters (Vertical)", callback_data=f"ask_count|poster|{movie_id}")],
-            [InlineKeyboardButton("🖼 Thumbnails (Horizontal)", callback_data=f"ask_count|thumb|{movie_id}")]
+            [InlineKeyboardButton("🎬 Posters", callback_data=f"ask_count|poster|{movie_id}|movie|0")],
+            [InlineKeyboardButton("🖼 Thumbnails", callback_data=f"ask_count|thumb|{movie_id}|movie|0")]
         ])
         
-        await status_msg.edit(
-            f"🍿 <b>Found:</b> {movie_title}\n\nKya chahiye?",
-            reply_markup=buttons
-        )
+        await status_msg.edit(f"🍿 <b>Found:</b> {movie_title}\n\nKya chahiye?", reply_markup=buttons)
 
     except Exception as e:
         await status_msg.edit(f"❌ Error: {e}")
@@ -372,45 +369,121 @@ async def search_movie_ask(client, message):
         try: await status_msg.delete()
         except: pass
 
-# --- MOVIE SEARCH 2: COUNT SELECTION ---
+# --- 2️⃣ WEBSERIES SEARCH COMMAND (WITH SEASON DETECTION) ---
+@app.on_message(filters.command("series"))
+async def search_series_ask(client, message):
+    if len(message.command) < 2: 
+        msg = await message.reply_text("❌ Usage: <code>/series Name S1</code>")
+        await asyncio.sleep(3)
+        await msg.delete()
+        try: await message.delete()
+        except: pass
+        return
+
+    full_query = " ".join(message.command[1:])
+    
+    # 🔥 DETECT SEASON (e.g., "Mirzapur S2" or "Mirzapur Season 2")
+    season_match = re.search(r"(?:s|season)\s*(\d+)", full_query, re.IGNORECASE)
+    season_number = "0" # Default 0 means Main Show
+    clean_query = full_query
+    
+    if season_match:
+        season_number = season_match.group(1)
+        # Remove 'S2' from name to search properly
+        clean_query = re.sub(r"(?:s|season)\s*(\d+)", "", full_query, flags=re.IGNORECASE).strip()
+
+    status_msg = await message.reply_text(f"📺 <b>Searching:</b> <code>{clean_query}</code> (Season: {season_number if season_number != '0' else 'All'})...")
+    try: await message.delete()
+    except: pass
+    
+    try:
+        # Search using Clean Name
+        search_url = f"https://api.themoviedb.org/3/search/tv?api_key={TMDB_API_KEY}&query={clean_query}"
+        response = requests.get(search_url).json()
+        if not response.get('results'):
+            await status_msg.edit("❌ <b>Series nahi mili!</b>")
+            await asyncio.sleep(3)
+            await status_msg.delete()
+            return
+
+        series_id = response['results'][0]['id']
+        series_name = response['results'][0]['name']
+        
+        display_text = f"📺 <b>Found:</b> {series_name}"
+        if season_number != "0":
+            display_text += f"\n💿 <b>Season:</b> {season_number}"
+
+        # Pass season_number in callback
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎬 Posters", callback_data=f"ask_count|poster|{series_id}|tv|{season_number}")],
+            [InlineKeyboardButton("🖼 Thumbnails", callback_data=f"ask_count|thumb|{series_id}|tv|{season_number}")]
+        ])
+        
+        await status_msg.edit(f"{display_text}\n\nKya chahiye?", reply_markup=buttons)
+
+    except Exception as e:
+        await status_msg.edit(f"❌ Error: {e}")
+        await asyncio.sleep(5)
+        try: await status_msg.delete()
+        except: pass
+
+# --- COUNT SELECTION ---
 @app.on_callback_query(filters.regex("^ask_count"))
 async def ask_count_callback(client, callback):
     await callback.answer()
-    data = callback.data.split("|") # ask_count | type | id
+    data = callback.data.split("|") # ask_count | type | id | media_type | season
     img_type = data[1]
-    movie_id = data[2]
+    media_id = data[2]
+    media_type = data[3]
+    season = data[4]
     
+    # Pass all info forward
     buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton("1️⃣", callback_data=f"final_img|{img_type}|{movie_id}|1"),
-         InlineKeyboardButton("2️⃣", callback_data=f"final_img|{img_type}|{movie_id}|2")],
-        [InlineKeyboardButton("3️⃣", callback_data=f"final_img|{img_type}|{movie_id}|3"),
-         InlineKeyboardButton("4️⃣", callback_data=f"final_img|{img_type}|{movie_id}|4")]
+        [InlineKeyboardButton("1️⃣", callback_data=f"final_img|{img_type}|{media_id}|1|{media_type}|{season}"),
+         InlineKeyboardButton("2️⃣", callback_data=f"final_img|{img_type}|{media_id}|2|{media_type}|{season}")],
+        [InlineKeyboardButton("3️⃣", callback_data=f"final_img|{img_type}|{media_id}|3|{media_type}|{season}"),
+         InlineKeyboardButton("4️⃣", callback_data=f"final_img|{img_type}|{media_id}|4|{media_type}|{season}")]
     ])
     
-    await callback.message.edit_text(
-        f"🔢 <b>Kitni photos chahiye?</b>\n(Type: {img_type.title()})",
-        reply_markup=buttons
-    )
+    title_xtra = f"(Season {season})" if season != "0" else ""
+    await callback.message.edit_text(f"🔢 <b>Kitni photos chahiye?</b>\n{title_xtra}", reply_markup=buttons)
 
-# --- MOVIE SEARCH 3: FINAL SENDING (STRICT TITLE MODE) ---
+# --- FINAL SENDING (Supports Movie, TV & Seasons) ---
 @app.on_callback_query(filters.regex("^final_img"))
 async def final_image_callback(client, callback):
     await callback.answer()
     user_id = callback.from_user.id
-    data = callback.data.split("|") # final_img | type | id | count
+    data = callback.data.split("|") # final_img | type | id | count | media_type | season
     img_type = data[1]
-    movie_id = data[2]
+    media_id = data[2]
     count_needed = int(data[3])
+    media_type = data[4]
+    season = data[5]
 
-    status_msg = await callback.message.edit_text(f"⏳ <b>Fetching {count_needed} Titled Images...</b>")
+    status_msg = await callback.message.edit_text(f"⏳ <b>Fetching Images...</b>")
     
     try:
-        details_url = f"https://api.themoviedb.org/3/movie/{movie_id}?api_key={TMDB_API_KEY}"
-        details_resp = requests.get(details_url).json()
-        movie_title = details_resp.get("title", "Movie")
+        # 1. Get Title
+        if media_type == "movie":
+            details_url = f"https://api.themoviedb.org/3/movie/{media_id}?api_key={TMDB_API_KEY}"
+            details_resp = requests.get(details_url).json()
+            media_title = details_resp.get("title")
+        else:
+            # TV Show
+            details_url = f"https://api.themoviedb.org/3/tv/{media_id}?api_key={TMDB_API_KEY}"
+            details_resp = requests.get(details_url).json()
+            media_title = details_resp.get("name")
+            if season != "0":
+                media_title += f" S{season}"
 
-        # 🔥 UPDATE: Asking for ALL languages to filter manually
-        images_url = f"https://api.themoviedb.org/3/movie/{movie_id}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi,null"
+        # 2. Get Images (Dynamic URL for Season)
+        if media_type == "tv" and season != "0":
+            # Specific Season API
+            images_url = f"https://api.themoviedb.org/3/tv/{media_id}/season/{season}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi,kn,te,ta,ml,null"
+        else:
+            # Standard Movie or Main TV Show API
+            images_url = f"https://api.themoviedb.org/3/{media_type}/{media_id}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi,kn,te,ta,ml,null"
+        
         img_response = requests.get(images_url).json()
         
         raw_list = []
@@ -420,27 +493,21 @@ async def final_image_callback(client, callback):
             raw_list = img_response.get('backdrops', [])
 
         if not raw_list:
-            await status_msg.edit(f"❌ No {img_type}s found.")
+            await status_msg.edit(f"❌ No {img_type}s found for this Season.")
             await asyncio.sleep(3)
             await status_msg.delete()
             return
 
-        # 🔥 STRICT LOGIC:
-        # 1. 'en' (English) = Best for Titles
-        # 2. 'hi' (Hindi) = Good for Indian movies
-        # 3. 'null' = No Text (Avoid if possible)
-
-        text_images = [img for img in raw_list if img.get('iso_639_1') in ['en', 'hi']]
+        # 🔥 TEXT PRIORITY LOGIC (Same as before)
+        titled_images = [img for img in raw_list if img.get('iso_639_1') is not None]
         clean_images = [img for img in raw_list if img.get('iso_639_1') is None]
 
-        # Sort by Rating
-        text_images.sort(key=lambda x: x.get('vote_average', 0), reverse=True)
+        titled_images.sort(key=lambda x: x.get('vote_average', 0), reverse=True)
+        clean_images.sort(key=lambda x: x.get('vote_average', 0), reverse=True)
 
-        # ✅ AGAR TEXT IMAGE HAI, TOH SIRF WAHI DIKHAO
-        if text_images:
-            final_list = text_images
+        if len(titled_images) > 0:
+            final_list = titled_images
         else:
-            # Agar text wali ek bhi nahi mili, tab majboori mein clean wali dikhao
             final_list = clean_images
         
         if not final_list: final_list = raw_list
@@ -459,13 +526,12 @@ async def final_image_callback(client, callback):
             
             if has_watermark:
                 processed_bytes = apply_watermark(full_url, wm_img, pos)
-                media_group.append(InputMediaPhoto(processed_bytes, caption=f"🎬 <b>{movie_title}</b>"))
+                media_group.append(InputMediaPhoto(processed_bytes, caption=f"🎬 <b>{media_title}</b>"))
             else:
-                media_group.append(InputMediaPhoto(full_url, caption=f"🎬 <b>{movie_title}</b>"))
+                media_group.append(InputMediaPhoto(full_url, caption=f"🎬 <b>{media_title}</b>"))
             current_count += 1
             
         await callback.message.reply_media_group(media_group)
-        
         try: await status_msg.delete()
         except: pass
 
@@ -719,4 +785,4 @@ if __name__ == "__main__":
     print("All-in-One Bot Started!")
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
-                     
+    

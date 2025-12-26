@@ -152,14 +152,16 @@ async def progress(current, total, message, start_time, task_type):
         try: await message.edit(tmp)
         except: pass
 
-# --- Helper Function (Watermark Fixed PNG) ---
+# --- Helper Function (Watermark Fixed PNG + BIG SIZE 50%) ---
 def apply_watermark(base_image_url, watermark_img, position):
     response = requests.get(base_image_url)
     base = Image.open(io.BytesIO(response.content)).convert("RGBA")
     wm = watermark_img.copy().convert("RGBA")
     
     width, height = base.size
-    wm_width = int(width * 0.3)
+    # 🔥 SIZE UPDATED: 0.5 = 50% of Image Width (Bada Logo)
+    wm_width = int(width * 0.5)
+    
     aspect_ratio = wm_width / float(wm.size[0])
     wm_height = int(float(wm.size[1]) * float(aspect_ratio))
     wm = wm.resize((wm_width, wm_height), Image.Resampling.LANCZOS)
@@ -197,7 +199,7 @@ def apply_watermark(base_image_url, watermark_img, position):
     output.seek(0)
     return output
     # ==========================================
-# 🔥 COMMANDS & SMART SERIES LOGIC
+# 🔥 COMMANDS & SMART LOGIC
 # ==========================================
 
 @app.on_message(filters.command("start") & filters.private)
@@ -397,18 +399,16 @@ async def search_series_ask(client, message):
     except: pass
     
     try:
-        # 🔥 Better Search Logic: Use params for special chars
         search_url = f"https://api.themoviedb.org/3/search/tv"
         params = {'api_key': TMDB_API_KEY, 'query': clean_query}
         response = requests.get(search_url, params=params).json()
         
-        # Fallback: Agar clean query se na mile, to Full Query try karo
         if not response.get('results'):
-            params['query'] = full_query
+            params['query'] = full_query # Try full query
             response = requests.get(search_url, params=params).json()
 
         if not response.get('results'):
-            await status_msg.edit("❌ <b>Series nahi mili!</b>\nSpelling check karein.")
+            await status_msg.edit("❌ <b>Series nahi mili!</b>")
             await asyncio.sleep(3)
             await status_msg.delete()
             return
@@ -452,7 +452,7 @@ async def ask_count_callback(client, callback):
     
     await callback.message.edit_text(f"🔢 <b>Kitni photos chahiye?</b>", reply_markup=buttons)
 
-# --- FINAL SENDING (SMART FALLBACK) ---
+# --- FINAL SENDING (SMART FALLBACK & TITLE PRIORITY) ---
 @app.on_callback_query(filters.regex("^final_img"))
 async def final_image_callback(client, callback):
     await callback.answer()
@@ -489,7 +489,6 @@ async def final_image_callback(client, callback):
         
         img_response = requests.get(images_url).json()
         
-        # Check raw list
         raw_list = []
         if img_type == "poster": raw_list = img_response.get('posters', [])
         else: raw_list = img_response.get('backdrops', [])
@@ -714,7 +713,6 @@ async def handle_text(client, message):
                 encoded = base64.b64encode(start_code.encode("utf-8")).decode("utf-8")
                 final_link = f"{BLOGGER_URL}?data={encoded}"
                 await message.reply_text(f"✅ <b>Link:</b>\n<code>{final_link}</code>", disable_web_page_preview=True)
-                # 🔥 Link Generate karne ke baad Input link delete
                 try: await message.delete() 
                 except: pass
             except: await message.reply_text("❌ Error.")
@@ -778,10 +776,9 @@ async def handle_text(client, message):
                 await client.send_document(user_id, dl_path, caption=caption, thumb=thumb_path, force_document=True, progress=progress, progress_args=(status_msg, time.time(), "📤 Uploading"))
             
             os.remove(dl_path)
-            # 🔥 AUTO-CLEAN: File bhejne ke baad original File aur "Name" command delete
             try:
-                await user_task['file_msg'].delete() # Original File delete
-                await message.delete() # Name command delete
+                await user_task['file_msg'].delete() 
+                await message.delete() 
             except: pass
 
         except Exception as e: await message.reply_text(f"Error: {e}")

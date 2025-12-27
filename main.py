@@ -608,40 +608,132 @@ async def set_caption_mode(client, message):
     await asyncio.sleep(3)
     await msg.delete()
 
+# --- 🔥 NEW: CANCEL COMMAND ---
+@app.on_message(filters.command("cancel") & filters.private)
+async def cancel_task(client, message):
+    user_id = message.from_user.id
+    # Reset Batch Data
+    if user_id in batch_data:
+        del batch_data[user_id]
+    # Reset User Data
+    if user_id in user_data:
+        del user_data[user_id]
+    
+    await message.reply_text("❌ <b>Task Cancelled!</b>\nProcess rok diya gaya hai.")
+
 # --- Batch Mode ---
 @app.on_message(filters.command("batch") & filters.private)
 async def batch_start(client, message):
     user_modes[message.from_user.id] = "renamer"
-    batch_data[message.from_user.id] = {'status': 'collecting', 'files': []}
+    batch_data[message.from_user.id] = {'status': 'collecting', 'files': [], 'base_name': None}
     try: await message.delete()
     except: pass
-    await message.reply_text("🚀 <b>Batch Mode ON!</b> Files bhejein, fir <b>/done</b> karein.")
+    await message.reply_text("🚀 <b>Batch Mode ON!</b>\n\n1. Files forward karein.\n2. Fir <b>/done</b> dabayein.\n3. Rokne ke liye <b>/cancel</b>.")
 
 @app.on_message(filters.command("done") & filters.private)
 async def batch_done(client, message):
     user_id = message.from_user.id
     try: await message.delete()
     except: pass
+    
     if user_id in batch_data and batch_data[user_id]['files']:
-        batch_data[user_id]['status'] = 'naming'
-        prompt = await message.reply_text("✅ Files mili. Ab <b>Series Name</b> bhejein.")
-        batch_data[user_id]['prompt_msg_id'] = prompt.id
-    else: await message.reply_text("Pehle files bhejein!")
+        batch_data[user_id]['status'] = 'waiting_name'
+        # Ask for Name
+        await message.reply_text(
+            f"✅ <b>{len(batch_data[user_id]['files'])} Files Selected.</b>\n\n"
+            "Ab <b>Series/Movie ka Name</b> bhejein:"
+        )
+    else: 
+        await message.reply_text("⚠️ Pehle kuch files bhejein!")
+
+# --- 🔥 BATCH CALLBACK HANDLER (VIDEO/FILE) ---
+@app.on_callback_query(filters.regex("^batch_mode_"))
+async def batch_process_start(client, callback):
+    global ACTIVE_TASKS
+    user_id = callback.from_user.id
+    mode = callback.data.replace("batch_mode_", "") # video or document
+    
+    if user_id not in batch_data:
+        return await callback.message.edit_text("❌ Batch expire ho gaya. Phir se karein.")
+
+    files_list = batch_data[user_id]['files']
+    base_name = batch_data[user_id]['base_name']
+    total_files = len(files_list)
+    
+    status_msg = await callback.message.edit_text(f"⏳ <b>Starting Batch... (0/{total_files})</b>")
+    ACTIVE_TASKS += 1
+
+    try:
+        processed_count = 0
+        for idx, msg in enumerate(files_list):
+            # Check if user cancelled
+            if user_id not in batch_data:
+                await status_msg.edit("❌ <b>Batch Cancelled.</b>")
+                break
+
+            media = msg.document or msg.video or msg.audio
+            if not media: continue
+
+            # Update Status
+            try: await status_msg.edit(f"♻️ <b>Processing:</b> {processed_count + 1}/{total_files}\n📂 {media.file_name}")
+            except: pass
+
+            ext = get_extension(media.file_name)
+            s_num, e_num = get_media_info(media.file_name or "")
+            
+            # Smart Naming Logic
+            if s_num and e_num:
+                new_name = f"{base_name} - S{s_num}E{e_num}{ext}"
+            elif e_num:
+                new_name = f"{base_name} - E{e_num}{ext}"
+            else:
+                # Agar episode number na mile, to 1, 2, 3... laga do
+                new_name = f"{base_name} - Part {idx+1}{ext}"
+
+            if not new_name.endswith(ext): new_name += ext
+            
+            # 1. Download
+            dl_path = await client.download_media(media, f"downloads/{new_name}")
+            
+            # 2. Attributes
+            w, h, dur = get_video_attributes(dl_path)
+            file_size = humanbytes(os.path.getsize(dl_path))
+            
+            caption = f"<b>{new_name}</b>\n\n<blockquote><code>File Size ♻️ ➥ {file_size}</code></blockquote>\n"
+            if dur > 0: caption += f"<blockquote><code>Duration ⏰ ➥ {get_duration_str(dur)}</code></blockquote>\n"
+            caption += f"<blockquote><code>Powered By ➥ {CREDIT_NAME}</code></blockquote>"
+
+            # 3. Upload (As per Mode)
+            thumb_path = f"thumbnails/{user_id}.jpg"
+            if not os.path.exists(thumb_path): thumb_path = None
+
+            if mode == 'video':
+                await client.send_video(user_id, dl_path, caption=caption, thumb=thumb_path, duration=dur, width=w, height=h, supports_streaming=True)
+            else:
+                await client.send_document(user_id, dl_path, caption=caption, thumb=thumb_path, force_document=True)
+            
+            # 4. Cleanup
+            os.remove(dl_path)
+            processed_count += 1
+        
+        await status_msg.edit(f"✅ <b>Batch Completed!</b>\nTotal: {processed_count} files sent.")
+
+    except Exception as e:
+        await status_msg.edit(f"❌ Error: {e}")
+    finally:
+        ACTIVE_TASKS -= 1
+        if user_id in batch_data: del batch_data[user_id]
+
 
 # --- 🔥 MAIN HANDLER (Smart Logic & Cleanup) ---
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo))
 async def handle_files(client, message):
     
-    # 1. Check if it's a PHOTO or IMAGE DOCUMENT (For Watermark)
+    # 1. Check if it's a PHOTO (For Watermark)
     is_image = False
-    if message.photo:
-        is_image = True
-    elif message.document:
-        # Check MIME type
-        if message.document.mime_type and message.document.mime_type.startswith("image/"):
-            is_image = True
+    if message.photo: is_image = True
+    elif message.document and message.document.mime_type and message.document.mime_type.startswith("image/"): is_image = True
             
-    # Agar Image hai, toh Watermark Menu dikhao
     if is_image:
         await message.reply_text(
             "📸 <b>Image Detected!</b>\n\nIska kya karna hai?",
@@ -653,26 +745,25 @@ async def handle_files(client, message):
         )
         return
 
-    # 2. Agar Video/Audio hai, toh Renamer Logic chalao
+    # 2. Logic Handler
     global ACTIVE_TASKS
     user_id = message.from_user.id
     current_mode = user_modes.get(user_id, "renamer")
     
     if current_mode == "caption_only":
+        # Caption Logic (Same as before)
         try:
             media = message.document or message.video or message.audio
             clean_name = auto_clean(media.file_name or "video.mkv")
             file_size = humanbytes(media.file_size)
             duration = get_duration_str(getattr(media, "duration", 0))
             s_num, e_num = get_media_info(clean_name)
-            
             caption = f"<b>{clean_name}</b>\n\n"
             if s_num: caption += f"💿 Season ➥ {s_num}\n"
             if e_num: caption += f"📺 Episode ➥ {e_num}\n\n"
             caption += f"<blockquote><code>File Size ♻️ ➥ {file_size}</code></blockquote>\n"
             if getattr(media, "duration", 0) > 0: caption += f"<blockquote><code>Duration ⏰ ➥ {duration}</code></blockquote>\n"
             caption += f"<blockquote><code>Powered By ➥ {CREDIT_NAME}</code></blockquote>"
-            
             await message.reply_cached_media(media.file_id, caption=caption)
             try: await message.delete() 
             except: pass
@@ -682,10 +773,12 @@ async def handle_files(client, message):
     if ACTIVE_TASKS >= MAX_TASK_LIMIT:
         return await message.reply_text("⚠️ <b>Busy!</b> Wait...")
 
+    # BATCH COLLECTING
     if user_id in batch_data and batch_data[user_id]['status'] == 'collecting':
         batch_data[user_id]['files'].append(message)
         return
 
+    # SINGLE FILE RENAME
     user_modes[user_id] = "renamer"
     user_data[user_id] = {'file_msg': message, 'mode': None}
     btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="mode_video"), InlineKeyboardButton("📁 Document", callback_data="mode_document")]])
@@ -719,34 +812,17 @@ async def handle_text(client, message):
         else: await message.reply_text("❌ No <code>?start=</code> found.")
         return
     
-    # Batch Processing
-    if user_id in batch_data and batch_data[user_id]['status'] == 'naming':
-        batch_data[user_id]['status'] = 'processing'
-        ACTIVE_TASKS += 1
-        status_msg = await message.reply_text(f"⏳ <b>Batch Processing...</b>")
-        try:
-            base_name = auto_clean(text)
-            for idx, msg in enumerate(batch_data[user_id]['files']):
-                media = msg.document or msg.video or msg.audio
-                ext = get_extension(media.file_name)
-                s_num, e_num = get_media_info(media.file_name or "")
-                
-                new_name = f"{base_name} - S{s_num}E{e_num}{ext}" if s_num and e_num else (f"{base_name} - E{e_num}{ext}" if e_num else f"{base_name}{ext}")
-                if not new_name.endswith(ext): new_name += ext
-                
-                dl_path = await client.download_media(media, f"downloads/{new_name}")
-                caption = f"<b>{new_name}</b>\n\n<blockquote><code>File Size ♻️ ➥ {humanbytes(os.path.getsize(dl_path))}</code></blockquote>\n"
-                dur = get_video_attributes(dl_path)[2]
-                if dur > 0: caption += f"<blockquote><code>Duration ⏰ ➥ {get_duration_str(dur)}</code></blockquote>\n"
-                caption += f"<blockquote><code>Powered By ➥ {CREDIT_NAME}</code></blockquote>"
-                
-                await client.send_document(user_id, dl_path, caption=caption, force_document=True)
-                os.remove(dl_path)
-        except Exception as e: print(e)
-        finally:
-            ACTIVE_TASKS -= 1
-            await status_msg.delete()
-            del batch_data[user_id]
+    # 🔥 BATCH NAME RECEIVED -> ASK VIDEO/FILE
+    if user_id in batch_data and batch_data[user_id]['status'] == 'waiting_name':
+        batch_data[user_id]['base_name'] = auto_clean(text)
+        batch_data[user_id]['status'] = 'ready'
+        
+        # Ask Mode
+        btn = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎥 Upload as Video", callback_data="batch_mode_video")],
+            [InlineKeyboardButton("📁 Upload as File", callback_data="batch_mode_document")]
+        ])
+        await message.reply_text(f"✅ Name Set: <b>{batch_data[user_id]['base_name']}</b>\n\nAb format select karein:", reply_markup=btn)
         return
 
     # Single File Processing
@@ -784,7 +860,7 @@ async def handle_text(client, message):
         except Exception as e: await message.reply_text(f"Error: {e}")
         finally:
             ACTIVE_TASKS -= 1
-            await status_msg.delete() # Bot ka status msg delete
+            await status_msg.delete() 
 
 async def main():
     await asyncio.gather(web_server(), app.start())

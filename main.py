@@ -1,6 +1,7 @@
 import os
 import time
 import math
+import base64
 import aiohttp
 import aiofiles
 import asyncio
@@ -18,6 +19,7 @@ API_HASH = os.environ.get("API_HASH", "hash")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "token")
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "b3b754854b7375276e19195a63969a41") 
 CREDIT_NAME = "Filmy Flip"
+BLOGGER_URL = os.environ.get("BLOGGER_URL", "https://yoursite.com") # Optional for /link
 
 app = Client("filmy_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
@@ -89,7 +91,7 @@ async def progress(current, total, message, start_time, status):
                f"🚀 {humanbytes(speed)}/s | ⏳ {time.strftime('%H:%M:%S', time.gmtime(time_left))}")
         try: await message.edit(tmp)
         except: pass
-            # --- COMMANDS (With Auto Delete) ---
+            # --- MAIN COMMANDS ---
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
     try: await message.delete()
@@ -97,35 +99,52 @@ async def start(client, message):
     await message.reply_text(
         f"👋 <b>Hello {message.from_user.first_name}!</b>\n\n"
         "🤖 <b>Filmy Flip All-in-One Bot</b>\n\n"
-        "🌐 <b>URL Mod:</b> <code>/url</code> (Direct Link Upload)\n"
-        "🎬 <b>Movies:</b> <code>/search Name</code>\n"
-        "📺 <b>Series:</b> <code>/series Name</code>\n"
-        "📁 <b>Renamer:</b> <code>/rename</code>, <code>/caption</code>\n"
-        "📦 <b>Batch:</b> <code>/batch</code> (Bulk Rename)\n"
-        "💧 <b>Watermark:</b> <code>/watermark</code>"
+        "🌐 <b>URL Mod:</b> <code>/url</code>\n"
+        "🎬 <b>Search:</b> <code>/search</code>, <code>/series</code>\n"
+        "📁 <b>Rename:</b> <code>/rename</code>, <code>/caption</code>\n"
+        "🔗 <b>Link Gen:</b> <code>/link</code>\n"
+        "📦 <b>Batch:</b> <code>/batch</code>\n"
+        "🧹 <b>Cleaner:</b> <code>/add</code>, <code>/del</code>, <code>/words</code>\n"
+        "💧 <b>Extra:</b> <code>/watermark</code>"
     )
 
 @app.on_message(filters.command("rename") & filters.private)
 async def set_rename_mode(client, message):
-    try: await message.delete()
+    try: await message.delete(); 
     except: pass
     user_modes[message.from_user.id] = "renamer"
     msg = await message.reply_text("📁 <b>Renamer Mode ON!</b>")
     await asyncio.sleep(3); await msg.delete()
 
+@app.on_message(filters.command("caption") & filters.private)
+async def set_caption_mode(client, message):
+    try: await message.delete(); 
+    except: pass
+    user_modes[message.from_user.id] = "caption_only"
+    msg = await message.reply_text("📝 <b>Caption Mode ON!</b>")
+    await asyncio.sleep(3); await msg.delete()
+
+@app.on_message(filters.command("link") & filters.private)
+async def set_link_mode(client, message):
+    try: await message.delete(); 
+    except: pass
+    user_modes[message.from_user.id] = "blogger_link"
+    msg = await message.reply_text("🔗 <b>Link Mode ON!</b>")
+    await asyncio.sleep(3); await msg.delete()
+
 @app.on_message(filters.command("url") & filters.private)
 async def set_url_mode(client, message):
-    try: await message.delete()
+    try: await message.delete(); 
     except: pass
     uid = message.from_user.id
     user_modes[uid] = "url"
     if uid in user_data: del user_data[uid]
-    msg = await message.reply_text("🌐 <b>URL Mode ON!</b>\nLink bhejein.")
+    msg = await message.reply_text("🌐 <b>URL Mode ON!</b>")
     await asyncio.sleep(3); await msg.delete()
 
 @app.on_message(filters.command("cancel") & filters.private)
 async def cancel_task(client, message):
-    try: await message.delete()
+    try: await message.delete(); 
     except: pass
     uid = message.from_user.id
     if uid in batch_data: del batch_data[uid]
@@ -134,47 +153,71 @@ async def cancel_task(client, message):
     msg = await message.reply_text("❌ <b>Task Cancelled!</b>")
     await asyncio.sleep(3); await msg.delete()
 
-# --- TMDB SEARCH ---
-@app.on_message(filters.command("search"))
-async def search_movie(client, message):
+# --- WORDS CLEANER COMMANDS ---
+@app.on_message(filters.command("add") & filters.private)
+async def add_word(client, message):
     try: await message.delete()
     except: pass
-    if len(message.command) < 2: return await message.reply_text("Usage: `/search Pushpa`")
-    query = " ".join(message.command[1:])
+    if len(message.command) < 2: return 
+    for word in message.command[1:]: REPLACE_DICT[word] = ""
+    msg = await message.reply_text(f"✅ Added: {message.command[1:]}")
+    await asyncio.sleep(3); await msg.delete()
+
+@app.on_message(filters.command("del") & filters.private)
+async def del_word(client, message):
+    try: await message.delete()
+    except: pass
+    if len(message.command) < 2: return 
+    deleted = [w for w in message.command[1:] if REPLACE_DICT.pop(w, None) is not None]
+    msg = await message.reply_text(f"🗑 Deleted: {deleted}")
+    await asyncio.sleep(3); await msg.delete()
+
+@app.on_message(filters.command("words") & filters.private)
+async def view_words(client, message):
+    try: await message.delete()
+    except: pass
+    disp = ", ".join(REPLACE_DICT.keys())
+    msg = await message.reply_text(f"📋 <b>Blocked Words:</b>\n{disp}" if REPLACE_DICT else "Empty.")
+    await asyncio.sleep(5); await msg.delete()
+
+# --- SEARCH & WATERMARK ---
+@app.on_message(filters.command("search"))
+async def search_movie(client, message):
+    try: await message.delete(); 
+    except: pass
+    if len(message.command) < 2: return await message.reply_text("Usage: `/search MovieName`")
     try:
-        url = f"https://api.themoviedb.org/3/search/movie?api_key={TMDB_API_KEY}&query={query}"
+        url = f"https://api.themoviedb.org/3/search/movie?api_key={TMDB_API_KEY}&query={' '.join(message.command[1:])}"
         data = requests.get(url).json()
-        if not data['results']: return await message.reply_text("❌ Movie not found.")
+        if not data['results']: return await message.reply_text("❌ Not found.")
         movie = data['results'][0]
         poster = f"https://image.tmdb.org/t/p/w500{movie['poster_path']}" if movie['poster_path'] else None
-        caption = f"🎬 <b>{movie['title']}</b>\n📅 {movie['release_date']}\n⭐️ {movie['vote_average']}/10\n\n📝 {movie['overview'][:200]}..."
+        caption = f"🎬 <b>{movie['title']}</b>\n📅 {movie['release_date']}\n⭐️ {movie['vote_average']}\n\n📝 {movie['overview'][:200]}..."
         if poster: await message.reply_photo(poster, caption=caption)
         else: await message.reply_text(caption)
-    except Exception as e: await message.reply_text(f"Error: {e}")
+    except: pass
 
 @app.on_message(filters.command("series"))
 async def search_series(client, message):
-    try: await message.delete()
+    try: await message.delete(); 
     except: pass
-    if len(message.command) < 2: return await message.reply_text("Usage: `/series Mirzapur`")
-    query = " ".join(message.command[1:])
+    if len(message.command) < 2: return await message.reply_text("Usage: `/series SeriesName`")
     try:
-        url = f"https://api.themoviedb.org/3/search/tv?api_key={TMDB_API_KEY}&query={query}"
+        url = f"https://api.themoviedb.org/3/search/tv?api_key={TMDB_API_KEY}&query={' '.join(message.command[1:])}"
         data = requests.get(url).json()
-        if not data['results']: return await message.reply_text("❌ Series not found.")
+        if not data['results']: return await message.reply_text("❌ Not found.")
         tv = data['results'][0]
         poster = f"https://image.tmdb.org/t/p/w500{tv['poster_path']}" if tv['poster_path'] else None
-        caption = f"📺 <b>{tv['name']}</b>\n📅 {tv['first_air_date']}\n⭐️ {tv['vote_average']}/10\n\n📝 {tv['overview'][:200]}..."
+        caption = f"📺 <b>{tv['name']}</b>\n📅 {tv['first_air_date']}\n⭐️ {tv['vote_average']}\n\n📝 {tv['overview'][:200]}..."
         if poster: await message.reply_photo(poster, caption=caption)
         else: await message.reply_text(caption)
-    except: await message.reply_text("Error fetching series.")
+    except: pass
 
-# --- WATERMARK ---
 @app.on_message(filters.command("watermark") & filters.private)
 async def watermark_cmd(client, message):
-    try: await message.delete()
+    try: await message.delete(); 
     except: pass
-    await message.reply_text("🖼 <b>Photo bhejein</b> jise Watermark banana hai.")
+    await message.reply_text("🖼 <b>Photo bhejein</b> (Thumbnail/Watermark ke liye).")
 
 @app.on_message(filters.photo & filters.private)
 async def save_watermark(client, message):
@@ -190,7 +233,7 @@ async def save_callback(client, callback):
     await client.download_media(callback.message.reply_to_message, path)
     await callback.message.edit_text("✅ <b>Saved!</b>")
 # ==========================================
-# 🚀 URL UPLOADER LOGIC
+# 🚀 URL UPLOADER
 # ==========================================
 @app.on_message(filters.private & filters.regex(r"^https?://"))
 async def link_handler(client, message):
@@ -242,7 +285,6 @@ async def process_url_upload(client, message, uid, mode):
     path = f"downloads/{data['filename']}"
     os.makedirs("downloads", exist_ok=True)
     start = time.time()
-    
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(data['url']) as resp:
@@ -268,18 +310,18 @@ async def process_url_upload(client, message, uid, mode):
     if os.path.exists(path): os.remove(path)
 
 # ==========================================
-# 🚀 BATCH & RENAME HANDLERS
+# 🚀 BATCH & FILE HANDLERS
 # ==========================================
 @app.on_message(filters.command("batch") & filters.private)
 async def batch_cmd(client, message):
-    try: await message.delete()
+    try: await message.delete(); 
     except: pass
     batch_data[message.from_user.id] = {'status': 'collecting', 'files': []}
     await message.reply_text("🚀 <b>Batch Mode!</b> Files forward karein, fir /done dabayein.")
 
 @app.on_message(filters.command("done") & filters.private)
 async def batch_done(client, message):
-    try: await message.delete()
+    try: await message.delete(); 
     except: pass
     uid = message.from_user.id
     if uid in batch_data and batch_data[uid]['files']:
@@ -292,7 +334,6 @@ async def batch_process(client, callback):
     uid = callback.from_user.id
     mode = "video" if "video" in callback.data else "doc"
     status = await callback.message.edit_text("⏳ <b>Starting Batch...</b>")
-    
     for idx, msg in enumerate(batch_data[uid]['files']):
         media = msg.document or msg.video or msg.audio
         if not media: continue
@@ -300,24 +341,32 @@ async def batch_process(client, callback):
         base = batch_data[uid]['base_name']
         ext = get_extension(media.file_name or "")
         new_name = f"{base} - S{s}E{e}{ext}" if s and e else (f"{base} - E{e}{ext}" if e else f"{base} - Part {idx+1}{ext}")
-        
         await status.edit(f"♻️ Processing {idx+1}...\n📂 {new_name}")
         dl = await client.download_media(media, f"downloads/{new_name}")
         w, h, dur = get_video_attributes(dl)
         thumb = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
-        
         if mode == 'video': await client.send_video(uid, dl, caption=new_name, thumb=thumb, duration=dur, width=w, height=h)
         else: await client.send_document(uid, dl, caption=new_name, thumb=thumb, force_document=True)
         os.remove(dl)
-    
     await status.edit("✅ Batch Completed!"); del batch_data[uid]
 
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio))
 async def handle_files(client, message):
     uid = message.from_user.id
+    
+    # 1. Caption Only Mode
+    if user_modes.get(uid) == "caption_only":
+        media = message.document or message.video or message.audio
+        file_size = humanbytes(message.document.file_size if message.document else message.video.file_size)
+        caption = f"<b>{media.file_name}</b>\n\n<blockquote>Size: {file_size}</blockquote>\n<blockquote>Powered By {CREDIT_NAME}</blockquote>"
+        await message.reply_cached_media(media.file_id, caption=caption)
+        return
+
+    # 2. Batch Collection
     if uid in batch_data and batch_data[uid]['status'] == 'collecting':
         batch_data[uid]['files'].append(message); return
     
+    # 3. Single Rename
     global ACTIVE_TASKS
     if ACTIVE_TASKS >= MAX_TASK_LIMIT: return await message.reply_text("⚠️ Busy!")
     
@@ -337,9 +386,17 @@ async def handle_text(client, message):
     uid = message.from_user.id
     text = message.text.strip()
     
+    # Blogger Link Gen
+    if user_modes.get(uid) == "blogger_link":
+        if "?start=" in text:
+            code = text.split("?start=")[1].split()[0]
+            enc = base64.b64encode(code.encode("utf-8")).decode("utf-8")
+            await message.reply_text(f"✅ <b>Link:</b>\n<code>{BLOGGER_URL}?data={enc}</code>")
+        return
+
     # Batch Name
     if uid in batch_data and batch_data[uid]['status'] == 'wait_name':
-        batch_data[uid]['base_name'] = text
+        batch_data[uid]['base_name'] = auto_clean(text)
         batch_data[uid]['status'] = 'ready'
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="batch_video"), InlineKeyboardButton("📁 File", callback_data="batch_doc")]])
         await message.reply_text(f"✅ Name: {text}\nFormat?", reply_markup=btn)
@@ -382,3 +439,4 @@ async def main():
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+    

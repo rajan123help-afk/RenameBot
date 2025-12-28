@@ -4,3 +4,4 @@ hachoir
 aiohttp
 requests
 Pillow
+aiofiles

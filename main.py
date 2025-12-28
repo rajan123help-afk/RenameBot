@@ -53,8 +53,12 @@ def humanbytes(size):
     while size > power: size /= power; n += 1
     return str(round(size, 2)) + " " + dic_power[n] + 'B'
 
+# 🔥 FIXED DURATION FUNCTION 🔥
 def get_duration_str(duration):
-    m, s = divmod(duration, 60); h, m = divmod(m, 60)
+    if not duration: return "00:00"
+    duration = int(duration) # Force Integer
+    m, s = divmod(duration, 60)
+    h, m = divmod(m, 60)
     return f"{h:02d}:{m:02d}:{s:02d}" if h > 0 else f"{m:02d}:{s:02d}"
 
 def get_extension(filename): return os.path.splitext(filename)[1]
@@ -87,31 +91,21 @@ def get_fancy_caption(filename, filesize, duration=0):
     caption += f"<blockquote><code>Powered By ➥ {CREDIT_NAME}</code></blockquote>"
     return caption
 
-# 🔥 NEW WATERMARK LOGIC (Bottom Center + 70% Size) 🔥
+# --- WATERMARK LOGIC ---
 def apply_watermark(base_path, wm_path):
     try:
         base = Image.open(base_path).convert("RGBA")
         wm = Image.open(wm_path).convert("RGBA")
-        
-        # 1. Resize Watermark to 70% of Base Width
         base_w, base_h = base.size
         wm_w, wm_h = wm.size
-        
-        new_wm_w = int(base_w * 0.70)  # 70% Width
-        new_wm_h = int(wm_h * (new_wm_w / wm_w)) # Height auto adjust
-        
+        new_wm_w = int(base_w * 0.70)
+        new_wm_h = int(wm_h * (new_wm_w / wm_w))
         wm = wm.resize((new_wm_w, new_wm_h), Image.LANCZOS)
-        
-        # 2. Position: Bottom Center
-        # X = (Total Width - WM Width) / 2 (Beech me)
-        # Y = Total Height - WM Height - 20 (Thoda sa upar niche se)
         x = (base_w - new_wm_w) // 2
         y = base_h - new_wm_h - 20 
-        
-        # 3. Paste Watermark
         base.paste(wm, (x, y), wm)
         base = base.convert("RGB")
-        base.save(base_path, "JPEG") # Overwrite Thumbnail
+        base.save(base_path, "JPEG")
         return base_path
     except Exception as e:
         print(f"WM Error: {e}")
@@ -130,7 +124,7 @@ async def progress(current, total, message, start_time, status):
                f"🚀 {humanbytes(speed)}/s | ⏳ {time.strftime('%H:%M:%S', time.gmtime(time_left))}")
         try: await message.edit(tmp)
         except: pass
-            # --- COMMANDS ---
+      # --- COMMANDS ---
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
     try: await message.delete()
@@ -269,7 +263,7 @@ async def save_callback(client, callback):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     await client.download_media(callback.message.reply_to_message, path)
     await callback.message.edit_text("✅ <b>Saved!</b>")
-# ==========================================
+ # ==========================================
 # 🚀 1. URL UPLOADER
 # ==========================================
 @app.on_message(filters.private & filters.regex(r"^https?://"))
@@ -427,7 +421,7 @@ async def handle_text(client, message):
         finally: ACTIVE_TASKS -= 1; await status.delete()
 
 # ==========================================
-# 🚀 3. FILE HANDLERS (Fixed Caption + Image + Watermark)
+# 🚀 3. FILE HANDLERS (Caption & Images)
 # ==========================================
 @app.on_message(filters.command("batch") & filters.private)
 async def batch_cmd(client, message):
@@ -480,23 +474,22 @@ async def batch_process(client, callback):
 async def handle_files(client, message):
     uid = message.from_user.id
     
-    # 🔥 FIXED CAPTION LOGIC 🔥
+    # 🔥 FIX: Caption Mode Error Safe
     if user_modes.get(uid) == "caption_only":
         try:
             media = message.document or message.video or message.audio
             if not media: return await message.reply_text("❌ Unknown file type")
             
-            # Safe Size Check
+            # Use getattr with default 0 to avoid float errors
             file_size = humanbytes(getattr(media, "file_size", 0))
-            dur = getattr(media, "duration", 0)
+            dur = int(getattr(media, "duration", 0) or 0)
             
             caption = get_fancy_caption(media.file_name or "Unknown File", file_size, dur)
             await message.reply_cached_media(media.file_id, caption=caption)
-            # Delete user file after reply
             try: await message.delete() 
             except: pass
         except Exception as e:
-            await message.reply_text(f"❌ Error in Caption: {e}")
+            await message.reply_text(f"❌ Error: {e}")
         return
 
     if uid in batch_data and batch_data[uid]['status'] == 'collecting':
@@ -551,3 +544,4 @@ async def main():
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+        

@@ -24,7 +24,9 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "token")
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "02a832d91755c2f5e8a2d1a6740a8674") 
 
 CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"
-BLOGGER_URL = os.environ.get("BLOGGER_URL", "https://yoursite.com")
+
+# ✅ AAPKA SPECIFIC BLOGGER LINK (Jo HTML me tha)
+BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
 app = Client("filmy_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
@@ -94,20 +96,16 @@ def get_fancy_caption(filename, filesize, duration=0):
     caption += f"<blockquote><code>Powered By ➥ {CREDIT_NAME}</code></blockquote>"
     return caption
 
-# --- WATERMARK LOGIC (70% & Bottom Center) ---
+# --- WATERMARK LOGIC ---
 def apply_watermark(base_path, wm_path):
     try:
         base = Image.open(base_path).convert("RGBA")
         wm = Image.open(wm_path).convert("RGBA")
         base_w, base_h = base.size
         wm_w, wm_h = wm.size
-        
-        # Resize to 70% width
         new_wm_w = int(base_w * 0.70)
         new_wm_h = int(wm_h * (new_wm_w / wm_w))
         wm = wm.resize((new_wm_w, new_wm_h), Image.LANCZOS)
-        
-        # Position: Bottom Center
         x = (base_w - new_wm_w) // 2
         y = base_h - new_wm_h - 20 
         base.paste(wm, (x, y), wm)
@@ -169,7 +167,7 @@ async def set_link_mode(client, message):
     try: await message.delete(); 
     except: pass
     user_modes[message.from_user.id] = "blogger_link"
-    msg = await message.reply_text("🔗 <b>Link Mode ON!</b>\nAb koi bhi text/link bhejein.")
+    msg = await message.reply_text("🔗 <b>Link Mode ON!</b>\nTelegram Bot Link bhejein (Example: `https://t.me/Bot?start=Code`).")
     await asyncio.sleep(3); await msg.delete()
 
 @app.on_message(filters.command("url") & filters.private)
@@ -232,7 +230,7 @@ async def save_watermark(client, message):
     await message.reply_text("Save as:", reply_markup=btn, quote=True)
 
 # ==========================================
-# 🚀 SEARCH HANDLER (Strict Logo Fix)
+# 🚀 SMART SEARCH HANDLER
 # ==========================================
 def extract_and_clean_query(query_list):
     raw_text = " ".join(query_list).lower()
@@ -263,7 +261,6 @@ async def search_handler(client, message):
     
     status = await message.reply_text(f"🔎 <b>Searching:</b> <code>{query}</code>...")
     try:
-        # 1. Main Search
         url = f"https://api.themoviedb.org/3/search/{stype}?api_key={TMDB_API_KEY}&query={query}"
         data = requests.get(url).json()
         
@@ -275,40 +272,30 @@ async def search_handler(client, message):
         title = res.get('name') if is_series else res.get('title')
         date = res.get('first_air_date') if is_series else res.get('release_date')
         
-        # 🔥 2. LOGO FIX (CRITICAL CHANGE)
-        # Hum pehle specific language (en) maangenge. Agar milegi to wahi lenge.
-        # Agar nahi mili, tabhi default par jayenge.
-        
-        final_poster = res.get('poster_path') # Default backup
+        poster_path = res.get('poster_path')
         
         try:
-            # Step A: Decide URL based on Series or Movie
             if is_series and season_num:
-                # Season Search
-                img_url = f"https://api.themoviedb.org/3/tv/{mid}/season/{season_num}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi"
+                base_img_url = f"https://api.themoviedb.org/3/tv/{mid}/season/{season_num}/images"
             else:
-                # Movie/Main Series Search
-                img_url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi"
-            
-            # Step B: Fetch Images
-            img_data = requests.get(img_url).json()
-            
-            # Step C: Pick First English/Hindi Image
-            if img_data.get('posters') and len(img_data['posters']) > 0:
-                final_poster = img_data['posters'][0]['file_path']
-                
-            # Season Title Update
+                base_img_url = f"https://api.themoviedb.org/3/{stype}/{mid}/images"
+
+            img_data = requests.get(f"{base_img_url}?api_key={TMDB_API_KEY}&include_image_language=en").json()
+            if img_data.get('posters'):
+                poster_path = img_data['posters'][0]['file_path']
+            else:
+                img_data = requests.get(f"{base_img_url}?api_key={TMDB_API_KEY}&include_image_language=hi").json()
+                if img_data.get('posters'):
+                    poster_path = img_data['posters'][0]['file_path']
+
             if is_series and season_num:
-                # Just to get air date correctly
                 s_info = requests.get(f"https://api.themoviedb.org/3/tv/{mid}/season/{season_num}?api_key={TMDB_API_KEY}").json()
                 title += f" (Season {season_num})"
                 date = s_info.get('air_date', date)
 
-        except Exception as e:
-            print(f"Image fetch error: {e}")
-            pass # Keep default if error
+        except Exception as e: print(e)
             
-        full_poster_url = f"https://image.tmdb.org/t/p/w500{final_poster}" if final_poster else None
+        full_poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else None
         
         btn = InlineKeyboardMarkup([
             [
@@ -316,16 +303,12 @@ async def search_handler(client, message):
                 InlineKeyboardButton("🎞 Thumbnail", callback_data=f"img_backdrop_{stype}_{mid}")
             ]
         ])
-        
         caption = f"🎬 <b>{title}</b>\n📅 {date}\n⭐️ {res.get('vote_average')}\n\n👇 <b>Kya download karna hai?</b>"
-        
         await status.delete()
         if full_poster_url: await message.reply_photo(full_poster_url, caption=caption, reply_markup=btn)
         else: await message.reply_text(caption, reply_markup=btn)
-        
-    except Exception as e:
-        await status.edit(f"❌ Error: {e}")
-# --- BUTTON CALLBACKS ---
+    except Exception as e: await status.edit(f"❌ Error: {e}")
+        # --- BUTTON CALLBACKS ---
 @app.on_callback_query(filters.regex("^img_"))
 async def img_type_callback(client, callback):
     try:
@@ -348,11 +331,14 @@ async def img_process_callback(client, callback):
         
         await callback.message.edit("⏳ <b>Downloading...</b>")
         
-        # 🔥 FIX: Language Filter for LOGO Posters
-        url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi,null"
+        url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en"
         data = requests.get(url).json()
         
         key = 'posters' if img_type == 'poster' else 'backdrops'
+        if not data.get(key):
+             url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=hi,null"
+             data = requests.get(url).json()
+
         if not data.get(key):
             return await callback.message.edit("❌ No images found!")
             
@@ -364,18 +350,13 @@ async def img_process_callback(client, callback):
             img_url = f"https://image.tmdb.org/t/p/w500{img['file_path']}"
             fpath = f"downloads/{mid}_{i}.jpg"
             os.makedirs("downloads", exist_ok=True)
-            
-            with open(fpath, 'wb') as f:
-                f.write(requests.get(img_url).content)
-            
+            with open(fpath, 'wb') as f: f.write(requests.get(img_url).content)
             if has_wm: apply_watermark(fpath, wm_path)
-            
             await client.send_photo(uid, fpath, caption=f"🦋 <b>Filmy Flip Hub</b>")
             os.remove(fpath)
             
         await callback.message.delete()
-    except Exception as e:
-        await callback.message.edit(f"❌ Error: {e}")
+    except Exception as e: await callback.message.edit(f"❌ Error: {e}")
 
 # --- OTHER HANDLERS ---
 @app.on_callback_query(filters.regex("save_"))
@@ -428,7 +409,35 @@ async def url_handler(client, callback):
 async def link_handler(client, message):
     uid = message.from_user.id
     if uid in batch_data and batch_data[uid].get('status') == 'naming': return 
-    if user_modes.get(uid) == "blogger_link": return await handle_text(client, message)
+    
+    # 🔥 EXACT HTML LOGIC FOR LINKS
+    # Agar Link Mode ON hai, toh hum check karenge ki link me '?start=' hai ya nahi
+    if user_modes.get(uid) == "blogger_link":
+        try: await message.delete(); 
+        except: pass
+        
+        text = message.text.strip()
+        
+        # HTML logic: Extract value of 'start' parameter
+        if "?start=" in text:
+            try:
+                # Code nikalna (HTML logic: urlObj.searchParams.get("start"))
+                start_code = text.split("?start=")[1].split()[0]
+                
+                # Base64 Encode (HTML logic: btoa(startValue))
+                enc = base64.b64encode(start_code.encode("utf-8")).decode("utf-8")
+                
+                # Final URL (HTML logic: myBloggerPage + "?data=" + encodedValue)
+                final_link = f"{BLOGGER_URL}?data={enc}"
+                
+                await message.reply_text(f"✅ <b>Link Generated!</b>\n\n🔗 <b>Your URL:</b>\n<code>{final_link}</code>")
+            except:
+                await message.reply_text("❌ <b>Error:</b> Link format sahi nahi hai.")
+        else:
+            await message.reply_text("❌ <b>Error:</b> Is link mein '?start=' code nahi mila!")
+        return
+
+    # Normal URL Uploader Code
     url = message.text.strip()
     status = await message.reply_text("🔎 <b>Checking Link...</b>")
     try: await message.delete(); 
@@ -485,6 +494,7 @@ async def process_url_upload(client, message, uid, mode):
 async def handle_text(client, message):
     uid = message.from_user.id
     text = message.text.strip()
+    
     if uid in download_queue and download_queue[uid].get('wait_name'):
         try: await message.delete(); 
         except: pass
@@ -492,12 +502,23 @@ async def handle_text(client, message):
         download_queue[uid]['wait_name'] = False
         await ask_url_format(client, message, uid, is_new=True)
         return
+
+    # Text-Based Link Gen (Agar user ne link copy paste kiya ho bina https ke)
     if user_modes.get(uid) == "blogger_link":
-        try: await message.delete(); 
-        except: pass
-        enc = base64.b64encode(text.encode("utf-8")).decode("utf-8")
-        await message.reply_text(f"✅ <b>Link Ready!</b>\n\n🔗 <b>Your URL:</b>\n<code>{BLOGGER_URL}?data={enc}</code>")
+        if "?start=" in text:
+             # Logic same as above (Extract -> Encode -> Append)
+             try:
+                start_code = text.split("?start=")[1].split()[0]
+                enc = base64.b64encode(start_code.encode("utf-8")).decode("utf-8")
+                final_link = f"{BLOGGER_URL}?data={enc}"
+                await message.reply_text(f"✅ <b>Link Generated!</b>\n\n🔗 <b>Your URL:</b>\n<code>{final_link}</code>")
+             except: await message.reply_text("❌ Error in code extraction.")
+        else:
+             # Fallback: Agar normal text/code bheja hai
+             enc = base64.b64encode(text.encode("utf-8")).decode("utf-8")
+             await message.reply_text(f"✅ <b>Link Ready!</b>\n\n🔗 <b>Your URL:</b>\n<code>{BLOGGER_URL}?data={enc}</code>")
         return
+
     if uid in batch_data and batch_data[uid]['status'] == 'wait_name':
         try: await message.delete(); 
         except: pass

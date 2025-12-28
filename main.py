@@ -308,7 +308,7 @@ async def search_handler(client, message):
         if full_poster_url: await message.reply_photo(full_poster_url, caption=caption, reply_markup=btn)
         else: await message.reply_text(caption, reply_markup=btn)
     except Exception as e: await status.edit(f"❌ Error: {e}")
-        # --- BUTTON CALLBACKS ---
+# --- BUTTON CALLBACKS ---
 @app.on_callback_query(filters.regex("^img_"))
 async def img_type_callback(client, callback):
     try:
@@ -410,42 +410,34 @@ async def link_handler(client, message):
     uid = message.from_user.id
     if uid in batch_data and batch_data[uid].get('status') == 'naming': return 
     
-    # 🔥 EXACT HTML LOGIC FOR LINKS
-    # Agar Link Mode ON hai, toh hum check karenge ki link me '?start=' hai ya nahi
+    # Blogger Link Logic
     if user_modes.get(uid) == "blogger_link":
         try: await message.delete(); 
         except: pass
-        
         text = message.text.strip()
-        
-        # HTML logic: Extract value of 'start' parameter
         if "?start=" in text:
             try:
-                # Code nikalna (HTML logic: urlObj.searchParams.get("start"))
                 start_code = text.split("?start=")[1].split()[0]
-                
-                # Base64 Encode (HTML logic: btoa(startValue))
                 enc = base64.b64encode(start_code.encode("utf-8")).decode("utf-8")
-                
-                # Final URL (HTML logic: myBloggerPage + "?data=" + encodedValue)
                 final_link = f"{BLOGGER_URL}?data={enc}"
-                
                 await message.reply_text(f"✅ <b>Link Generated!</b>\n\n🔗 <b>Your URL:</b>\n<code>{final_link}</code>")
-            except:
-                await message.reply_text("❌ <b>Error:</b> Link format sahi nahi hai.")
+            except: await message.reply_text("❌ Error in code extraction.")
         else:
-            await message.reply_text("❌ <b>Error:</b> Is link mein '?start=' code nahi mila!")
+             enc = base64.b64encode(text.encode("utf-8")).decode("utf-8")
+             await message.reply_text(f"✅ <b>Link Ready!</b>\n\n🔗 <b>Your URL:</b>\n<code>{BLOGGER_URL}?data={enc}</code>")
         return
 
-    # Normal URL Uploader Code
+    # Normal URL Upload
     url = message.text.strip()
     status = await message.reply_text("🔎 <b>Checking Link...</b>")
     try: await message.delete(); 
     except: pass
     try:
+        # 🔥 HEADERS ADDED HERE (Browser ban ke request jayegi)
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
         async with aiohttp.ClientSession() as session:
-            async with session.head(url) as resp:
-                if resp.status != 200: return await status.edit("❌ <b>Invalid Link!</b>")
+            async with session.head(url, headers=headers) as resp:
+                if resp.status != 200: return await status.edit("❌ <b>Invalid Link!</b> (Website blocked bot)")
                 fname = url.split("/")[-1].split("?")[0] or "file.dat"
                 download_queue[uid] = {"url": url, "filename": fname}
                 btn = InlineKeyboardMarkup([[InlineKeyboardButton("✏️ Rename", callback_data="url_rename"), InlineKeyboardButton("⏩ Next", callback_data="url_mode")]])
@@ -463,12 +455,21 @@ async def process_url_upload(client, message, uid, mode):
     data = download_queue[uid]
     if message.from_user.is_bot: status = await message.edit("📥 <b>Downloading...</b>")
     else: status = await message.reply_text("📥 <b>Downloading...</b>")
+    
     path = f"downloads/{data['filename']}"
     os.makedirs("downloads", exist_ok=True)
     start = time.time()
+    
+    # 🔥 CRITICAL FIX: Headers Added (To Bypass Bot Detection)
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
+    
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(data['url']) as resp:
+            async with session.get(data['url'], headers=headers) as resp:
+                if resp.status != 200:
+                     await status.edit(f"❌ Error: Server returned {resp.status}")
+                     return
+                
                 total = int(resp.headers.get("content-length", 0))
                 async with aiofiles.open(path, "wb") as f:
                     dl = 0
@@ -477,6 +478,7 @@ async def process_url_upload(client, message, uid, mode):
                         await f.write(chunk)
                         dl += len(chunk)
                         if (time.time()-start) > 5: await progress(dl, total, status, start, "📥 Downloading")
+        
         await status.edit("📤 <b>Uploading...</b>")
         w, h, dur = get_video_attributes(path)
         file_size = humanbytes(os.path.getsize(path))
@@ -494,7 +496,6 @@ async def process_url_upload(client, message, uid, mode):
 async def handle_text(client, message):
     uid = message.from_user.id
     text = message.text.strip()
-    
     if uid in download_queue and download_queue[uid].get('wait_name'):
         try: await message.delete(); 
         except: pass
@@ -502,23 +503,18 @@ async def handle_text(client, message):
         download_queue[uid]['wait_name'] = False
         await ask_url_format(client, message, uid, is_new=True)
         return
-
-    # Text-Based Link Gen (Agar user ne link copy paste kiya ho bina https ke)
     if user_modes.get(uid) == "blogger_link":
         if "?start=" in text:
-             # Logic same as above (Extract -> Encode -> Append)
              try:
                 start_code = text.split("?start=")[1].split()[0]
                 enc = base64.b64encode(start_code.encode("utf-8")).decode("utf-8")
                 final_link = f"{BLOGGER_URL}?data={enc}"
                 await message.reply_text(f"✅ <b>Link Generated!</b>\n\n🔗 <b>Your URL:</b>\n<code>{final_link}</code>")
-             except: await message.reply_text("❌ Error in code extraction.")
+             except: await message.reply_text("❌ Error")
         else:
-             # Fallback: Agar normal text/code bheja hai
              enc = base64.b64encode(text.encode("utf-8")).decode("utf-8")
              await message.reply_text(f"✅ <b>Link Ready!</b>\n\n🔗 <b>Your URL:</b>\n<code>{BLOGGER_URL}?data={enc}</code>")
         return
-
     if uid in batch_data and batch_data[uid]['status'] == 'wait_name':
         try: await message.delete(); 
         except: pass

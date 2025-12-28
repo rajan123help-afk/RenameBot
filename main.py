@@ -232,7 +232,7 @@ async def save_watermark(client, message):
     await message.reply_text("Save as:", reply_markup=btn, quote=True)
 
 # ==========================================
-# 🚀 SEARCH HANDLER (With Logo/Text Fix)
+# 🚀 SEARCH HANDLER (Strict Logo Fix)
 # ==========================================
 def extract_and_clean_query(query_list):
     raw_text = " ".join(query_list).lower()
@@ -275,26 +275,40 @@ async def search_handler(client, message):
         title = res.get('name') if is_series else res.get('title')
         date = res.get('first_air_date') if is_series else res.get('release_date')
         
-        # 🔥 2. LOGO FIX: Search for English/Hindi Poster specifically
-        poster_path = res.get('poster_path') # Default fallback
+        # 🔥 2. LOGO FIX (CRITICAL CHANGE)
+        # Hum pehle specific language (en) maangenge. Agar milegi to wahi lenge.
+        # Agar nahi mili, tabhi default par jayenge.
+        
+        final_poster = res.get('poster_path') # Default backup
         
         try:
-            # Series Season Check
+            # Step A: Decide URL based on Series or Movie
             if is_series and season_num:
-                s_url = f"https://api.themoviedb.org/3/tv/{mid}/season/{season_num}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi,null"
-                s_data = requests.get(s_url).json()
-                if s_data.get('posters'):
-                    poster_path = s_data['posters'][0]['file_path'] # Get first EN/HI poster
+                # Season Search
+                img_url = f"https://api.themoviedb.org/3/tv/{mid}/season/{season_num}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi"
             else:
-                # Movie/Series Main Check
-                img_url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi,null"
-                img_data = requests.get(img_url).json()
-                if img_data.get('posters'):
-                     poster_path = img_data['posters'][0]['file_path'] # Get first EN/HI poster
-        except:
-            pass # Fallback to default if error
+                # Movie/Main Series Search
+                img_url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi"
             
-        full_poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else None
+            # Step B: Fetch Images
+            img_data = requests.get(img_url).json()
+            
+            # Step C: Pick First English/Hindi Image
+            if img_data.get('posters') and len(img_data['posters']) > 0:
+                final_poster = img_data['posters'][0]['file_path']
+                
+            # Season Title Update
+            if is_series and season_num:
+                # Just to get air date correctly
+                s_info = requests.get(f"https://api.themoviedb.org/3/tv/{mid}/season/{season_num}?api_key={TMDB_API_KEY}").json()
+                title += f" (Season {season_num})"
+                date = s_info.get('air_date', date)
+
+        except Exception as e:
+            print(f"Image fetch error: {e}")
+            pass # Keep default if error
+            
+        full_poster_url = f"https://image.tmdb.org/t/p/w500{final_poster}" if final_poster else None
         
         btn = InlineKeyboardMarkup([
             [

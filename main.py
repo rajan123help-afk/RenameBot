@@ -861,6 +861,156 @@ async def handle_text(client, message):
         finally:
             ACTIVE_TASKS -= 1
             await status_msg.delete() 
+# ==========================================
+# 🚀 UPDATED: URL UPLOADER (Video/File Choice)
+# ==========================================
+
+download_queue = {}
+
+# --- Link Handler ---
+@app.on_message(filters.private & filters.regex(r"^https?://"))
+async def link_handler(client, message):
+    # Renaming mode check
+    user_id = message.from_user.id
+    if user_id in user_data or (user_id in batch_data and batch_data[user_id].get('status') == 'naming'):
+        return 
+
+    url = message.text.strip()
+    status_msg = await message.reply_text("🔎 <b>Checking Link...</b>")
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.head(url) as resp:
+                if resp.status != 200:
+                    await status_msg.edit("❌ <b>Link Error!</b> (Invalid URL)")
+                    return
+                
+                # Auto Detect Filename
+                filename = url.split("/")[-1]
+                if "?" in filename: filename = filename.split("?")[0]
+                if not filename: filename = "file.dat"
+                
+                # Save Data
+                download_queue[user_id] = {"url": url, "filename": filename}
+                
+                # Rename Option
+                btn = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("✏️ Rename", callback_data="url_ask_name")],
+                    [InlineKeyboardButton("⏩ Next (Select Format)", callback_data="url_ask_mode")]
+                ])
+                await status_msg.edit(
+                    f"🔗 <b>Link Found!</b>\n\n📂 <b>File:</b> <code>{filename}</code>\n\nKya karna hai?",
+                    reply_markup=btn
+                )
+    except Exception as e:
+        await status_msg.edit(f"❌ Error: {e}")
+
+# --- Callbacks: Rename & Mode Selection ---
+@app.on_callback_query(filters.regex("^url_"))
+async def url_callbacks(client, callback):
+    user_id = callback.from_user.id
+    data = callback.data
+    
+    if user_id not in download_queue:
+        await callback.answer("Task Expired!", show_alert=True)
+        return
+
+    # 1. Ask for New Name
+    if data == "url_ask_name":
+        await callback.message.delete()
+        download_queue[user_id]['waiting_for_name'] = True
+        await client.send_message(user_id, "📝 <b>Naya Naam Bhejein:</b>\n(Example: <code>movie.mkv</code>)", reply_markup=ForceReply(True))
+    
+    # 2. Ask for Format (Video or File)
+    elif data == "url_ask_mode":
+        await ask_format(client, callback.message, user_id)
+
+    # 3. Start Upload Process
+    elif data.startswith("url_mode_"):
+        mode = data.replace("url_mode_", "") # 'video' or 'document'
+        await start_url_upload(client, callback.message, user_id, mode)
+
+# --- Helper: Show Format Buttons ---
+async def ask_format(client, message, user_id):
+    filename = download_queue[user_id]['filename']
+    btn = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎥 Upload as Video", callback_data="url_mode_video")],
+        [InlineKeyboardButton("📁 Upload as File", callback_data="url_mode_document")]
+    ])
+    try: await message.edit(f"📂 <b>Name:</b> <code>{filename}</code>\n\nAb format select karein:", reply_markup=btn)
+    except: await message.reply_text(f"📂 <b>Name:</b> <code>{filename}</code>\n\nAb format select karein:", reply_markup=btn)
+
+# --- Handle Rename Text for URL ---
+@app.on_message(filters.private & filters.reply)
+async def url_rename_handler(client, message):
+    user_id = message.from_user.id
+    if user_id in download_queue and download_queue[user_id].get('waiting_for_name'):
+        new_name = message.text.strip()
+        download_queue[user_id]['filename'] = new_name
+        download_queue[user_id]['waiting_for_name'] = False 
+        
+        # Rename hone ke baad Format pucho
+        await ask_format(client, message, user_id)
+
+# --- Main Download & Upload Function ---
+async def start_url_upload(client, message, user_id, mode):
+    data = download_queue.get(user_id)
+    url = data['url']
+    filename = data['filename']
+    
+    status_msg = await message.reply_text(f"📥 <b>Downloading...</b>\n<code>{filename}</code>")
+    start_time = time.time()
+    
+    if not os.path.exists("downloads"): os.makedirs("downloads")
+    file_path = f"downloads/{filename}"
+
+    try:
+        # 1. DOWNLOAD
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                total_size = int(response.headers.get("content-length", 0))
+                
+                import aiofiles 
+                async with aiofiles.open(file_path, "wb") as f:
+                    downloaded = 0
+                    async for chunk in response.content.iter_chunked(1024 * 1024): 
+                        if not chunk: break
+                        await f.write(chunk)
+                        downloaded += len(chunk)
+                        
+                        now = time.time()
+                        if (now - start_time) > 5: 
+                            await progress(downloaded, total_size, status_msg, start_time, "📥 Downloading")
+                            start_time = now 
+        
+        # 2. UPLOAD
+        await status_msg.edit("📤 <b>Uploading...</b>")
+        start_time = time.time()
+        
+        # Get Thumbnail & Metadata
+        w, h, dur = get_video_attributes(file_path)
+        thumb_path = f"thumbnails/{user_id}.jpg"
+        if not os.path.exists(thumb_path): thumb_path = None
+        
+        caption = f"📂 <b>{filename}</b>\n\n✅ Uploaded by {CREDIT_NAME}"
+
+        # Upload as Selected Mode
+        if mode == "video":
+             await client.send_video(user_id, file_path, caption=caption, duration=dur, width=w, height=h, thumb=thumb_path, supports_streaming=True, progress=progress, progress_args=(status_msg, start_time, "📤 Uploading"))
+        else:
+             await client.send_document(user_id, file_path, caption=caption, thumb=thumb_path, force_document=True, progress=progress, progress_args=(status_msg, start_time, "📤 Uploading"))
+
+        await status_msg.delete()
+        os.remove(file_path)
+        del download_queue[user_id]
+
+    except Exception as e:
+        await status_msg.edit(f"❌ Error: {e}")
+        if os.path.exists(file_path): os.remove(file_path)
+
+# ==========================================
+# 👆 URL CODE ENDS HERE 👆
+# ==========================================
 
 async def main():
     await asyncio.gather(web_server(), app.start())

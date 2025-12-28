@@ -2,6 +2,6 @@ pyrofork
 tgcrypto
 hachoir
 aiohttp
+aiofiles
 requests
 Pillow
-aiofiles

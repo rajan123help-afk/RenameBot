@@ -1,4 +1,4 @@
-import os, time, math, base64, re, asyncio, aiohttp, aiofiles, shutil
+import os, time, math, base64, re, asyncio, aiohttp, aiofiles
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiohttp import web
@@ -11,7 +11,10 @@ TMDB_API_KEY = "02a832d91755c2f5e8a2d1a6740a8674"
 CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"
 
 app = Client("RenameBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+
+# --- GLOBAL VARIABLES ---
 user_modes, user_data, batch_data = {}, {}, {}
+CLEANER_WORDS = [] 
 
 # --- HELPER FUNCTIONS ---
 def reset_user(uid):
@@ -25,11 +28,19 @@ def humanbytes(size):
         if size < 1024: return f"{size:.2f} {unit}"
         size /= 1024
 
+# --- CAPTION STYLE (Green Blockquote) ---
 def get_fancy_caption(filename, filesize):
     caption = f"<b>{filename}</b>\n\n"
     caption += f"<blockquote><b>File Size ♻️ ➥ {humanbytes(filesize)}</b></blockquote>\n"
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME}</b></blockquote>"
     return caption
+
+# --- CLEANER LOGIC ---
+def apply_cleaner(filename):
+    for word in CLEANER_WORDS:
+        pattern = re.compile(re.escape(word), re.IGNORECASE)
+        filename = pattern.sub(CREDIT_NAME, filename)
+    return filename
 
 async def shorten_link(link):
     try:
@@ -56,7 +67,7 @@ async def progress(current, total, message, start_time, status):
 @app.on_message(filters.command("start") & filters.private)
 async def start_cmd(client, message):
     reset_user(message.from_user.id)
-    await message.reply_text("👋 **Bot Online!**\nSaare features working hain.")
+    await message.reply_text("👋 **Bot Online!**\n/add - Add word to cleaner\n/search - Search Movie/Series")
 
 @app.on_message(filters.command(["url", "rename", "batch", "caption", "link", "watermark"]) & filters.private)
 async def mode_setter(client, message):
@@ -67,9 +78,36 @@ async def mode_setter(client, message):
     if cmd == "batch": batch_data[uid] = {'status': 'collecting', 'files': []}
     
     msg = f"✅ **{cmd.upper()} Mode Active!**"
-    if cmd == "url": msg += "\nLink bhejo download ke liye."
-    if cmd == "caption": msg += "\nFile bhejo caption badalne ke liye."
+    if cmd == "caption": msg += "\nAb File bhejo, caption badal dunga."
     await message.reply_text(msg)
+
+# --- CLEANER COMMANDS ---
+@app.on_message(filters.command(["add", "del", "words", "cancel", "clear"]) & filters.private)
+async def utility_cmds(client, message):
+    cmd = message.command[0]
+    if cmd == "cancel":
+        reset_user(message.from_user.id)
+        await message.reply_text("❌ Task Cancelled.")
+    elif cmd == "clear":
+        async for msg in client.get_chat_history(message.chat.id, limit=50):
+            try: await msg.delete()
+            except: pass
+    elif cmd == "add":
+        if len(message.command) < 2: return await message.reply_text("Usage: `/add word`")
+        word_to_add = message.command[1]
+        if word_to_add not in CLEANER_WORDS:
+            CLEANER_WORDS.append(word_to_add)
+            await message.reply_text(f"✅ Added: **{word_to_add}**\nAb ye replace hoke '{CREDIT_NAME}' ban jayega.")
+        else:
+            await message.reply_text("⚠️ Ye word pehle se added hai.")
+    elif cmd == "del":
+        if len(message.command) < 2: return
+        word_to_del = message.command[1]
+        if word_to_del in CLEANER_WORDS:
+            CLEANER_WORDS.remove(word_to_del)
+            await message.reply_text(f"🗑 Removed: **{word_to_del}**")
+    elif cmd == "words":
+        await message.reply_text(f"📝 **Cleaner Words:**\n{CLEANER_WORDS}")
 
 @app.on_message(filters.command("done") & filters.private)
 async def batch_done(client, message):
@@ -79,7 +117,7 @@ async def batch_done(client, message):
         await message.reply_text("✅ Files collected. Ab **Series Name** bhejein:")
     else: await message.reply_text("⚠️ Batch khali hai!")
 
-# --- SEARCH ---
+# --- SEARCH (Updated for Title Logo) ---
 @app.on_message(filters.command(["search", "series"]) & filters.private)
 async def search_handler(client, message):
     if len(message.command) < 2: return
@@ -94,9 +132,11 @@ async def search_handler(client, message):
 @app.on_callback_query(filters.regex("^stype_"))
 async def search_type_cb(client, callback):
     _, stype, query = callback.data.split("_")
+    # Using short query to avoid button length limit
+    s_query = query[:20] 
     btn = InlineKeyboardMarkup([
-        [InlineKeyboardButton("1", callback_data=f"snum_{stype}_0_{query[:15]}"), InlineKeyboardButton("2", callback_data=f"snum_{stype}_1_{query[:15]}")],
-        [InlineKeyboardButton("3", callback_data=f"snum_{stype}_2_{query[:15]}"), InlineKeyboardButton("4", callback_data=f"snum_{stype}_3_{query[:15]}")]
+        [InlineKeyboardButton("1", callback_data=f"snum_{stype}_0_{s_query}"), InlineKeyboardButton("2", callback_data=f"snum_{stype}_1_{s_query}")],
+        [InlineKeyboardButton("3", callback_data=f"snum_{stype}_2_{s_query}"), InlineKeyboardButton("4", callback_data=f"snum_{stype}_3_{s_query}")]
     ])
     await callback.message.edit(f"✅ Select Option (1-4):", reply_markup=btn)
 
@@ -104,18 +144,40 @@ async def search_type_cb(client, callback):
 async def search_final_cb(client, callback):
     parts = callback.data.split("_")
     stype, idx, query = parts[1], int(parts[2]), parts[3]
+    
     async with aiohttp.ClientSession() as session:
-        async with session.get(f"https://api.themoviedb.org/3/search/multi?api_key={TMDB_API_KEY}&query={query}&include_image_language=en,null") as r:
+        # 1. Search to get ID and Media Type
+        async with session.get(f"https://api.themoviedb.org/3/search/multi?api_key={TMDB_API_KEY}&query={query}") as r:
             data = await r.json()
-            if data.get('results') and len(data['results']) > idx:
-                res = data['results'][idx]
-                path = res.get('poster_path' if stype == 'poster' else 'backdrop_path')
-                await callback.message.delete()
-                if path:
-                    await client.send_photo(callback.from_user.id, f"https://image.tmdb.org/t/p/w500{path}", caption=f"🎬 **{res.get('title', res.get('name'))}**")
-                else: await callback.answer("Image nahi mili.", show_alert=True)
+            if not data.get('results') or len(data['results']) <= idx:
+                return await callback.answer("❌ Search not found or expired.", show_alert=True)
+            
+            res = data['results'][idx]
+            mid = res['id']
+            mtype = res.get('media_type', 'movie')
+            default_path = res.get('poster_path' if stype == 'poster' else 'backdrop_path')
+            title = res.get('title', res.get('name'))
 
-# --- MAIN ENGINE ---
+        # 2. Fetch English Images (Logo Hunter)
+        # This call gets images with English text specifically
+        async with session.get(f"https://api.themoviedb.org/3/{mtype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en") as r2:
+            img_data = await r2.json()
+            # Select appropriate list
+            img_list = img_data.get('posters' if stype == 'poster' else 'backdrops', [])
+            
+            # Use first English image if available, else fallback to default
+            if img_list:
+                final_path = img_list[0]['file_path']
+            else:
+                final_path = default_path
+            
+            await callback.message.delete()
+            if final_path:
+                await client.send_photo(callback.from_user.id, f"https://image.tmdb.org/t/p/w500{final_path}", caption=f"🎬 **{title}**\n🆔 {mid}")
+            else:
+                await callback.answer("❌ Image nahi mili.", show_alert=True)
+
+# --- ENGINE ---
 @app.on_message(filters.private & ~filters.regex(r"^/"))
 async def engine(client, message):
     uid = message.from_user.id
@@ -127,7 +189,7 @@ async def engine(client, message):
         await message.reply_text(f"🔗 **Short Link:**\n`{short}`")
         return await message.delete()
 
-    # 2. URL UPLOADER (With Progress Bar)
+    # 2. URL UPLOADER
     if mode == "url" and message.text and message.text.startswith("http"):
         sts = await message.reply_text("📥 Downloading...")
         fpath = f"downloads/{uid}_file"
@@ -154,10 +216,12 @@ async def engine(client, message):
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="bt_video"), InlineKeyboardButton("📁 File", callback_data="bt_doc")]])
         return await message.reply_text(f"✅ Name: **{message.text}**\nSelect Format:", reply_markup=btn)
 
-    # 4. CAPTION MODE (Direct & Fast)
+    # 4. CAPTION MODE (Cleaner Applied)
     if mode == "caption_mode" and (message.document or message.video):
         file = message.document or message.video
-        cap = get_fancy_caption(file.file_name or "File", file.file_size)
+        fname = file.file_name or "File"
+        fname = apply_cleaner(fname) # Cleaner
+        cap = get_fancy_caption(fname, file.file_size)
         await message.copy(chat_id=uid, caption=cap)
         return
 
@@ -177,7 +241,7 @@ async def engine(client, message):
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="mode_video"), InlineKeyboardButton("📁 File", callback_data="mode_doc")]])
         await message.reply_text("Select Format:", reply_markup=btn)
 
-# --- CALLBACKS (BATCH & RENAME LOGIC) ---
+# --- CALLBACKS ---
 @app.on_callback_query(filters.regex("^save_") | filters.regex("^mode_") | filters.regex("^bt_") | filters.regex("cancel_process"))
 async def all_callbacks(client, cb):
     uid = cb.from_user.id
@@ -186,7 +250,6 @@ async def all_callbacks(client, cb):
         reset_user(uid)
         return await cb.message.edit("❌ Task Cancelled.")
 
-    # SAVE THUMB/WM
     if "save_" in cb.data:
         fld = "thumbnails" if "thumb" in cb.data else "watermarks"
         os.makedirs(fld, exist_ok=True)
@@ -195,12 +258,10 @@ async def all_callbacks(client, cb):
         await asyncio.gather(cb.message.delete(), msg.delete())
         return await client.send_message(uid, f"✅ {fld.capitalize()} Saved!")
 
-    # SINGLE RENAME
     if "mode_" in cb.data:
         msg = user_data[uid]['msg']
         await process_rename(client, msg, cb, uid, "video" in cb.data)
 
-    # BATCH RENAME LOOP
     if "bt_" in cb.data:
         files = batch_data[uid]['files']
         base_name = batch_data[uid]['base_name']
@@ -208,28 +269,27 @@ async def all_callbacks(client, cb):
         await cb.message.edit(f"🚀 Starting Batch for {len(files)} files...")
         
         for index, msg in enumerate(files):
-            new_name = f"{base_name} S01E{index+1}.mkv" # Simple naming logic
+            new_name = f"{base_name} S01E{index+1}.mkv"
             await process_rename(client, msg, cb, uid, is_video, new_name)
-            await asyncio.sleep(2) # Floodwait protection
+            await asyncio.sleep(2)
         
         reset_user(uid)
         await client.send_message(uid, "✅ Batch Process Completed!")
 
-# --- COMMON RENAME FUNCTION (With Progress Bar) ---
+# --- RENAME FUNCTION ---
 async def process_rename(client, msg, cb, uid, is_video, force_name=None):
     sts = await client.send_message(uid, "📥 Downloading...")
     try:
-        # 1. Determine Name
         if force_name:
             fname = force_name
         else:
             fname = msg.video.file_name if msg.video else msg.document.file_name
             if not fname: fname = f"file_{uid}.mp4"
 
-        # 2. Download
+        fname = apply_cleaner(fname) # Cleaner Applied
+
         fpath = await client.download_media(msg, file_name=f"downloads/{fname}", progress=progress, progress_args=(sts, time.time(), "📥 Downloading..."))
         
-        # 3. Upload
         thumb_path = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
         caption = get_fancy_caption(fname, os.path.getsize(fpath))
         
@@ -238,7 +298,6 @@ async def process_rename(client, msg, cb, uid, is_video, force_name=None):
         else:
             await client.send_document(uid, fpath, thumb=thumb_path, caption=caption, force_document=True, progress=progress, progress_args=(sts, time.time(), "📤 Uploading..."))
         
-        # 4. Auto Delete
         await asyncio.gather(msg.delete(), sts.delete())
         if os.path.exists(fpath): os.remove(fpath)
 

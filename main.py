@@ -20,12 +20,12 @@ API_ID = int(os.environ.get("API_ID", "12345"))
 API_HASH = os.environ.get("API_HASH", "hash")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "token")
 
-# ✅ API KEY (Updated)
+# ✅ API KEY
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "02a832d91755c2f5e8a2d1a6740a8674") 
 
 CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"
 
-# ✅ BLOGGER LINK (Updated)
+# ✅ BLOGGER LINK
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
 app = Client("filmy_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
@@ -88,15 +88,12 @@ def get_media_info(name):
     e = re.search(r"[Ee](\d{1,3})", name)
     return (s.group(1) if s else None), (e.group(1) if e else None)
 
-# 🔥 CAPTION STYLE (Season/Episode Wala)
 def get_fancy_caption(filename, filesize, duration=0):
     caption = f"<b>{filename}</b>\n\n"
-    
     s, e = get_media_info(filename)
     if s: caption += f"💿 <b>Season ➥ {s}</b>\n"
     if e: caption += f"📺 <b>Episode ➥ {e}</b>\n"
     if s or e: caption += "\n"
-        
     caption += f"<blockquote><b>File Size ♻️ ➥ {filesize}</b></blockquote>\n"
     if duration > 0:
         caption += f"<blockquote><b>Duration ⏰ ➥ {get_duration_str(duration)}</b></blockquote>\n"
@@ -123,23 +120,34 @@ def apply_watermark(base_path, wm_path):
         print(f"WM Error: {e}")
         return base_path
 
-# 🔥 PROGRESS BAR (With Cancel Button)
+# 🔥 DETAILED PROGRESS BAR (Speed, %, Time sab dikhayega)
 async def progress(current, total, message, start_time, status):
     now = time.time()
     diff = now - start_time
-    if round(diff % 5.00) == 0 or current == total:
+    
+    # Update every 3 seconds (Fast Response)
+    if round(diff % 3.00) == 0 or current == total:
         percentage = current * 100 / total
         speed = current / diff
         time_left = round((total - current) / speed) if speed > 0 else 0
-        tmp = (f"{status}\n"
-               f"[{''.join(['●' for i in range(math.floor(percentage / 5))])}{''.join(['○' for i in range(20 - math.floor(percentage / 5))])}] {round(percentage, 2)}%\n"
-               f"💾 {humanbytes(current)} / {humanbytes(total)}\n"
-               f"🚀 {humanbytes(speed)}/s | ⏳ {time.strftime('%H:%M:%S', time.gmtime(time_left))}")
+        
+        # Progress Bar Design
+        bar_len = 10
+        filled = int(percentage / 100 * bar_len)
+        bar = '●' * filled + '○' * (bar_len - filled)
+        
+        tmp = (
+            f"{status}\n\n"
+            f"[{bar}] <b>{round(percentage, 1)}%</b>\n"
+            f"📂 <b>Size:</b> {humanbytes(current)} / {humanbytes(total)}\n"
+            f"🚀 <b>Speed:</b> {humanbytes(speed)}/s\n"
+            f"⏳ <b>ETA:</b> {time.strftime('%H:%M:%S', time.gmtime(time_left))}"
+        )
         
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_process")]])
         try: await message.edit(tmp, reply_markup=btn)
         except: pass
-           # --- COMMANDS ---
+        # --- COMMANDS ---
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
     try: await message.delete()
@@ -327,7 +335,7 @@ async def search_handler(client, message):
         
     except Exception as e:
         await status.edit(f"❌ Error: {e}")
-    # --- BUTTON CALLBACKS ---
+# --- BUTTON CALLBACKS ---
 @app.on_callback_query(filters.regex("^img_"))
 async def img_type_callback(client, callback):
     try:
@@ -350,7 +358,6 @@ async def img_process_callback(client, callback):
         
         await callback.message.edit("⏳ <b>Downloading...</b>")
         
-        # LOGO PRIORITY LOGIC
         url_logo = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi"
         data_logo = requests.get(url_logo).json()
         key = 'posters' if img_type == 'poster' else 'backdrops'
@@ -433,10 +440,10 @@ async def cancel_process_callback(client, callback):
     if uid in user_data: del user_data[uid]
     if uid in batch_data: del batch_data[uid]
     await callback.answer("❌ Task Cancelled!", show_alert=True)
-    try: await callback.message.delete()
+    try: await callback.message.edit("❌ <b>Process Cancelled by User!</b>")
     except: pass
 
-# 🔥 BATCH COMMANDS (Moved UP for Priority)
+# 🔥 BATCH COMMANDS (Priority High)
 @app.on_message(filters.command("batch") & filters.private)
 async def batch_cmd(client, message):
     try: await message.delete(); 
@@ -454,29 +461,73 @@ async def batch_done(client, message):
         await message.reply_text(f"✅ <b>{len(batch_data[uid]['files'])} Files.</b>\nSeries Name bhejein:")
     else: await message.reply_text("⚠️ Pehle files bhejein!")
 
+# 🔥 BATCH PROCESS (Detailed Progress Linked)
 @app.on_callback_query(filters.regex("^batch_"))
 async def batch_process(client, callback):
     uid = callback.from_user.id
     mode = "video" if "video" in callback.data else "doc"
-    status = await callback.message.edit_text("⏳ <b>Starting Batch...</b>")
-    for idx, msg in enumerate(batch_data[uid]['files']):
+    
+    btn = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_process")]])
+    status = await callback.message.edit_text("⏳ <b>Starting Batch...</b>", reply_markup=btn)
+    
+    files_list = batch_data[uid]['files']
+    total_files = len(files_list)
+    
+    for idx, msg in enumerate(files_list):
+        if uid not in batch_data: await status.edit("❌ Batch Cancelled!"); return
+
         media = msg.document or msg.video or msg.audio
         if not media: continue
+        
         s, e = get_media_info(media.file_name or "")
         base = batch_data[uid]['base_name']
         ext = get_extension(media.file_name or "")
         new_name = f"{base} - S{s}E{e}{ext}" if s and e else (f"{base} - E{e}{ext}" if e else f"{base} - Part {idx+1}{ext}")
-        await status.edit(f"♻️ Processing {idx+1}...\n📂 {new_name}")
-        dl = await client.download_media(media, f"downloads/{new_name}")
+        
+        # DOWNLOADING (Detailed Status Passed)
+        start = time.time()
+        try:
+            dl = await client.download_media(
+                media, 
+                f"downloads/{new_name}",
+                progress=progress,
+                progress_args=(status, start, f"📥 <b>Downloading File {idx+1}/{total_files}</b>")
+            )
+        except Exception as e:
+            await status.edit(f"❌ Error Downloading File {idx+1}: {e}")
+            continue
+
+        if uid not in batch_data: 
+            os.remove(dl)
+            await status.edit("❌ Batch Cancelled!"); return
+
         w, h, dur = get_video_attributes(dl)
+        file_size = humanbytes(os.path.getsize(dl))
         thumb_path = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
         wm_path = f"watermarks/{uid}.jpg"
         if thumb_path and os.path.exists(wm_path): thumb_path = apply_watermark(thumb_path, wm_path)
         caption = get_fancy_caption(new_name, humanbytes(os.path.getsize(dl)), dur)
-        if mode == 'video': await client.send_video(uid, dl, caption=caption, thumb=thumb, duration=dur, width=w, height=h)
-        else: await client.send_document(uid, dl, caption=caption, thumb=thumb, force_document=True)
+        
+        # UPLOADING (Detailed Status Passed)
+        start = time.time()
+        try:
+            if mode == 'video': 
+                await client.send_video(
+                    uid, dl, caption=caption, thumb=thumb_path, duration=dur, width=w, height=h,
+                    progress=progress, progress_args=(status, start, f"📤 <b>Uploading File {idx+1}/{total_files}</b>")
+                )
+            else: 
+                await client.send_document(
+                    uid, dl, caption=caption, thumb=thumb_path, force_document=True,
+                    progress=progress, progress_args=(status, start, f"📤 <b>Uploading File {idx+1}/{total_files}</b>")
+                )
+        except Exception as e:
+            await client.send_message(uid, f"❌ Upload Error File {idx+1}: {e}")
+            
         os.remove(dl)
-    await status.edit("✅ Batch Completed!"); del batch_data[uid]
+        
+    await status.edit("✅ <b>Batch Completed Successfully!</b>"); 
+    if uid in batch_data: del batch_data[uid]
 
 @app.on_message(filters.private & filters.regex(r"^https?://"))
 async def link_handler(client, message):
@@ -561,12 +612,10 @@ async def process_url_upload(client, message, uid, mode):
     except Exception as e: await status.edit(f"❌ Error: {e}")
     if os.path.exists(path): os.remove(path)
 
-# 🔥 HANDLE TEXT (Moved DOWN & Protected)
+# 🔥 TEXT HANDLER (Last Priority)
 @app.on_message(filters.private & filters.text)
 async def handle_text(client, message):
-    # SAFETY: Ignore commands (starting with /)
     if message.text.startswith("/"): return
-    
     uid = message.from_user.id
     text = message.text.strip()
     
@@ -622,6 +671,47 @@ async def handle_text(client, message):
             except: pass
         except Exception as e: await status.edit(f"Error: {e}")
         finally: ACTIVE_TASKS -= 1; await status.delete()
+
+@app.on_message(filters.command("batch") & filters.private)
+async def batch_cmd(client, message):
+    try: await message.delete(); 
+    except: pass
+    batch_data[message.from_user.id] = {'status': 'collecting', 'files': []}
+    await message.reply_text("🚀 <b>Batch Mode!</b> Files forward karein, fir /done dabayein.")
+
+@app.on_message(filters.command("done") & filters.private)
+async def batch_done(client, message):
+    try: await message.delete(); 
+    except: pass
+    uid = message.from_user.id
+    if uid in batch_data and batch_data[uid]['files']:
+        batch_data[uid]['status'] = 'wait_name'
+        await message.reply_text(f"✅ <b>{len(batch_data[uid]['files'])} Files.</b>\nSeries Name bhejein:")
+    else: await message.reply_text("⚠️ Pehle files bhejein!")
+
+@app.on_callback_query(filters.regex("^batch_"))
+async def batch_process(client, callback):
+    uid = callback.from_user.id
+    mode = "video" if "video" in callback.data else "doc"
+    status = await callback.message.edit_text("⏳ <b>Starting Batch...</b>")
+    for idx, msg in enumerate(batch_data[uid]['files']):
+        media = msg.document or msg.video or msg.audio
+        if not media: continue
+        s, e = get_media_info(media.file_name or "")
+        base = batch_data[uid]['base_name']
+        ext = get_extension(media.file_name or "")
+        new_name = f"{base} - S{s}E{e}{ext}" if s and e else (f"{base} - E{e}{ext}" if e else f"{base} - Part {idx+1}{ext}")
+        await status.edit(f"♻️ Processing {idx+1}...\n📂 {new_name}")
+        dl = await client.download_media(media, f"downloads/{new_name}")
+        w, h, dur = get_video_attributes(dl)
+        thumb_path = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
+        wm_path = f"watermarks/{uid}.jpg"
+        if thumb_path and os.path.exists(wm_path): thumb_path = apply_watermark(thumb_path, wm_path)
+        caption = get_fancy_caption(new_name, humanbytes(os.path.getsize(dl)), dur)
+        if mode == 'video': await client.send_video(uid, dl, caption=caption, thumb=thumb, duration=dur, width=w, height=h)
+        else: await client.send_document(uid, dl, caption=caption, thumb=thumb, force_document=True)
+        os.remove(dl)
+    await status.edit("✅ Batch Completed!"); del batch_data[uid]
 
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio))
 async def handle_files(client, message):

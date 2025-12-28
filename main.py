@@ -147,7 +147,7 @@ async def progress(current, total, message, start_time, status):
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_process")]])
         try: await message.edit(tmp, reply_markup=btn)
         except: pass
-        # --- COMMANDS ---
+            # --- COMMANDS ---
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
     try: await message.delete()
@@ -443,11 +443,15 @@ async def cancel_process_callback(client, callback):
     try: await callback.message.edit("❌ <b>Process Cancelled by User!</b>")
     except: pass
 
-# 🔥 BATCH COMMANDS (Priority High)
+# 🔥 BATCH COMMANDS (Mode Reset Added)
 @app.on_message(filters.command("batch") & filters.private)
 async def batch_cmd(client, message):
     try: await message.delete(); 
     except: pass
+    
+    # Reset Link Mode to avoid conflict
+    if message.from_user.id in user_modes: del user_modes[message.from_user.id]
+    
     batch_data[message.from_user.id] = {'status': 'collecting', 'files': []}
     await message.reply_text("🚀 <b>Batch Mode!</b> Files forward karein, fir /done dabayein.")
 
@@ -461,7 +465,7 @@ async def batch_done(client, message):
         await message.reply_text(f"✅ <b>{len(batch_data[uid]['files'])} Files.</b>\nSeries Name bhejein:")
     else: await message.reply_text("⚠️ Pehle files bhejein!")
 
-# 🔥 BATCH PROCESS (Detailed Progress Linked)
+# 🔥 BATCH PROCESS
 @app.on_callback_query(filters.regex("^batch_"))
 async def batch_process(client, callback):
     uid = callback.from_user.id
@@ -484,7 +488,7 @@ async def batch_process(client, callback):
         ext = get_extension(media.file_name or "")
         new_name = f"{base} - S{s}E{e}{ext}" if s and e else (f"{base} - E{e}{ext}" if e else f"{base} - Part {idx+1}{ext}")
         
-        # DOWNLOADING (Detailed Status Passed)
+        # DOWNLOADING
         start = time.time()
         try:
             dl = await client.download_media(
@@ -508,7 +512,7 @@ async def batch_process(client, callback):
         if thumb_path and os.path.exists(wm_path): thumb_path = apply_watermark(thumb_path, wm_path)
         caption = get_fancy_caption(new_name, humanbytes(os.path.getsize(dl)), dur)
         
-        # UPLOADING (Detailed Status Passed)
+        # UPLOADING
         start = time.time()
         try:
             if mode == 'video': 
@@ -612,13 +616,14 @@ async def process_url_upload(client, message, uid, mode):
     except Exception as e: await status.edit(f"❌ Error: {e}")
     if os.path.exists(path): os.remove(path)
 
-# 🔥 TEXT HANDLER (Last Priority)
+# 🔥 TEXT HANDLER (Strict Priority Applied)
 @app.on_message(filters.private & filters.text)
 async def handle_text(client, message):
     if message.text.startswith("/"): return
     uid = message.from_user.id
     text = message.text.strip()
     
+    # 1. Check if waiting for URL Name
     if uid in download_queue and download_queue[uid].get('wait_name'):
         try: await message.delete(); 
         except: pass
@@ -626,6 +631,18 @@ async def handle_text(client, message):
         download_queue[uid]['wait_name'] = False
         await ask_url_format(client, message, uid, is_new=True)
         return
+
+    # 2. Check if waiting for BATCH Name (MOVED UP FOR PRIORITY)
+    if uid in batch_data and batch_data[uid]['status'] == 'wait_name':
+        try: await message.delete(); 
+        except: pass
+        batch_data[uid]['base_name'] = auto_clean(text)
+        batch_data[uid]['status'] = 'ready'
+        btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="batch_video"), InlineKeyboardButton("📁 File", callback_data="batch_doc")]])
+        await message.reply_text(f"✅ Name: {text}\nFormat?", reply_markup=btn)
+        return
+
+    # 3. Check for Link Mode (Now Lower Priority)
     if user_modes.get(uid) == "blogger_link":
         if "?start=" in text:
              try:
@@ -638,14 +655,8 @@ async def handle_text(client, message):
              enc = base64.b64encode(text.encode("utf-8")).decode("utf-8")
              await message.reply_text(f"✅ <b>Link Ready!</b>\n\n🔗 <b>Your URL:</b>\n<code>{BLOGGER_URL}?data={enc}</code>")
         return
-    if uid in batch_data and batch_data[uid]['status'] == 'wait_name':
-        try: await message.delete(); 
-        except: pass
-        batch_data[uid]['base_name'] = auto_clean(text)
-        batch_data[uid]['status'] = 'ready'
-        btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="batch_video"), InlineKeyboardButton("📁 File", callback_data="batch_doc")]])
-        await message.reply_text(f"✅ Name: {text}\nFormat?", reply_markup=btn)
-        return
+
+    # 4. Normal Reply (Rename)
     if message.reply_to_message and uid in user_data:
         global ACTIVE_TASKS
         task = user_data.pop(uid)
@@ -671,74 +682,6 @@ async def handle_text(client, message):
             except: pass
         except Exception as e: await status.edit(f"Error: {e}")
         finally: ACTIVE_TASKS -= 1; await status.delete()
-
-@app.on_message(filters.command("batch") & filters.private)
-async def batch_cmd(client, message):
-    try: await message.delete(); 
-    except: pass
-    batch_data[message.from_user.id] = {'status': 'collecting', 'files': []}
-    await message.reply_text("🚀 <b>Batch Mode!</b> Files forward karein, fir /done dabayein.")
-
-@app.on_message(filters.command("done") & filters.private)
-async def batch_done(client, message):
-    try: await message.delete(); 
-    except: pass
-    uid = message.from_user.id
-    if uid in batch_data and batch_data[uid]['files']:
-        batch_data[uid]['status'] = 'wait_name'
-        await message.reply_text(f"✅ <b>{len(batch_data[uid]['files'])} Files.</b>\nSeries Name bhejein:")
-    else: await message.reply_text("⚠️ Pehle files bhejein!")
-
-@app.on_callback_query(filters.regex("^batch_"))
-async def batch_process(client, callback):
-    uid = callback.from_user.id
-    mode = "video" if "video" in callback.data else "doc"
-    status = await callback.message.edit_text("⏳ <b>Starting Batch...</b>")
-    for idx, msg in enumerate(batch_data[uid]['files']):
-        media = msg.document or msg.video or msg.audio
-        if not media: continue
-        s, e = get_media_info(media.file_name or "")
-        base = batch_data[uid]['base_name']
-        ext = get_extension(media.file_name or "")
-        new_name = f"{base} - S{s}E{e}{ext}" if s and e else (f"{base} - E{e}{ext}" if e else f"{base} - Part {idx+1}{ext}")
-        await status.edit(f"♻️ Processing {idx+1}...\n📂 {new_name}")
-        dl = await client.download_media(media, f"downloads/{new_name}")
-        w, h, dur = get_video_attributes(dl)
-        thumb_path = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
-        wm_path = f"watermarks/{uid}.jpg"
-        if thumb_path and os.path.exists(wm_path): thumb_path = apply_watermark(thumb_path, wm_path)
-        caption = get_fancy_caption(new_name, humanbytes(os.path.getsize(dl)), dur)
-        if mode == 'video': await client.send_video(uid, dl, caption=caption, thumb=thumb, duration=dur, width=w, height=h)
-        else: await client.send_document(uid, dl, caption=caption, thumb=thumb, force_document=True)
-        os.remove(dl)
-    await status.edit("✅ Batch Completed!"); del batch_data[uid]
-
-@app.on_message(filters.private & (filters.document | filters.video | filters.audio))
-async def handle_files(client, message):
-    uid = message.from_user.id
-    media = message.document or message.video or message.audio
-    if not media: return
-    if getattr(media, "mime_type", "").startswith("image/"):
-        btn = InlineKeyboardMarkup([[InlineKeyboardButton("🖼 Thumbnail", callback_data="save_thumb"), InlineKeyboardButton("💧 Watermark", callback_data="save_wm")], [InlineKeyboardButton("➡️ Rename File", callback_data="force_rename")]])
-        await message.reply_text("<b>🖼 Image Detected!</b>\nSet as Thumbnail or Watermark?", reply_markup=btn, quote=True)
-        return
-    if user_modes.get(uid) == "caption_only":
-        try:
-            file_size = humanbytes(getattr(media, "file_size", 0))
-            dur = int(getattr(media, "duration", 0) or 0)
-            caption = get_fancy_caption(media.file_name or "Unknown File", file_size, dur)
-            await message.reply_cached_media(media.file_id, caption=caption)
-            try: await message.delete() 
-            except: pass
-        except Exception as e: await message.reply_text(f"❌ Error: {e}")
-        return
-    if uid in batch_data and batch_data[uid]['status'] == 'collecting':
-        batch_data[uid]['files'].append(message); return
-    global ACTIVE_TASKS
-    if ACTIVE_TASKS >= MAX_TASK_LIMIT: return await message.reply_text("⚠️ Busy!")
-    user_data[uid] = {'msg': message}
-    btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="mode_video"), InlineKeyboardButton("📁 File", callback_data="mode_document")]])
-    await message.reply_text("Format select karein:", reply_markup=btn, quote=True)
 
 # --- MAIN LOOP ---
 async def main():

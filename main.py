@@ -19,7 +19,7 @@ API_ID = int(os.environ.get("API_ID", "12345"))
 API_HASH = os.environ.get("API_HASH", "hash")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "token")
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "b3b754854b7375276e19195a63969a41") 
-CREDIT_NAME = "🦋 Filmy Flip 🦋"
+CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"  # ✅ Name Updated
 BLOGGER_URL = os.environ.get("BLOGGER_URL", "https://yoursite.com")
 
 app = Client("filmy_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
@@ -53,10 +53,10 @@ def humanbytes(size):
     while size > power: size /= power; n += 1
     return str(round(size, 2)) + " " + dic_power[n] + 'B'
 
-# 🔥 FIXED DURATION FUNCTION 🔥
+# ✅ Duration Fix (Float Error Removed)
 def get_duration_str(duration):
     if not duration: return "00:00"
-    duration = int(duration) # Force Integer
+    duration = int(duration) 
     m, s = divmod(duration, 60)
     h, m = divmod(m, 60)
     return f"{h:02d}:{m:02d}:{s:02d}" if h > 0 else f"{m:02d}:{s:02d}"
@@ -91,18 +91,23 @@ def get_fancy_caption(filename, filesize, duration=0):
     caption += f"<blockquote><code>Powered By ➥ {CREDIT_NAME}</code></blockquote>"
     return caption
 
-# --- WATERMARK LOGIC ---
+# --- WATERMARK LOGIC (Bottom Center) ---
 def apply_watermark(base_path, wm_path):
     try:
         base = Image.open(base_path).convert("RGBA")
         wm = Image.open(wm_path).convert("RGBA")
+        
+        # Resize to 70% width
         base_w, base_h = base.size
         wm_w, wm_h = wm.size
         new_wm_w = int(base_w * 0.70)
         new_wm_h = int(wm_h * (new_wm_w / wm_w))
         wm = wm.resize((new_wm_w, new_wm_h), Image.LANCZOS)
+        
+        # Position: Bottom Center
         x = (base_w - new_wm_w) // 2
         y = base_h - new_wm_h - 20 
+        
         base.paste(wm, (x, y), wm)
         base = base.convert("RGB")
         base.save(base_path, "JPEG")
@@ -124,14 +129,14 @@ async def progress(current, total, message, start_time, status):
                f"🚀 {humanbytes(speed)}/s | ⏳ {time.strftime('%H:%M:%S', time.gmtime(time_left))}")
         try: await message.edit(tmp)
         except: pass
-      # --- COMMANDS ---
+            # --- COMMANDS ---
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
     try: await message.delete()
     except: pass
     await message.reply_text(
         f"👋 <b>Hello {message.from_user.first_name}!</b>\n\n"
-        "🤖 <b>Filmy Flip All-in-One Bot</b>\n\n"
+        "🤖 <b>Filmy Flip Hub Bot</b>\n\n"
         "🌐 <b>URL Mod:</b> <code>/url</code>\n"
         "🎬 <b>Search:</b> <code>/search</code>, <code>/series</code>\n"
         "📁 <b>Rename:</b> <code>/rename</code>, <code>/caption</code>\n"
@@ -263,7 +268,7 @@ async def save_callback(client, callback):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     await client.download_media(callback.message.reply_to_message, path)
     await callback.message.edit_text("✅ <b>Saved!</b>")
- # ==========================================
+# ==========================================
 # 🚀 1. URL UPLOADER
 # ==========================================
 @app.on_message(filters.private & filters.regex(r"^https?://"))
@@ -338,7 +343,6 @@ async def process_url_upload(client, message, uid, mode):
         w, h, dur = get_video_attributes(path)
         file_size = humanbytes(os.path.getsize(path))
         
-        # Apply Watermark
         thumb_path = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
         wm_path = f"watermarks/{uid}.jpg"
         if thumb_path and os.path.exists(wm_path):
@@ -403,7 +407,6 @@ async def handle_text(client, message):
             dl = await client.download_media(media, f"downloads/{new_name}", progress=progress, progress_args=(status, time.time(), "📥"))
             w, h, dur = get_video_attributes(dl)
             
-            # Apply Watermark
             thumb_path = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
             wm_path = f"watermarks/{uid}.jpg"
             if thumb_path and os.path.exists(wm_path):
@@ -421,7 +424,7 @@ async def handle_text(client, message):
         finally: ACTIVE_TASKS -= 1; await status.delete()
 
 # ==========================================
-# 🚀 3. FILE HANDLERS (Caption & Images)
+# 🚀 3. FILE HANDLERS (Priority Fixed)
 # ==========================================
 @app.on_message(filters.command("batch") & filters.private)
 async def batch_cmd(client, message):
@@ -457,7 +460,6 @@ async def batch_process(client, callback):
         dl = await client.download_media(media, f"downloads/{new_name}")
         w, h, dur = get_video_attributes(dl)
         
-        # Apply Watermark
         thumb_path = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
         wm_path = f"watermarks/{uid}.jpg"
         if thumb_path and os.path.exists(wm_path):
@@ -473,16 +475,24 @@ async def batch_process(client, callback):
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio))
 async def handle_files(client, message):
     uid = message.from_user.id
+    media = message.document or message.video or message.audio
+    if not media: return
     
-    # 🔥 FIX: Caption Mode Error Safe
+    # 🔥 1. CHECK IMAGE FIRST (For Watermark/Thumbnail)
+    mime = getattr(media, "mime_type", "")
+    if mime and mime.startswith("image/"):
+        btn = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🖼 Thumbnail", callback_data="save_thumb"), InlineKeyboardButton("💧 Watermark", callback_data="save_wm")],
+            [InlineKeyboardButton("➡️ Rename File", callback_data="force_rename")]
+        ])
+        await message.reply_text("<b>🖼 Image Detected!</b>\nSet as Thumbnail or Watermark?", reply_markup=btn, quote=True)
+        return
+
+    # 🔥 2. THEN CHECK CAPTION MODE
     if user_modes.get(uid) == "caption_only":
         try:
-            media = message.document or message.video or message.audio
-            if not media: return await message.reply_text("❌ Unknown file type")
-            
-            # Use getattr with default 0 to avoid float errors
             file_size = humanbytes(getattr(media, "file_size", 0))
-            dur = int(getattr(media, "duration", 0) or 0)
+            dur = int(getattr(media, "duration", 0) or 0) # Force int
             
             caption = get_fancy_caption(media.file_name or "Unknown File", file_size, dur)
             await message.reply_cached_media(media.file_id, caption=caption)
@@ -492,6 +502,7 @@ async def handle_files(client, message):
             await message.reply_text(f"❌ Error: {e}")
         return
 
+    # 🔥 3. THEN CHECK BATCH
     if uid in batch_data and batch_data[uid]['status'] == 'collecting':
         batch_data[uid]['files'].append(message); return
     
@@ -499,17 +510,6 @@ async def handle_files(client, message):
     if ACTIVE_TASKS >= MAX_TASK_LIMIT: return await message.reply_text("⚠️ Busy!")
     
     user_data[uid] = {'msg': message}
-    media = message.document or message.video or message.audio
-    
-    mime = getattr(media, "mime_type", "")
-    if mime and mime.startswith("image/"):
-        btn = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🖼 Thumbnail", callback_data="save_thumb"), InlineKeyboardButton("💧 Watermark", callback_data="save_wm")],
-            [InlineKeyboardButton("➡️ Rename File", callback_data="force_rename")]
-        ])
-        await message.reply_text("<b>🖼 Image Detected!</b>", reply_markup=btn, quote=True)
-        return
-
     btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="mode_video"), InlineKeyboardButton("📁 File", callback_data="mode_document")]])
     await message.reply_text("Format select karein:", reply_markup=btn, quote=True)
 
@@ -544,4 +544,3 @@ async def main():
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
-        

@@ -232,17 +232,14 @@ async def save_watermark(client, message):
     await message.reply_text("Save as:", reply_markup=btn, quote=True)
 
 # ==========================================
-# 🚀 SMART SEARCH HANDLER (With Clean Logic)
+# 🚀 SEARCH HANDLER (With Logo/Text Fix)
 # ==========================================
 def extract_and_clean_query(query_list):
     raw_text = " ".join(query_list).lower()
     season_num = None
-    
-    # 1. Season Detection (s3, season 2)
     match = re.search(r'\b(?:s|season)\s?(\d{1,2})\b', raw_text)
     if match: season_num = int(match.group(1))
     
-    # 2. Junk Removal
     ignore_words = [
         "full", "movie", "hindi", "dubbed", "download", "hd", "4k", 
         "1080p", "720p", "480p", "camrip", "dvdscr", "web-dl", "webrip",
@@ -253,7 +250,6 @@ def extract_and_clean_query(query_list):
     for w in query_list:
         if w.lower() not in ignore_words and not re.match(r'^s\d+$', w.lower()):
             clean_words.append(w)
-            
     return " ".join(clean_words), season_num
 
 @app.on_message(filters.command(["search", "series"]))
@@ -265,8 +261,9 @@ async def search_handler(client, message):
     is_series = "series" in message.command[0]
     stype = "tv" if is_series else "movie"
     
-    status = await message.reply_text(f"🔎 <b>Searching:</b> <code>{query}</code>" + (f" (Season {season_num})" if season_num else "") + "...")
+    status = await message.reply_text(f"🔎 <b>Searching:</b> <code>{query}</code>...")
     try:
+        # 1. Main Search
         url = f"https://api.themoviedb.org/3/search/{stype}?api_key={TMDB_API_KEY}&query={query}"
         data = requests.get(url).json()
         
@@ -277,17 +274,26 @@ async def search_handler(client, message):
         mid = res['id']
         title = res.get('name') if is_series else res.get('title')
         date = res.get('first_air_date') if is_series else res.get('release_date')
-        poster_path = res.get('poster_path')
-
-        # Season Poster Logic
-        if is_series and season_num:
-            s_url = f"https://api.themoviedb.org/3/tv/{mid}/season/{season_num}?api_key={TMDB_API_KEY}"
-            s_data = requests.get(s_url).json()
-            if s_data.get('poster_path'):
-                poster_path = s_data['poster_path']
-                title += f" (Season {season_num})"
-                date = s_data.get('air_date', date)
-
+        
+        # 🔥 2. LOGO FIX: Search for English/Hindi Poster specifically
+        poster_path = res.get('poster_path') # Default fallback
+        
+        try:
+            # Series Season Check
+            if is_series and season_num:
+                s_url = f"https://api.themoviedb.org/3/tv/{mid}/season/{season_num}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi,null"
+                s_data = requests.get(s_url).json()
+                if s_data.get('posters'):
+                    poster_path = s_data['posters'][0]['file_path'] # Get first EN/HI poster
+            else:
+                # Movie/Series Main Check
+                img_url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi,null"
+                img_data = requests.get(img_url).json()
+                if img_data.get('posters'):
+                     poster_path = img_data['posters'][0]['file_path'] # Get first EN/HI poster
+        except:
+            pass # Fallback to default if error
+            
         full_poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else None
         
         btn = InlineKeyboardMarkup([
@@ -594,4 +600,3 @@ async def main():
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
-

@@ -88,14 +88,31 @@ def get_media_info(name):
     e = re.search(r"[Ee](\d{1,3})", name)
     return (s.group(1) if s else None), (e.group(1) if e else None)
 
+# 🔥 NEW: Caption Style Updated (Season/Episode Added)
 def get_fancy_caption(filename, filesize, duration=0):
+    # 1. Filename Bold
     caption = f"<b>{filename}</b>\n\n"
-    caption += f"<blockquote><code>File Size ♻️ ➥ {filesize}</code></blockquote>\n"
+    
+    # 2. Season/Episode Check
+    s, e = get_media_info(filename)
+    if s:
+        caption += f"💿 <b>Season ➥ {s}</b>\n"
+    if e:
+        caption += f"📺 <b>Episode ➥ {e}</b>\n"
+    
+    if s or e:
+        caption += "\n" # Thoda gap agar Season/Episode dikhaya to
+        
+    # 3. Stats in Quotes (Green Line Style)
+    caption += f"<blockquote><b>File Size ♻️ ➥ {filesize}</b></blockquote>\n"
+    
     if duration > 0:
-        caption += f"<blockquote><code>Duration ⏰ ➥ {get_duration_str(duration)}</code></blockquote>\n"
-    caption += f"<blockquote><code>Powered By ➥ {CREDIT_NAME}</code></blockquote>"
+        caption += f"<blockquote><b>Duration ⏰ ➥ {get_duration_str(duration)}</b></blockquote>\n"
+        
+    caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME}</b></blockquote>"
+    
     return caption
-
+    
 # --- WATERMARK LOGIC ---
 def apply_watermark(base_path, wm_path):
     try:

@@ -20,12 +20,12 @@ API_ID = int(os.environ.get("API_ID", "12345"))
 API_HASH = os.environ.get("API_HASH", "hash")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "token")
 
-# ✅ NEW API KEY
+# ✅ API KEY
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "02a832d91755c2f5e8a2d1a6740a8674") 
 
 CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"
 
-# ✅ AAPKA SPECIFIC BLOGGER LINK (Jo HTML me tha)
+# ✅ BLOGGER LINK
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
 app = Client("filmy_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
@@ -116,6 +116,7 @@ def apply_watermark(base_path, wm_path):
         print(f"WM Error: {e}")
         return base_path
 
+# 🔥 UPDATE: Progress Bar me Cancel Button Jod Diya
 async def progress(current, total, message, start_time, status):
     now = time.time()
     diff = now - start_time
@@ -127,7 +128,10 @@ async def progress(current, total, message, start_time, status):
                f"[{''.join(['●' for i in range(math.floor(percentage / 5))])}{''.join(['○' for i in range(20 - math.floor(percentage / 5))])}] {round(percentage, 2)}%\n"
                f"💾 {humanbytes(current)} / {humanbytes(total)}\n"
                f"🚀 {humanbytes(speed)}/s | ⏳ {time.strftime('%H:%M:%S', time.gmtime(time_left))}")
-        try: await message.edit(tmp)
+        
+        # Cancel Button Added
+        btn = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_process")]])
+        try: await message.edit(tmp, reply_markup=btn)
         except: pass
             # --- COMMANDS ---
 @app.on_message(filters.command("start") & filters.private)
@@ -331,18 +335,29 @@ async def img_process_callback(client, callback):
         
         await callback.message.edit("⏳ <b>Downloading...</b>")
         
-        url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en"
-        data = requests.get(url).json()
-        
         key = 'posters' if img_type == 'poster' else 'backdrops'
-        if not data.get(key):
-             url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=hi,null"
-             data = requests.get(url).json()
+        
+        # 🔥 LOGIC UPDATE: Logo Priority + Fill Quantity
+        # 1. Pehle English/Hindi (Logo) wale uthao
+        url_logo = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi"
+        data_logo = requests.get(url_logo).json()
+        pool = data_logo.get(key, [])
+        
+        # 2. Agar maange gaye photos (count) se kam mile, to Clean (Null) wale se bharo
+        if len(pool) < count:
+            url_clean = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=null"
+            data_clean = requests.get(url_clean).json()
+            clean_pool = data_clean.get(key, [])
+            
+            # Duplicates check karne ki zaroorat kam hai, seedha jod dete hain
+            pool.extend(clean_pool)
 
-        if not data.get(key):
+        if not pool:
             return await callback.message.edit("❌ No images found!")
             
-        images = data[key][:count]
+        # 3. Jitne maange thay utne slice kar lo (e.g. Total 4)
+        images = pool[:count]
+        
         wm_path = f"watermarks/{uid}.jpg"
         has_wm = os.path.exists(wm_path)
         
@@ -405,6 +420,16 @@ async def url_handler(client, callback):
     elif "video" in data or "document" in data:
         await process_url_upload(client, callback.message, uid, "video" if "video" in data else "doc")
 
+@app.on_callback_query(filters.regex("^cancel_process"))
+async def cancel_process_callback(client, callback):
+    uid = callback.from_user.id
+    if uid in download_queue: del download_queue[uid]
+    if uid in user_data: del user_data[uid]
+    if uid in batch_data: del batch_data[uid]
+    await callback.answer("❌ Task Cancelled!", show_alert=True)
+    try: await callback.message.delete()
+    except: pass
+
 @app.on_message(filters.private & filters.regex(r"^https?://"))
 async def link_handler(client, message):
     uid = message.from_user.id
@@ -427,13 +452,13 @@ async def link_handler(client, message):
              await message.reply_text(f"✅ <b>Link Ready!</b>\n\n🔗 <b>Your URL:</b>\n<code>{BLOGGER_URL}?data={enc}</code>")
         return
 
-    # Normal URL Upload
+    # Normal URL with Headers Fix
     url = message.text.strip()
-    status = await message.reply_text("🔎 <b>Checking Link...</b>")
+    btn = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_process")]])
+    status = await message.reply_text("🔎 <b>Checking Link...</b>", reply_markup=btn)
     try: await message.delete(); 
     except: pass
     try:
-        # 🔥 HEADERS ADDED HERE (Browser ban ke request jayegi)
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
         async with aiohttp.ClientSession() as session:
             async with session.head(url, headers=headers) as resp:
@@ -453,14 +478,15 @@ async def ask_url_format(client, message, uid, is_new=False):
 
 async def process_url_upload(client, message, uid, mode):
     data = download_queue[uid]
-    if message.from_user.is_bot: status = await message.edit("📥 <b>Downloading...</b>")
-    else: status = await message.reply_text("📥 <b>Downloading...</b>")
+    btn = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_process")]])
+    if message.from_user.is_bot: status = await message.edit("📥 <b>Downloading...</b>", reply_markup=btn)
+    else: status = await message.reply_text("📥 <b>Downloading...</b>", reply_markup=btn)
     
     path = f"downloads/{data['filename']}"
     os.makedirs("downloads", exist_ok=True)
     start = time.time()
     
-    # 🔥 CRITICAL FIX: Headers Added (To Bypass Bot Detection)
+    # Headers added here too
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
     
     try:
@@ -469,17 +495,18 @@ async def process_url_upload(client, message, uid, mode):
                 if resp.status != 200:
                      await status.edit(f"❌ Error: Server returned {resp.status}")
                      return
-                
                 total = int(resp.headers.get("content-length", 0))
                 async with aiofiles.open(path, "wb") as f:
                     dl = 0
                     async for chunk in resp.content.iter_chunked(1024*1024):
+                        if uid not in download_queue: await status.edit("❌ Cancelled!"); return 
                         if not chunk: break
                         await f.write(chunk)
                         dl += len(chunk)
                         if (time.time()-start) > 5: await progress(dl, total, status, start, "📥 Downloading")
         
-        await status.edit("📤 <b>Uploading...</b>")
+        if uid not in download_queue: return
+        await status.edit("📤 <b>Uploading...</b>", reply_markup=btn)
         w, h, dur = get_video_attributes(path)
         file_size = humanbytes(os.path.getsize(path))
         thumb_path = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
@@ -527,7 +554,8 @@ async def handle_text(client, message):
         global ACTIVE_TASKS
         task = user_data.pop(uid)
         ACTIVE_TASKS += 1
-        status = await message.reply_text("⏳ <b>Processing...</b>")
+        btn = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_process")]])
+        status = await message.reply_text("⏳ <b>Processing...</b>", reply_markup=btn)
         try: await message.delete(); 
         except: pass
         try:

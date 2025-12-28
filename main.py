@@ -239,6 +239,8 @@ async def img_process_callback(client, callback):
         _, count, img_type, stype, mid = callback.data.split("_")
         count = int(count)
         await callback.message.edit("⏳ <b>Downloading...</b>")
+        
+        # Logo Priority Logic
         url_logo = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi"
         data_logo = requests.get(url_logo).json()
         key = 'posters' if img_type == 'poster' else 'backdrops'
@@ -247,6 +249,7 @@ async def img_process_callback(client, callback):
             url_clean = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=null"
             data_clean = requests.get(url_clean).json()
             pool.extend(data_clean.get(key, []))
+
         if not pool: return await callback.message.edit("❌ No images found!")
         images = pool[:count]
         wm_path = f"watermarks/{uid}.jpg"
@@ -267,15 +270,15 @@ async def img_process_callback(client, callback):
 async def batch_cmd(client, message):
     uid = message.from_user.id
     batch_data[uid] = {'status': 'collecting', 'files': []}
-    if uid in user_modes: del user_modes[uid] # Reset Link Mode
-    await message.reply_text("🚀 <b>Batch Mode ON!</b>\nAb files forward karein, fir <code>/done</code> likhein.")
+    if uid in user_modes: del user_modes[uid]
+    await message.reply_text("🚀 <b>Batch Mode ON!</b>\nFiles forward karein, fir <code>/done</code> likhein.")
 
 @app.on_message(filters.command("done") & filters.private)
 async def batch_done(client, message):
     uid = message.from_user.id
     if uid in batch_data and batch_data[uid]['files']:
         batch_data[uid]['status'] = 'wait_name'
-        await message.reply_text(f"✅ <b>{len(batch_data[uid]['files'])} Files collected.</b>\nAb Series ka naya naam bhejein:")
+        await message.reply_text(f"✅ <b>{len(batch_data[uid]['files'])} Files collected.</b>\nAb Series Name bhejein:")
     else:
         await message.reply_text("⚠️ Pehle files bhejein!")
 
@@ -306,31 +309,24 @@ async def batch_process(client, callback):
         os.remove(dl)
     await status.edit("✅ Batch Completed!"); del batch_data[uid]
 
-# --- TEXT & LINK HANDLER ---
+# --- TEXT HANDLER (Priority Check) ---
 @app.on_message(filters.private & filters.text)
 async def handle_text(client, message):
     if message.text.startswith("/"): return
-    uid = message.from_user.id
-    text = message.text.strip()
+    uid, text = message.from_user.id, message.text.strip()
 
-    # 1. PRIORITY: Batch Name
+    # 1. Batch Naming Priority
     if uid in batch_data and batch_data[uid]['status'] == 'wait_name':
-        batch_data[uid]['base_name'] = text
-        batch_data[uid]['status'] = 'ready'
+        batch_data[uid].update({'base_name': text, 'status': 'ready'})
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="batch_video"), InlineKeyboardButton("📁 File", callback_data="batch_doc")]])
-        await message.reply_text(f"✅ Name set to: <b>{text}</b>\nAb format select karein:", reply_markup=btn)
+        await message.reply_text(f"✅ Name set: <b>{text}</b>\nSelect Format:", reply_markup=btn)
         return
 
-    # 2. Link Generator Mode
+    # 2. Blogger Link Mode
     if user_modes.get(uid) == "blogger_link" or "t.me/" in text:
-        if "?start=" in text:
-            start_code = text.split("?start=")[1].split()[0]
-            enc = base64.b64encode(start_code.encode("utf-8")).decode("utf-8")
-            await message.reply_text(f"✅ <b>Link Generated!</b>\n\n🔗 Your URL:\n<code>{BLOGGER_URL}?data={enc}</code>")
-        else:
-            enc = base64.b64encode(text.encode("utf-8")).decode("utf-8")
-            await message.reply_text(f"✅ <b>Link Ready!</b>\n\n🔗 Your URL:\n<code>{BLOGGER_URL}?data={enc}</code>")
-        return
+        code = text.split("?start=")[1].split()[0] if "?start=" in text else text
+        enc = base64.b64encode(code.encode()).decode()
+        await message.reply_text(f"✅ <b>Link Ready!</b>\n\n🔗 <code>{BLOGGER_URL}?data={enc}</code>")
 
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio))
 async def handle_files(client, message):
@@ -338,14 +334,26 @@ async def handle_files(client, message):
     if uid in batch_data and batch_data[uid]['status'] == 'collecting':
         batch_data[uid]['files'].append(message)
         return
-    # Normal Rename Logic
     user_data[uid] = {'msg': message}
     btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="mode_video"), InlineKeyboardButton("📁 File", callback_data="mode_document")]])
     await message.reply_text("Select Format:", reply_markup=btn, quote=True)
 
-@app.on_callback_query(filters.regex("^cancel_process"))
-async def cancel_cb(client, callback):
-    uid = callback.from_user.id
-    if uid in batch_data: del batch_data[uid]
-    await callback.answer("Cancelled!", show_alert=True)
-    await callback.message.delete()
+# --- WEB SERVER & BOT START ---
+async def start_services():
+    # Start Web Server for Render
+    port = int(os.environ.get("PORT", 8080))
+    web_app = await web_server()
+    runner = web.AppRunner(web_app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    
+    # Start Bot
+    await app.start()
+    print("Bot is alive!")
+    await asyncio.Event().wait()
+
+if __name__ == "__main__":
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(start_services())
+        

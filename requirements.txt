@@ -1,7 +1,6 @@
-pyrofork
+pyrogram
 tgcrypto
-hachoir
 aiohttp
 aiofiles
-requests
 Pillow
+hachoir

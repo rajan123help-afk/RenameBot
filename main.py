@@ -18,7 +18,10 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceRepl
 API_ID = int(os.environ.get("API_ID", "12345"))
 API_HASH = os.environ.get("API_HASH", "hash")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "token")
-TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "b3b754854b7375276e19195a63969a41") 
+
+# ✅ NEW API KEY SET HERE
+TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "02a832d91755c2f5e8a2d1a6740a8674") 
+
 CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"
 BLOGGER_URL = os.environ.get("BLOGGER_URL", "https://yoursite.com")
 
@@ -90,20 +93,16 @@ def get_fancy_caption(filename, filesize, duration=0):
     caption += f"<blockquote><code>Powered By ➥ {CREDIT_NAME}</code></blockquote>"
     return caption
 
-# --- WATERMARK LOGIC (70% & Bottom Center) ---
+# --- WATERMARK LOGIC (Bottom Center + 70%) ---
 def apply_watermark(base_path, wm_path):
     try:
         base = Image.open(base_path).convert("RGBA")
         wm = Image.open(wm_path).convert("RGBA")
         base_w, base_h = base.size
         wm_w, wm_h = wm.size
-        
-        # Resize to 70% width
         new_wm_w = int(base_w * 0.70)
         new_wm_h = int(wm_h * (new_wm_w / wm_w))
         wm = wm.resize((new_wm_w, new_wm_h), Image.LANCZOS)
-        
-        # Position: Bottom Center
         x = (base_w - new_wm_w) // 2
         y = base_h - new_wm_h - 20 
         base.paste(wm, (x, y), wm)
@@ -127,7 +126,7 @@ async def progress(current, total, message, start_time, status):
                f"🚀 {humanbytes(speed)}/s | ⏳ {time.strftime('%H:%M:%S', time.gmtime(time_left))}")
         try: await message.edit(tmp)
         except: pass
-# --- COMMANDS ---
+            # --- COMMANDS ---
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
     try: await message.delete()
@@ -372,7 +371,7 @@ async def link_handler(client, message):
     uid = message.from_user.id
     if uid in batch_data and batch_data[uid].get('status') == 'naming': return 
     
-    # 🔥 Link Gen Check
+    # 🔥 LINK MODE CHECK (Fix)
     if user_modes.get(uid) == "blogger_link":
         return await handle_text(client, message)
 
@@ -442,7 +441,7 @@ async def handle_text(client, message):
         await ask_url_format(client, message, uid, is_new=True)
         return
 
-    # 🔥 LINK GENERATOR FIX (Any Text)
+    # 🔥 LINK GENERATOR FIX (Accepts ALL Text)
     if user_modes.get(uid) == "blogger_link":
         try: await message.delete(); 
         except: pass

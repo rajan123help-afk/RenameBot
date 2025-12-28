@@ -2,6 +2,7 @@ import os
 import time
 import math
 import base64
+import re
 import aiohttp
 import aiofiles
 import asyncio
@@ -19,7 +20,7 @@ API_ID = int(os.environ.get("API_ID", "12345"))
 API_HASH = os.environ.get("API_HASH", "hash")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "token")
 
-# ✅ NEW API KEY SET HERE
+# ✅ NEW API KEY
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "02a832d91755c2f5e8a2d1a6740a8674") 
 
 CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"
@@ -93,16 +94,20 @@ def get_fancy_caption(filename, filesize, duration=0):
     caption += f"<blockquote><code>Powered By ➥ {CREDIT_NAME}</code></blockquote>"
     return caption
 
-# --- WATERMARK LOGIC (Bottom Center + 70%) ---
+# --- WATERMARK LOGIC (70% & Bottom Center) ---
 def apply_watermark(base_path, wm_path):
     try:
         base = Image.open(base_path).convert("RGBA")
         wm = Image.open(wm_path).convert("RGBA")
         base_w, base_h = base.size
         wm_w, wm_h = wm.size
+        
+        # Resize to 70% width
         new_wm_w = int(base_w * 0.70)
         new_wm_h = int(wm_h * (new_wm_w / wm_w))
         wm = wm.resize((new_wm_w, new_wm_h), Image.LANCZOS)
+        
+        # Position: Bottom Center
         x = (base_w - new_wm_w) // 2
         y = base_h - new_wm_h - 20 
         base.paste(wm, (x, y), wm)
@@ -227,29 +232,63 @@ async def save_watermark(client, message):
     await message.reply_text("Save as:", reply_markup=btn, quote=True)
 
 # ==========================================
-# 🚀 SEARCH HANDLER (With Buttons)
+# 🚀 SMART SEARCH HANDLER (With Clean Logic)
 # ==========================================
+def extract_and_clean_query(query_list):
+    raw_text = " ".join(query_list).lower()
+    season_num = None
+    
+    # 1. Season Detection (s3, season 2)
+    match = re.search(r'\b(?:s|season)\s?(\d{1,2})\b', raw_text)
+    if match: season_num = int(match.group(1))
+    
+    # 2. Junk Removal
+    ignore_words = [
+        "full", "movie", "hindi", "dubbed", "download", "hd", "4k", 
+        "1080p", "720p", "480p", "camrip", "dvdscr", "web-dl", "webrip",
+        "bluray", "watch", "online", "free", "link", "series", "season",
+        "s1", "s2", "s3", "s4", "s5", "part", "part1", "part2", "all", "episodes"
+    ]
+    clean_words = []
+    for w in query_list:
+        if w.lower() not in ignore_words and not re.match(r'^s\d+$', w.lower()):
+            clean_words.append(w)
+            
+    return " ".join(clean_words), season_num
+
 @app.on_message(filters.command(["search", "series"]))
 async def search_handler(client, message):
     if len(message.command) < 2:
         return await message.reply_text("Usage: `/search Name`")
     
-    query = " ".join(message.command[1:])
+    query, season_num = extract_and_clean_query(message.command[1:])
     is_series = "series" in message.command[0]
     stype = "tv" if is_series else "movie"
     
-    status = await message.reply_text("🔎 <b>Searching...</b>")
+    status = await message.reply_text(f"🔎 <b>Searching:</b> <code>{query}</code>" + (f" (Season {season_num})" if season_num else "") + "...")
     try:
         url = f"https://api.themoviedb.org/3/search/{stype}?api_key={TMDB_API_KEY}&query={query}"
         data = requests.get(url).json()
         
         if not data.get('results'):
-            return await status.edit("❌ <b>Not found!</b> Check spelling.")
+            return await status.edit("❌ <b>Not found!</b>")
         
         res = data['results'][0]
         mid = res['id']
         title = res.get('name') if is_series else res.get('title')
         date = res.get('first_air_date') if is_series else res.get('release_date')
+        poster_path = res.get('poster_path')
+
+        # Season Poster Logic
+        if is_series and season_num:
+            s_url = f"https://api.themoviedb.org/3/tv/{mid}/season/{season_num}?api_key={TMDB_API_KEY}"
+            s_data = requests.get(s_url).json()
+            if s_data.get('poster_path'):
+                poster_path = s_data['poster_path']
+                title += f" (Season {season_num})"
+                date = s_data.get('air_date', date)
+
+        full_poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else None
         
         btn = InlineKeyboardMarkup([
             [
@@ -259,11 +298,14 @@ async def search_handler(client, message):
         ])
         
         caption = f"🎬 <b>{title}</b>\n📅 {date}\n⭐️ {res.get('vote_average')}\n\n👇 <b>Kya download karna hai?</b>"
-        await status.edit(caption, reply_markup=btn)
+        
+        await status.delete()
+        if full_poster_url: await message.reply_photo(full_poster_url, caption=caption, reply_markup=btn)
+        else: await message.reply_text(caption, reply_markup=btn)
         
     except Exception as e:
         await status.edit(f"❌ Error: {e}")
-# --- ALL BUTTON CALLBACKS ---
+# --- BUTTON CALLBACKS ---
 @app.on_callback_query(filters.regex("^img_"))
 async def img_type_callback(client, callback):
     try:
@@ -286,7 +328,8 @@ async def img_process_callback(client, callback):
         
         await callback.message.edit("⏳ <b>Downloading...</b>")
         
-        url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}"
+        # 🔥 FIX: Language Filter for LOGO Posters
+        url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi,null"
         data = requests.get(url).json()
         
         key = 'posters' if img_type == 'poster' else 'backdrops'
@@ -294,7 +337,6 @@ async def img_process_callback(client, callback):
             return await callback.message.edit("❌ No images found!")
             
         images = data[key][:count]
-        
         wm_path = f"watermarks/{uid}.jpg"
         has_wm = os.path.exists(wm_path)
         
@@ -306,8 +348,7 @@ async def img_process_callback(client, callback):
             with open(fpath, 'wb') as f:
                 f.write(requests.get(img_url).content)
             
-            if has_wm:
-                apply_watermark(fpath, wm_path)
+            if has_wm: apply_watermark(fpath, wm_path)
             
             await client.send_photo(uid, fpath, caption=f"🦋 <b>Filmy Flip Hub</b>")
             os.remove(fpath)
@@ -316,6 +357,7 @@ async def img_process_callback(client, callback):
     except Exception as e:
         await callback.message.edit(f"❌ Error: {e}")
 
+# --- OTHER HANDLERS ---
 @app.on_callback_query(filters.regex("save_"))
 async def save_callback(client, callback):
     uid = callback.from_user.id
@@ -326,16 +368,13 @@ async def save_callback(client, callback):
         if callback.message.reply_to_message:
             await client.download_media(callback.message.reply_to_message, path)
             await callback.message.edit_text("✅ <b>Saved Successfully!</b>")
-        else:
-            await callback.message.edit_text("❌ <b>Error:</b> Original photo not found.")
-    except Exception as e:
-        await callback.message.edit_text(f"❌ Error: {e}")
+        else: await callback.message.edit_text("❌ Error")
+    except Exception as e: await callback.message.edit_text(f"❌ Error: {e}")
 
 @app.on_callback_query(filters.regex("^force_rename"))
 async def force_rename_callback(client, callback):
     try:
-        await callback.answer()
-        await callback.message.delete()
+        await callback.answer(); await callback.message.delete()
         uid = callback.from_user.id
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="mode_video"), InlineKeyboardButton("📁 File", callback_data="mode_document")]])
         await client.send_message(uid, "Format select karein:", reply_markup=btn)
@@ -365,21 +404,15 @@ async def url_handler(client, callback):
     elif "video" in data or "document" in data:
         await process_url_upload(client, callback.message, uid, "video" if "video" in data else "doc")
 
-# --- MAIN HANDLERS ---
 @app.on_message(filters.private & filters.regex(r"^https?://"))
 async def link_handler(client, message):
     uid = message.from_user.id
     if uid in batch_data and batch_data[uid].get('status') == 'naming': return 
-    
-    # 🔥 LINK MODE CHECK (Fix)
-    if user_modes.get(uid) == "blogger_link":
-        return await handle_text(client, message)
-
+    if user_modes.get(uid) == "blogger_link": return await handle_text(client, message)
     url = message.text.strip()
     status = await message.reply_text("🔎 <b>Checking Link...</b>")
     try: await message.delete(); 
     except: pass
-
     try:
         async with aiohttp.ClientSession() as session:
             async with session.head(url) as resp:
@@ -432,7 +465,6 @@ async def process_url_upload(client, message, uid, mode):
 async def handle_text(client, message):
     uid = message.from_user.id
     text = message.text.strip()
-    
     if uid in download_queue and download_queue[uid].get('wait_name'):
         try: await message.delete(); 
         except: pass
@@ -440,15 +472,12 @@ async def handle_text(client, message):
         download_queue[uid]['wait_name'] = False
         await ask_url_format(client, message, uid, is_new=True)
         return
-
-    # 🔥 LINK GENERATOR FIX (Accepts ALL Text)
     if user_modes.get(uid) == "blogger_link":
         try: await message.delete(); 
         except: pass
         enc = base64.b64encode(text.encode("utf-8")).decode("utf-8")
         await message.reply_text(f"✅ <b>Link Ready!</b>\n\n🔗 <b>Your URL:</b>\n<code>{BLOGGER_URL}?data={enc}</code>")
         return
-
     if uid in batch_data and batch_data[uid]['status'] == 'wait_name':
         try: await message.delete(); 
         except: pass
@@ -457,7 +486,6 @@ async def handle_text(client, message):
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="batch_video"), InlineKeyboardButton("📁 File", callback_data="batch_doc")]])
         await message.reply_text(f"✅ Name: {text}\nFormat?", reply_markup=btn)
         return
-
     if message.reply_to_message and uid in user_data:
         global ACTIVE_TASKS
         task = user_data.pop(uid)
@@ -529,13 +557,10 @@ async def handle_files(client, message):
     uid = message.from_user.id
     media = message.document or message.video or message.audio
     if not media: return
-    # 1. Image Check
-    mime = getattr(media, "mime_type", "")
-    if mime and mime.startswith("image/"):
+    if getattr(media, "mime_type", "").startswith("image/"):
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🖼 Thumbnail", callback_data="save_thumb"), InlineKeyboardButton("💧 Watermark", callback_data="save_wm")], [InlineKeyboardButton("➡️ Rename File", callback_data="force_rename")]])
         await message.reply_text("<b>🖼 Image Detected!</b>\nSet as Thumbnail or Watermark?", reply_markup=btn, quote=True)
         return
-    # 2. Caption Mode
     if user_modes.get(uid) == "caption_only":
         try:
             file_size = humanbytes(getattr(media, "file_size", 0))
@@ -546,10 +571,8 @@ async def handle_files(client, message):
             except: pass
         except Exception as e: await message.reply_text(f"❌ Error: {e}")
         return
-    # 3. Batch
     if uid in batch_data and batch_data[uid]['status'] == 'collecting':
         batch_data[uid]['files'].append(message); return
-    # 4. Normal
     global ACTIVE_TASKS
     if ACTIVE_TASKS >= MAX_TASK_LIMIT: return await message.reply_text("⚠️ Busy!")
     user_data[uid] = {'msg': message}
@@ -571,3 +594,4 @@ async def main():
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+

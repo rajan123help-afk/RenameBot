@@ -233,7 +233,7 @@ async def save_callback(client, callback):
     await client.download_media(callback.message.reply_to_message, path)
     await callback.message.edit_text("✅ <b>Saved!</b>")
 # ==========================================
-# 🚀 URL UPLOADER
+# 🚀 URL UPLOADER LOGIC
 # ==========================================
 @app.on_message(filters.private & filters.regex(r"^https?://"))
 async def link_handler(client, message):
@@ -267,17 +267,15 @@ async def url_handler(client, callback):
     elif "video" in data or "document" in data:
         await process_url_upload(client, callback.message, uid, "video" if "video" in data else "doc")
 
+# --- Helper: Ask Format (Safe Mode) ---
 async def ask_url_format(client, message, uid):
     btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="url_video"), InlineKeyboardButton("📁 File", callback_data="url_document")]])
-    await message.edit(f"📂 <b>{download_queue[uid]['filename']}</b>\nFormat?", reply_markup=btn)
-
-@app.on_message(filters.private & filters.reply)
-async def url_name_reply(client, message):
-    uid = message.from_user.id
-    if uid in download_queue and download_queue[uid].get('wait_name'):
-        download_queue[uid]['filename'] = message.text.strip()
-        download_queue[uid]['wait_name'] = False
-        await ask_url_format(client, message, uid)
+    # Agar message User ka hai (Rename ke baad), toh Reply karo
+    if message.from_user.is_bot == False:
+        await message.reply_text(f"✅ <b>Name Saved!</b>\n📂 <code>{download_queue[uid]['filename']}</code>\n\nAb Format select karein:", reply_markup=btn)
+    # Agar message Bot ka hai (Direct Next), toh Edit karo
+    else:
+        await message.edit(f"📂 <b>{download_queue[uid]['filename']}</b>\nFormat?", reply_markup=btn)
 
 async def process_url_upload(client, message, uid, mode):
     data = download_queue[uid]
@@ -354,7 +352,6 @@ async def batch_process(client, callback):
 async def handle_files(client, message):
     uid = message.from_user.id
     
-    # 1. Caption Only Mode
     if user_modes.get(uid) == "caption_only":
         media = message.document or message.video or message.audio
         file_size = humanbytes(message.document.file_size if message.document else message.video.file_size)
@@ -362,11 +359,9 @@ async def handle_files(client, message):
         await message.reply_cached_media(media.file_id, caption=caption)
         return
 
-    # 2. Batch Collection
     if uid in batch_data and batch_data[uid]['status'] == 'collecting':
         batch_data[uid]['files'].append(message); return
     
-    # 3. Single Rename
     global ACTIVE_TASKS
     if ACTIVE_TASKS >= MAX_TASK_LIMIT: return await message.reply_text("⚠️ Busy!")
     
@@ -381,12 +376,20 @@ async def single_mode(client, callback):
     await callback.message.delete()
     await client.send_message(uid, "📝 <b>New Name:</b>", reply_markup=ForceReply(True))
 
+# 🔥 MAIN TEXT HANDLER (Fixed for Rename) 🔥
 @app.on_message(filters.private & filters.text)
 async def handle_text(client, message):
     uid = message.from_user.id
     text = message.text.strip()
     
-    # Blogger Link Gen
+    # 1. URL RENAME LOGIC (Updated to Reply instead of Edit)
+    if uid in download_queue and download_queue[uid].get('wait_name'):
+        download_queue[uid]['filename'] = text
+        download_queue[uid]['wait_name'] = False
+        await ask_url_format(client, message, uid)
+        return
+
+    # 2. Blogger Link Gen
     if user_modes.get(uid) == "blogger_link":
         if "?start=" in text:
             code = text.split("?start=")[1].split()[0]
@@ -394,7 +397,7 @@ async def handle_text(client, message):
             await message.reply_text(f"✅ <b>Link:</b>\n<code>{BLOGGER_URL}?data={enc}</code>")
         return
 
-    # Batch Name
+    # 3. Batch Name
     if uid in batch_data and batch_data[uid]['status'] == 'wait_name':
         batch_data[uid]['base_name'] = auto_clean(text)
         batch_data[uid]['status'] = 'ready'
@@ -402,7 +405,7 @@ async def handle_text(client, message):
         await message.reply_text(f"✅ Name: {text}\nFormat?", reply_markup=btn)
         return
 
-    # Single Rename
+    # 4. Single Rename
     if message.reply_to_message and uid in user_data:
         global ACTIVE_TASKS
         task = user_data.pop(uid)
@@ -439,4 +442,3 @@ async def main():
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
-    

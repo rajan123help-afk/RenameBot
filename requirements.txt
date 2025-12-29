@@ -1,3 +1,4 @@
 pyrofork
 aiohttp
 requests
+aiofiles

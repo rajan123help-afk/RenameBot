@@ -3,3 +3,4 @@ aiohttp
 requests
 aiofiles
 Pillow
+TgCrypto

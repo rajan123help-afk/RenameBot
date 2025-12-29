@@ -8,6 +8,7 @@ import requests
 import shutil
 import html
 import aiofiles
+from PIL import Image
 from aiohttp import web
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
@@ -22,7 +23,7 @@ BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_ultimate", 
+    "filmy_pro_ultimate", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -33,7 +34,7 @@ app = Client(
 user_modes = {}
 batch_data = {}
 download_queue = {}
-cleaner_dict = {} # For /add and /del
+cleaner_dict = {}
 
 # --- WEB SERVER ---
 routes = web.RouteTableDef()
@@ -67,8 +68,7 @@ def get_media_info(name):
     return (s.group(1) if s else None), (e.group(1) if e else None)
 
 def clean_filename(name):
-    for k, v in cleaner_dict.items():
-        name = name.replace(k, v)
+    for k, v in cleaner_dict.items(): name = name.replace(k, v)
     return name.strip()
 
 def get_fancy_caption(filename, filesize, duration=0):
@@ -83,7 +83,27 @@ def get_fancy_caption(filename, filesize, duration=0):
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME}</b></blockquote>"
     return caption
 
-# --- PROGRESS BAR (STATUS) ---
+# 🔥 WATERMARK LOGIC (70% Bottom Center)
+def apply_watermark(base_path, wm_path):
+    try:
+        base = Image.open(base_path).convert("RGBA")
+        wm = Image.open(wm_path).convert("RGBA")
+        base_w, base_h = base.size
+        wm_w, wm_h = wm.size
+        new_wm_w = int(base_w * 0.70)
+        ratio = new_wm_w / wm_w
+        new_wm_h = int(wm_h * ratio)
+        wm = wm.resize((new_wm_w, new_wm_h), Image.Resampling.LANCZOS)
+        x = (base_w - new_wm_w) // 2
+        y = base_h - new_wm_h - 20
+        base.paste(wm, (x, y), wm)
+        base = base.convert("RGB")
+        base.save(base_path, "JPEG")
+        return base_path
+    except Exception as e:
+        print(f"WM Error: {e}")
+        return base_path
+
 async def progress(current, total, message, start_time, status_text):
     now = time.time()
     diff = now - start_time
@@ -92,13 +112,9 @@ async def progress(current, total, message, start_time, status_text):
         speed = current / diff if diff > 0 else 0
         eta = time.strftime('%H:%M:%S', time.gmtime(round((total - current) / speed))) if speed > 0 else "00:00:00"
         try:
-            btn = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_task")]])
             await message.edit(
-                f"{status_text}\n\n"
-                f"📊 <b>Progress:</b> {round(percentage, 1)}%\n"
-                f"🚀 <b>Speed:</b> {humanbytes(speed)}/s\n"
-                f"⏳ <b>ETA:</b> {eta}",
-                reply_markup=btn
+                f"{status_text}\n\n📊 <b>{round(percentage, 1)}%</b>\n🚀 <b>{humanbytes(speed)}/s</b>\n⏳ <b>ETA:</b> {eta}",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_task")]])
             )
         except: pass
 
@@ -107,20 +123,15 @@ async def progress(current, total, message, start_time, status_text):
 async def start(client, message):
     await message.reply_text(
         f"👋 <b>Hello {message.from_user.first_name}!</b>\n\n"
-        "🛠 <b>AVAILABLE COMMANDS:</b>\n"
-        "🔹 <code>/search Name</code> - Poster with Logo\n"
-        "🔹 <code>/caption</code> - Caption Mode (Green Line)\n"
-        "🔹 <code>/batch</code> - Batch Rename Mode\n"
-        "🔹 <code>/done</code> - Process Batch\n"
-        "🔹 <code>/url</code> - URL Upload Mode\n"
-        "🔹 <code>/link</code> - Blogger Link Gen\n"
-        "🔹 <code>/watermark</code> - Set Thumbnail\n"
-        "🔹 <code>/add word</code> - Add to Cleaner\n"
-        "🔹 <code>/del word</code> - Remove from Cleaner\n\n"
-        "⚠️ <b>Note:</b> Single Rename Disabled."
+        "🎬 <b>Filmy Flip Commands:</b>\n"
+        "🔹 <code>/search Name</code> (Movie)\n"
+        "🔹 <code>/series Name</code> (Series)\n"
+        "🔹 <code>/caption</code> (Green Line)\n"
+        "🔹 <code>/batch</code> (Rename)\n"
+        "🔹 <code>/url</code> (Link Upload)\n"
+        "🔹 Send Photo -> Save Thumb/Watermark"
     )
 
-# --- MODE SWITCHERS ---
 @app.on_message(filters.command("caption") & filters.private)
 async def set_caption(client, message):
     user_modes[message.from_user.id] = "caption"
@@ -136,49 +147,19 @@ async def set_url(client, message):
     user_modes[message.from_user.id] = "url"
     await message.reply_text("🌐 <b>URL Mode ON!</b> Link bhejein.")
 
-@app.on_message(filters.command("watermark") & filters.private)
-async def set_thumb(client, message):
-    await message.reply_text("🖼 <b>Send Photo</b> to set as Thumbnail.")
-
-# --- CLEANER COMMANDS ---
 @app.on_message(filters.command("add") & filters.private)
 async def add_clean(client, message):
-    if len(message.command) < 2: return await message.reply_text("Usage: <code>/add word</code>")
-    word = message.command[1]
-    cleaner_dict[word] = ""
-    await message.reply_text(f"✅ Added '<b>{word}</b>' to cleaner.")
+    if len(message.command) < 2: return
+    cleaner_dict[message.command[1]] = ""
+    await message.reply_text(f"✅ Added: {message.command[1]}")
 
 @app.on_message(filters.command("del") & filters.private)
 async def del_clean(client, message):
-    if len(message.command) < 2: return await message.reply_text("Usage: <code>/del word</code>")
-    word = message.command[1]
-    if word in cleaner_dict:
-        del cleaner_dict[word]
-        await message.reply_text(f"🗑 Removed '<b>{word}</b>' from cleaner.")
-    else:
-        await message.reply_text("❌ Word not found.")
+    if len(message.command) < 2: return
+    if message.command[1] in cleaner_dict: del cleaner_dict[message.command[1]]
+    await message.reply_text(f"🗑 Removed: {message.command[1]}")
 
-@app.on_message(filters.command("words") & filters.private)
-async def view_clean(client, message):
-    await message.reply_text(f"📋 <b>Cleaner Words:</b>\n{', '.join(cleaner_dict.keys())}")
-
-# --- BATCH COMMANDS ---
-@app.on_message(filters.command("batch") & filters.private)
-async def batch_cmd(client, message):
-    uid = message.from_user.id
-    batch_data[uid] = {'files': []}
-    await message.reply_text("📦 <b>Batch Mode ON!</b>\nFiles forward karein, fir <code>/done</code> likhein.")
-
-@app.on_message(filters.command("done") & filters.private)
-async def batch_done(client, message):
-    uid = message.from_user.id
-    if uid in batch_data and batch_data[uid]['files']:
-        await message.reply_text("📝 <b>Series Name Bhejein:</b>", reply_markup=ForceReply(True))
-        batch_data[uid]['step'] = 'naming'
-    else:
-        await message.reply_text("⚠️ Pehle kuch files bhejein!")
-
-# --- SEARCH (LOGO FIX) ---
+# --- SEARCH SYSTEM ---
 @app.on_message(filters.command(["search", "series"]))
 async def search_handler(client, message):
     if len(message.command) < 2: return await message.reply_text("Usage: /search Name")
@@ -189,57 +170,96 @@ async def search_handler(client, message):
         url = f"https://api.themoviedb.org/3/search/{stype}?api_key={TMDB_API_KEY}&query={query}"
         res = requests.get(url).json().get('results')
         if not res: return await status.edit("❌ Not Found")
-        top = res[0]
-        img_url = f"https://api.themoviedb.org/3/{stype}/{top['id']}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi"
-        posters = requests.get(img_url).json().get('posters', [])
-        final_poster = posters[0]['file_path'] if posters else top.get('poster_path')
-        if not final_poster: return await status.edit("❌ No Logo Poster Found")
-        
-        caption = f"🎬 <b>{top.get('name') if stype=='tv' else top.get('title')}</b>"
-        btn = InlineKeyboardMarkup([[InlineKeyboardButton("🖼 Get Poster", callback_data=f"get_poster_{stype}_{top['id']}")]])
-        await status.delete()
-        await message.reply_photo(f"https://image.tmdb.org/t/p/w500{final_poster}", caption=caption, reply_markup=btn)
+        mid = res[0]['id']
+        title = res[0].get('name') if stype == 'tv' else res[0].get('title')
+        btn = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🖼 Poster", callback_data=f"type_poster_{stype}_{mid}"),
+             InlineKeyboardButton("🎞 Thumbnail", callback_data=f"type_backdrop_{stype}_{mid}")]
+        ])
+        await status.edit(f"🎬 <b>{title}</b>\n👇 Kya chahiye?", reply_markup=btn)
     except Exception as e: await status.edit(f"Error: {e}")
 
-@app.on_callback_query(filters.regex("^get_"))
-async def get_callback(client, callback):
+@app.on_callback_query(filters.regex("^type_"))
+async def type_callback(client, callback):
     try:
-        _, _, stype, mid = callback.data.split("_")
-        url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi"
-        data = requests.get(url).json().get('posters', [])[:3]
-        for img in data:
-            await client.send_photo(callback.from_user.id, f"https://image.tmdb.org/t/p/original{img['file_path']}")
-        await callback.answer()
+        _, img_type, stype, mid = callback.data.split("_")
+        btn = InlineKeyboardMarkup([
+            [InlineKeyboardButton("1", callback_data=f"num_1_{img_type}_{stype}_{mid}"),
+             InlineKeyboardButton("2", callback_data=f"num_2_{img_type}_{stype}_{mid}")],
+            [InlineKeyboardButton("3", callback_data=f"num_3_{img_type}_{stype}_{mid}"),
+             InlineKeyboardButton("4", callback_data=f"num_4_{img_type}_{stype}_{mid}")]
+        ])
+        await callback.message.edit(f"✅ <b>{img_type.capitalize()} Selected!</b>\nKitni images chahiye?", reply_markup=btn)
     except: pass
+
+# 🔥 UPDATED NUMBER CALLBACK (Sends multiple images)
+@app.on_callback_query(filters.regex("^num_"))
+async def num_callback(client, callback):
+    try:
+        _, count, img_type, stype, mid = callback.data.split("_")
+        count = int(count) # Kitni chahiye (e.g., 3)
+        
+        await callback.answer(f"Sending top {count} images...")
+        await callback.message.delete()
+
+        url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi"
+        data = requests.get(url).json()
+        pool = data.get('posters' if img_type == 'poster' else 'backdrops', [])
+        
+        if not pool: return await client.send_message(callback.from_user.id, "❌ No images found!")
+
+        # Slice the pool to get requested number of images
+        images_to_send = pool[:count]
+
+        for i, img_data in enumerate(images_to_send):
+            img_path = img_data['file_path']
+            full_url = f"https://image.tmdb.org/t/p/original{img_path}"
+            await client.send_photo(
+                callback.from_user.id, 
+                full_url, 
+                caption=f"🖼 <b>{img_type.capitalize()} {i+1} of {len(images_to_send)}</b>"
+            )
+            time.sleep(0.5) # Thoda ruk kar bheje taaki flood na ho
+
+    except Exception as e: await client.send_message(callback.from_user.id, f"Error: {e}")
+
+# --- PHOTO HANDLER (Thumb/Watermark) ---
+@app.on_message(filters.private & filters.photo)
+async def photo_handler(client, message):
+    btn = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🖼 Save Thumbnail", callback_data="save_thumb"),
+         InlineKeyboardButton("💧 Save Watermark", callback_data="save_wm")]
+    ])
+    await message.reply_text("📸 <b>Image Detected!</b>\nKya karna hai?", reply_markup=btn, quote=True)
+
+@app.on_callback_query(filters.regex("^save_"))
+async def save_img_callback(client, callback):
+    uid = callback.from_user.id
+    mode = "thumbnails" if "thumb" in callback.data else "watermarks"
+    path = f"{mode}/{uid}.jpg"
+    os.makedirs(mode, exist_ok=True)
+    await client.download_media(callback.message.reply_to_message, path)
+    await callback.message.edit(f"✅ <b>Saved to {mode}!</b>")
 
 # --- URL UPLOADER ---
 @app.on_message(filters.private & filters.regex(r"^https?://"))
 async def url_handler(client, message):
     uid = message.from_user.id
-    url = message.text.strip()
-    await message.reply_text(
-        "🔗 <b>Link Detected!</b>\nDownload as:",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎥 Video", callback_data=f"dl_vid"), InlineKeyboardButton("📁 File", callback_data=f"dl_doc")]
-        ]),
-        quote=True
-    )
-    download_queue[uid] = url
+    download_queue[uid] = message.text.strip()
+    btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="dl_vid"), InlineKeyboardButton("📁 File", callback_data="dl_doc")]])
+    await message.reply_text("🔗 <b>Link Found!</b> Download as:", reply_markup=btn, quote=True)
 
 @app.on_callback_query(filters.regex("^dl_"))
-async def process_url(client, callback):
+async def dl_process(client, callback):
     uid = callback.from_user.id
     url = download_queue.get(uid)
-    if not url: return await callback.answer("Link Expired!")
-    
+    if not url: return await callback.answer("Expired!")
     mode = "video" if "vid" in callback.data else "doc"
     await callback.message.delete()
     status = await callback.message.reply_text("📥 <b>Downloading...</b>")
-    
-    fname = url.split("/")[-1] or "downloaded_file"
+    fname = url.split("/")[-1] or "file.dat"
     path = f"downloads/{uid}_{fname}"
     os.makedirs("downloads", exist_ok=True)
-    
     try:
         start = time.time()
         async with aiohttp.ClientSession() as session:
@@ -248,118 +268,96 @@ async def process_url(client, callback):
                 with open(path, "wb") as f:
                     dl = 0
                     async for chunk in resp.content.iter_chunked(1024*1024):
-                        if uid not in download_queue: # Check cancel
-                            await status.edit("❌ Cancelled"); return
+                        if uid not in download_queue: await status.edit("❌ Cancelled"); return
                         f.write(chunk); dl += len(chunk)
                         if time.time() - start > 5: await progress(dl, total, status, start, "📥 Downloading")
-        
         await status.edit("📤 <b>Uploading...</b>")
         file_size = humanbytes(os.path.getsize(path))
         cap = get_fancy_caption(fname, file_size)
         thumb_path = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
-        
+        wm_path = f"watermarks/{uid}.jpg"
+        if thumb_path and os.path.exists(wm_path): thumb_path = apply_watermark(thumb_path, wm_path)
         start = time.time()
-        if mode == "video":
-            await client.send_video(uid, path, caption=cap, thumb=thumb_path, progress=progress, progress_args=(status, start, "📤 Uploading"))
-        else:
-            await client.send_document(uid, path, caption=cap, thumb=thumb_path, progress=progress, progress_args=(status, start, "📤 Uploading"))
-        
-        os.remove(path) # Auto Delete
-        await status.delete() # Auto Delete Status
-        del download_queue[uid]
-    except Exception as e:
-        await status.edit(f"❌ Error: {e}")
+        if mode == "video": await client.send_video(uid, path, caption=cap, thumb=thumb_path, progress=progress, progress_args=(status, start, "📤 Uploading"))
+        else: await client.send_document(uid, path, caption=cap, thumb=thumb_path, progress=progress, progress_args=(status, start, "📤 Uploading"))
+        os.remove(path); del download_queue[uid]
+        await status.delete()
+    except Exception as e: await status.edit(f"❌ Error: {e}")
 
-# --- CANCEL HANDLER ---
-@app.on_callback_query(filters.regex("cancel_task"))
-async def cancel_task(client, callback):
-    uid = callback.from_user.id
-    if uid in download_queue: del download_queue[uid]
-    if uid in batch_data: del batch_data[uid]
-    await callback.answer("❌ Task Cancelled!")
-    await callback.message.delete()
+# --- BATCH ---
+@app.on_message(filters.command("batch") & filters.private)
+async def batch_start(client, message):
+    batch_data[message.from_user.id] = {'files': []}
+    await message.reply_text("📦 <b>Batch Mode!</b> Files bhejein, fir /done likhein.")
 
-# --- TEXT & FILE HANDLER ---
+@app.on_message(filters.command("done") & filters.private)
+async def batch_done(client, message):
+    uid = message.from_user.id
+    if uid in batch_data and batch_data[uid]['files']:
+        batch_data[uid]['step'] = 'naming'
+        await message.reply_text("📝 <b>Name bhejein:</b>", reply_markup=ForceReply(True))
+
 @app.on_message(filters.private & filters.text)
-async def handle_text(client, message):
+async def text_handler(client, message):
     if message.text.startswith("/"): return
     uid = message.from_user.id
     text = message.text.strip()
-    
-    # Batch Naming
     if uid in batch_data and batch_data[uid].get('step') == 'naming':
         batch_data[uid]['name'] = text
-        await message.reply_text(
-            f"✅ Name: <b>{text}</b>\nFormat Select:",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="batch_run_vid"), InlineKeyboardButton("📁 File", callback_data="batch_run_doc")]])
-        )
+        btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="batch_run_vid"), InlineKeyboardButton("📁 File", callback_data="batch_run_doc")]])
+        await message.reply_text(f"✅ Name: {text}\nStart?", reply_markup=btn)
         return
-
-    # Link Gen
     if user_modes.get(uid) == "link":
         code = text.split("?start=")[1].split()[0] if "?start=" in text else text
         enc = base64.b64encode(code.encode()).decode()
         await message.reply_text(f"🔗 <code>{BLOGGER_URL}?data={enc}</code>")
 
 @app.on_callback_query(filters.regex("^batch_run_"))
-async def run_batch(client, callback):
+async def batch_run(client, callback):
     uid = callback.from_user.id
     mode = "video" if "vid" in callback.data else "doc"
     files = batch_data[uid]['files']
-    base_name = batch_data[uid]['name']
-    
-    status = await callback.message.edit("🚀 <b>Batch Started!</b>")
-    total = len(files)
-    
+    base = batch_data[uid]['name']
+    status = await callback.message.edit("🚀 <b>Processing...</b>")
     for i, msg in enumerate(files):
+        if uid not in batch_data: break
         try:
-            if uid not in batch_data: break # Cancel check
             media = msg.document or msg.video or msg.audio
             s, e = get_media_info(media.file_name or "")
             ext = os.path.splitext(media.file_name or "")[1] or ".mkv"
-            
-            new_name = f"{base_name} - S{s}E{e}{ext}" if s and e else f"{base_name} - {i+1}{ext}"
-            new_name = clean_filename(new_name) # Apply Cleaner
-            
+            new_name = f"{base} - S{s}E{e}{ext}" if s and e else f"{base} - {i+1}{ext}"
+            new_name = clean_filename(new_name)
             path = await client.download_media(media, file_name=f"downloads/{new_name}")
             cap = get_fancy_caption(new_name, humanbytes(os.path.getsize(path)))
             thumb_path = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
-            
+            wm_path = f"watermarks/{uid}.jpg"
+            if thumb_path and os.path.exists(wm_path): thumb_path = apply_watermark(thumb_path, wm_path)
             if mode == "video": await client.send_video(uid, path, caption=cap, thumb=thumb_path)
             else: await client.send_document(uid, path, caption=cap, thumb=thumb_path)
-            
-            os.remove(path) # Auto Delete
-            await status.edit(f"✅ Processed: {i+1}/{total}")
+            os.remove(path); await status.edit(f"✅ {i+1}/{len(files)}")
         except: pass
-    
-    await status.edit("🎉 <b>Batch Complete!</b>")
-    if uid in batch_data: del batch_data[uid]
+    await status.edit("🎉 <b>Done!</b>"); del batch_data[uid]
 
-@app.on_message(filters.private & filters.photo)
-async def save_thumb(client, message):
-    uid = message.from_user.id
-    path = f"thumbnails/{uid}.jpg"
-    os.makedirs("thumbnails", exist_ok=True)
-    await client.download_media(message, path)
-    await message.reply_text("✅ <b>Thumbnail Saved!</b>")
+@app.on_callback_query(filters.regex("cancel_task"))
+async def cancel_handler(client, callback):
+    uid = callback.from_user.id
+    if uid in download_queue: del download_queue[uid]
+    if uid in batch_data: del batch_data[uid]
+    await callback.answer("Cancelled!")
+    await callback.message.delete()
 
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio))
-async def handle_files(client, message):
+async def file_handler(client, message):
     uid = message.from_user.id
-    
-    # Batch Collection
     if uid in batch_data and 'step' not in batch_data[uid]:
         batch_data[uid]['files'].append(message)
-        return
-
-    # Caption Mode
-    if user_modes.get(uid) == "caption":
+    elif user_modes.get(uid) == "caption":
         media = message.document or message.video or message.audio
         cap = get_fancy_caption(media.file_name or "File", humanbytes(getattr(media, "file_size", 0)), getattr(media, "duration", 0))
         if message.video: await client.send_video(uid, media.file_id, caption=cap)
         else: await client.send_document(uid, media.file_id, caption=cap)
 
-# --- START SERVICES ---
+# --- START ---
 async def start_services():
     web_app = await web_server()
     runner = web.AppRunner(web_app)
@@ -370,4 +368,4 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
-            
+    

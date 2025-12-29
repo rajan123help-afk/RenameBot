@@ -23,7 +23,7 @@ BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_ultimate", 
+    "filmy_pro_super", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -129,7 +129,7 @@ async def start(client, message):
         "🔹 <code>/caption</code> (Green Line)\n"
         "🔹 <code>/batch</code> (Rename)\n"
         "🔹 <code>/url</code> (Link Upload)\n"
-        "🔹 Send Photo -> Save Thumb/Watermark"
+        "🔹 Send Photo (File/Media) -> Save Thumb/Watermark"
     )
 
 @app.on_message(filters.command("caption") & filters.private)
@@ -140,12 +140,12 @@ async def set_caption(client, message):
 @app.on_message(filters.command("link") & filters.private)
 async def set_link(client, message):
     user_modes[message.from_user.id] = "link"
-    await message.reply_text("🔗 <b>Link Mode ON!</b>")
+    await message.reply_text("🔗 <b>Link Mode ON!</b> Telegram Link ya Code bhejein.")
 
 @app.on_message(filters.command("url") & filters.private)
 async def set_url(client, message):
     user_modes[message.from_user.id] = "url"
-    await message.reply_text("🌐 <b>URL Mode ON!</b> Link bhejein.")
+    await message.reply_text("🌐 <b>URL Mode ON!</b> Direct Download Link bhejein.")
 
 @app.on_message(filters.command("add") & filters.private)
 async def add_clean(client, message):
@@ -192,12 +192,13 @@ async def type_callback(client, callback):
         await callback.message.edit(f"✅ <b>{img_type.capitalize()} Selected!</b>\nKitni images chahiye?", reply_markup=btn)
     except: pass
 
-# 🔥 UPDATED NUMBER CALLBACK (Sends multiple images)
+# 🔥 NUMBER CALLBACK (Sends multiple images WITH WATERMARK) - FIX 3
 @app.on_callback_query(filters.regex("^num_"))
 async def num_callback(client, callback):
     try:
+        uid = callback.from_user.id
         _, count, img_type, stype, mid = callback.data.split("_")
-        count = int(count) # Kitni chahiye (e.g., 3)
+        count = int(count)
         
         await callback.answer(f"Sending top {count} images...")
         await callback.message.delete()
@@ -206,20 +207,37 @@ async def num_callback(client, callback):
         data = requests.get(url).json()
         pool = data.get('posters' if img_type == 'poster' else 'backdrops', [])
         
-        if not pool: return await client.send_message(callback.from_user.id, "❌ No images found!")
-
-        # Slice the pool to get requested number of images
+        if not pool: return await client.send_message(uid, "❌ No images found!")
         images_to_send = pool[:count]
+        wm_path = f"watermarks/{uid}.jpg"
+        os.makedirs("downloads", exist_ok=True)
 
         for i, img_data in enumerate(images_to_send):
             img_path = img_data['file_path']
             full_url = f"https://image.tmdb.org/t/p/original{img_path}"
+            temp_path = f"downloads/temp_{uid}_{i}.jpg"
+
+            # Download TMDB Image locally
+            async with aiohttp.ClientSession() as session:
+                async with session.get(full_url) as resp:
+                    if resp.status == 200:
+                        f = await aiofiles.open(temp_path, mode='wb')
+                        await f.write(await resp.read())
+                        await f.close()
+
+            # Apply Watermark if exists
+            final_path = temp_path
+            if os.path.exists(wm_path):
+                final_path = apply_watermark(temp_path, wm_path)
+
+            # Send Local File
             await client.send_photo(
-                callback.from_user.id, 
-                full_url, 
+                uid, 
+                photo=final_path, 
                 caption=f"🖼 <b>{img_type.capitalize()} {i+1} of {len(images_to_send)}</b>"
             )
-            time.sleep(0.5) # Thoda ruk kar bheje taaki flood na ho
+            os.remove(temp_path)
+            time.sleep(0.5)
 
     except Exception as e: await client.send_message(callback.from_user.id, f"Error: {e}")
 
@@ -238,13 +256,18 @@ async def save_img_callback(client, callback):
     mode = "thumbnails" if "thumb" in callback.data else "watermarks"
     path = f"{mode}/{uid}.jpg"
     os.makedirs(mode, exist_ok=True)
-    await client.download_media(callback.message.reply_to_message, path)
+    # Determine if replying to photo or document
+    media = callback.message.reply_to_message.photo or callback.message.reply_to_message.document
+    await client.download_media(media, path)
     await callback.message.edit(f"✅ <b>Saved to {mode}!</b>")
 
 # --- URL UPLOADER ---
 @app.on_message(filters.private & filters.regex(r"^https?://"))
 async def url_handler(client, message):
     uid = message.from_user.id
+    # If in link mode, ignore here (handled in text_handler)
+    if user_modes.get(uid) == "link": return 
+
     download_queue[uid] = message.text.strip()
     btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="dl_vid"), InlineKeyboardButton("📁 File", callback_data="dl_doc")]])
     await message.reply_text("🔗 <b>Link Found!</b> Download as:", reply_markup=btn, quote=True)
@@ -282,9 +305,9 @@ async def dl_process(client, callback):
         else: await client.send_document(uid, path, caption=cap, thumb=thumb_path, progress=progress, progress_args=(status, start, "📤 Uploading"))
         os.remove(path); del download_queue[uid]
         await status.delete()
-    except Exception as e: await status.edit(f"❌ Error: {e}")
+    except Exception as e: await status.edit(f"❌ Error: {e} (Direct Link Required)")
 
-# --- BATCH ---
+# --- BATCH & TEXT ---
 @app.on_message(filters.command("batch") & filters.private)
 async def batch_start(client, message):
     batch_data[message.from_user.id] = {'files': []}
@@ -302,13 +325,21 @@ async def text_handler(client, message):
     if message.text.startswith("/"): return
     uid = message.from_user.id
     text = message.text.strip()
+    
     if uid in batch_data and batch_data[uid].get('step') == 'naming':
         batch_data[uid]['name'] = text
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="batch_run_vid"), InlineKeyboardButton("📁 File", callback_data="batch_run_doc")]])
         await message.reply_text(f"✅ Name: {text}\nStart?", reply_markup=btn)
         return
+
+    # 🔥 TELEGRAM LINK FIX (Problem 1)
     if user_modes.get(uid) == "link":
-        code = text.split("?start=")[1].split()[0] if "?start=" in text else text
+        code = text
+        if "t.me/" in text: # If full telegram link sent
+            code = text.split("/")[-1] # Get the last part (message ID)
+        elif "?start=" in text:
+            code = text.split("?start=")[1].split()[0]
+            
         enc = base64.b64encode(code.encode()).decode()
         await message.reply_text(f"🔗 <code>{BLOGGER_URL}?data={enc}</code>")
 
@@ -346,16 +377,37 @@ async def cancel_handler(client, callback):
     await callback.answer("Cancelled!")
     await callback.message.delete()
 
-@app.on_message(filters.private & (filters.document | filters.video | filters.audio))
-async def file_handler(client, message):
+# 🔥 IMAGE AS FILE FIX (Problem 2)
+@app.on_message(filters.private & filters.document)
+async def document_handler(client, message):
+    uid = message.from_user.id
+    # Check if document is an image
+    if message.document.mime_type.startswith("image/"):
+        btn = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🖼 Save Thumbnail", callback_data="save_thumb"),
+             InlineKeyboardButton("💧 Save Watermark", callback_data="save_wm")]
+        ])
+        await message.reply_text("📸 <b>Image File Detected!</b>\nKya karna hai?", reply_markup=btn, quote=True)
+        return # Stop here, don't process as regular file
+
+    # Normal file processing (Batch/Caption) continues here...
+    if uid in batch_data and 'step' not in batch_data[uid]:
+        batch_data[uid]['files'].append(message)
+    elif user_modes.get(uid) == "caption":
+        media = message.document
+        cap = get_fancy_caption(media.file_name or "File", humanbytes(media.file_size), 0)
+        await client.send_document(uid, media.file_id, caption=cap)
+
+@app.on_message(filters.private & (filters.video | filters.audio))
+async def media_handler(client, message):
     uid = message.from_user.id
     if uid in batch_data and 'step' not in batch_data[uid]:
         batch_data[uid]['files'].append(message)
     elif user_modes.get(uid) == "caption":
-        media = message.document or message.video or message.audio
+        media = message.video or message.audio
         cap = get_fancy_caption(media.file_name or "File", humanbytes(getattr(media, "file_size", 0)), getattr(media, "duration", 0))
         if message.video: await client.send_video(uid, media.file_id, caption=cap)
-        else: await client.send_document(uid, media.file_id, caption=cap)
+        else: await client.send_audio(uid, media.file_id, caption=cap)
 
 # --- START ---
 async def start_services():
@@ -368,4 +420,4 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
-    
+            

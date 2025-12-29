@@ -1,6 +1,4 @@
 https://github.com/Pyrogram/pyrogram/archive/master.zip
 tgcrypto
 aiohttp
-aiofiles
 requests
-Pillow

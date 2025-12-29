@@ -1,7 +1,6 @@
-pyrogram==2.0.106
+https://github.com/Pyrogram/pyrogram/archive/master.zip
 tgcrypto
 aiohttp
 aiofiles
 requests
 Pillow
-hachoir

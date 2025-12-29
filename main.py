@@ -24,7 +24,7 @@ BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_final_fix", 
+    "filmy_pro_saving_fix", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -227,9 +227,8 @@ async def num_callback(client, callback):
             data = requests.get(url).json()
             pool = data.get('posters' if img_type == 'poster' else 'backdrops', [])
             
-            # 🔥 FIX: No spam message, just silently switch to main if empty
-            if not pool:
-                pass 
+            # 🔥 Silent Fallback if empty (No spam)
+            if not pool: pass
 
         # Fallback (Main Images)
         if not pool:
@@ -264,7 +263,7 @@ async def num_callback(client, callback):
 
     except Exception as e: await client.send_message(callback.from_user.id, f"Error: {e}")
 
-# --- PHOTO HANDLER (Absolute Fix for Saving Freeze) ---
+# --- PHOTO HANDLER (Fix for Thumbnail Freeze) ---
 @app.on_message(filters.private & filters.photo)
 async def photo_handler(client, message):
     btn = InlineKeyboardMarkup([
@@ -281,25 +280,27 @@ async def save_img_callback(client, callback):
     os.makedirs(mode, exist_ok=True)
     path = f"{mode}/{uid}.jpg"
     
-    await callback.message.edit("⏳ <b>Saving...</b>")
+    await callback.message.edit("⏳ <b>Processing...</b>")
     try:
-        # 🔥 ULTRA SAFE DOWNLOAD METHOD (Using File ID)
         reply = callback.message.reply_to_message
-        if reply.photo:
-            file_id = reply.photo.file_id
-        elif reply.document:
-            file_id = reply.document.file_id
-        else:
-            return await callback.message.edit("❌ Media error!")
-
-        # Download directly using file_id (No Hangs)
-        await client.download_media(file_id, file_name=path)
+        if not reply:
+            return await callback.message.edit("❌ Error: Original message not found.")
+            
+        # 🔥 DOWNLOAD DIRECTLY FROM MESSAGE OBJECT
+        await client.download_media(
+            message=reply, 
+            file_name=path
+        )
         
+        # Verify if file actually downloaded
+        if not os.path.exists(path):
+             return await callback.message.edit("❌ Download Failed! Try sending photo again.")
+
         # Force Convert to JPEG
         img = Image.open(path).convert("RGB")
         img.save(path, "JPEG")
         
-        await callback.message.edit(f"✅ <b>Success!</b> Saved to {mode}.")
+        await callback.message.edit(f"✅ <b>Set Successfully!</b>")
     except Exception as e:
         await callback.message.edit(f"❌ Error: {e}")
 

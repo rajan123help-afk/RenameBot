@@ -24,7 +24,7 @@ BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_strict_image", 
+    "filmy_pro_final_v2", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -263,7 +263,7 @@ async def num_callback(client, callback):
 
     except Exception as e: await client.send_message(callback.from_user.id, f"Error: {e}")
 
-# --- PHOTO HANDLER (STRICT MODE & SAFE DOWNLOAD) ---
+# --- PHOTO HANDLER (STRICT IMAGE FILTER & SAFE DOWNLOAD) ---
 @app.on_message(filters.private & filters.photo)
 async def photo_handler(client, message):
     btn = InlineKeyboardMarkup([
@@ -285,7 +285,7 @@ async def save_img_callback(client, callback):
         reply = callback.message.reply_to_message
         if not reply: return await callback.message.edit("❌ Original message lost.")
         
-        # 🔥 ULTRA SAFE DOWNLOAD (Prevents Freezing)
+        # 🔥 ULTRA SAFE DOWNLOAD
         await client.download_media(
             message=reply, 
             file_name=path

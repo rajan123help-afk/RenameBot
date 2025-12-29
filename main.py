@@ -24,7 +24,7 @@ BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_saving_fix", 
+    "filmy_pro_strict_image", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -227,7 +227,7 @@ async def num_callback(client, callback):
             data = requests.get(url).json()
             pool = data.get('posters' if img_type == 'poster' else 'backdrops', [])
             
-            # 🔥 Silent Fallback if empty (No spam)
+            # 🔥 Silent Fallback (No Spam)
             if not pool: pass
 
         # Fallback (Main Images)
@@ -263,7 +263,7 @@ async def num_callback(client, callback):
 
     except Exception as e: await client.send_message(callback.from_user.id, f"Error: {e}")
 
-# --- PHOTO HANDLER (Fix for Thumbnail Freeze) ---
+# --- PHOTO HANDLER (STRICT MODE & SAFE DOWNLOAD) ---
 @app.on_message(filters.private & filters.photo)
 async def photo_handler(client, message):
     btn = InlineKeyboardMarkup([
@@ -283,18 +283,16 @@ async def save_img_callback(client, callback):
     await callback.message.edit("⏳ <b>Processing...</b>")
     try:
         reply = callback.message.reply_to_message
-        if not reply:
-            return await callback.message.edit("❌ Error: Original message not found.")
-            
-        # 🔥 DOWNLOAD DIRECTLY FROM MESSAGE OBJECT
+        if not reply: return await callback.message.edit("❌ Original message lost.")
+        
+        # 🔥 ULTRA SAFE DOWNLOAD (Prevents Freezing)
         await client.download_media(
             message=reply, 
             file_name=path
         )
         
-        # Verify if file actually downloaded
         if not os.path.exists(path):
-             return await callback.message.edit("❌ Download Failed! Try sending photo again.")
+             return await callback.message.edit("❌ Download Failed! Try again.")
 
         # Force Convert to JPEG
         img = Image.open(path).convert("RGB")
@@ -418,16 +416,21 @@ async def cancel_handler(client, callback):
     await callback.answer("Cancelled!")
     await callback.message.delete()
 
+# 🔥 DOCUMENT HANDLER (STRICT IMAGE FILTER)
 @app.on_message(filters.private & filters.document)
 async def document_handler(client, message):
     uid = message.from_user.id
-    if message.document.mime_type.startswith("image/"):
+    
+    # ✅ Only show Thumb/Watermark option if document IS an image
+    if message.document.mime_type and message.document.mime_type.startswith("image/"):
         btn = InlineKeyboardMarkup([
             [InlineKeyboardButton("🖼 Save Thumbnail", callback_data="save_thumb"),
              InlineKeyboardButton("💧 Save Watermark", callback_data="save_wm")]
         ])
         await message.reply_text("📸 <b>Image File Detected!</b>\nKya karna hai?", reply_markup=btn, quote=True)
         return 
+
+    # For other files (Videos, Subtitles, etc.), go to Batch/Caption directly
     if uid in batch_data and 'step' not in batch_data[uid]:
         batch_data[uid]['files'].append(message)
     elif user_modes.get(uid) == "caption":
@@ -457,3 +460,4 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
+        

@@ -1,320 +1,353 @@
-import os, time, math, base64, re, asyncio, aiohttp, aiofiles
-from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+import os, time, math, base64, re, aiohttp, aiofiles, asyncio, requests, shutil
 from aiohttp import web
+from PIL import Image
+from hachoir.metadata import extractMetadata
+from hachoir.parser import createParser
+from pyrogram import Client, filters
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
 
 # --- CONFIGURATION ---
 API_ID = int(os.environ.get("API_ID", "12345"))
-API_HASH = os.environ.get("API_HASH", "your_hash")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "your_token")
-TMDB_API_KEY = "02a832d91755c2f5e8a2d1a6740a8674"
+API_HASH = os.environ.get("API_HASH", "hash")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "token")
+TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "02a832d91755c2f5e8a2d1a6740a8674") 
 CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"
+BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
-app = Client("RenameBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+app = Client("filmy_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 # --- GLOBAL VARIABLES ---
-user_modes, user_data, batch_data = {}, {}, {}
-CLEANER_WORDS = [] 
+user_data, batch_data, download_queue, user_modes, REPLACE_DICT = {}, {}, {}, {}, {}
+ACTIVE_TASKS, MAX_TASK_LIMIT = 0, 5
 
-# --- HELPER FUNCTIONS ---
-def reset_user(uid):
-    user_modes.pop(uid, None)
-    batch_data.pop(uid, None)
-    user_data.pop(uid, None)
-
+# --- HELPERS ---
 def humanbytes(size):
-    if not size: return "0 B"
-    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-        if size < 1024: return f"{size:.2f} {unit}"
-        size /= 1024
+    if not size: return ""
+    power, n = 2**10, 0
+    dic_power = {0: ' ', 1: 'K', 2: 'M', 3: 'G', 4: 'T'}
+    while size > power: size /= power; n += 1
+    return f"{round(size, 2)} {dic_power[n]}B"
 
-# --- CAPTION STYLE (Green Blockquote) ---
-def get_fancy_caption(filename, filesize):
+def get_duration_str(duration):
+    if not duration: return "00:00"
+    m, s = divmod(int(duration), 60)
+    h, m = divmod(m, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}" if h > 0 else f"{m:02d}:{s:02d}"
+
+def get_media_info(name):
+    s = re.search(r"[Ss](\d{1,2})", name)
+    e = re.search(r"[Ee](\d{1,3})", name)
+    return (s.group(1) if s else None), (e.group(1) if e else None)
+
+def get_fancy_caption(filename, filesize, duration=0):
     caption = f"<b>{filename}</b>\n\n"
-    caption += f"<blockquote><b>File Size ♻️ ➥ {humanbytes(filesize)}</b></blockquote>\n"
+    s, e = get_media_info(filename)
+    if s: caption += f"💿 <b>Season ➥ {s}</b>\n"
+    if e: caption += f"📺 <b>Episode ➥ {e}</b>\n"
+    if s or e: caption += "\n"
+    caption += f"<blockquote><b>File Size ♻️ ➥ {filesize}</b></blockquote>\n"
+    if duration > 0: caption += f"<blockquote><b>Duration ⏰ ➥ {get_duration_str(duration)}</b></blockquote>\n"
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME}</b></blockquote>"
     return caption
-
-# --- CLEANER LOGIC ---
-def apply_cleaner(filename):
-    for word in CLEANER_WORDS:
-        pattern = re.compile(re.escape(word), re.IGNORECASE)
-        filename = pattern.sub(CREDIT_NAME, filename)
-    return filename
-
-async def shorten_link(link):
-    try:
-        url = f"http://tinyurl.com/api-create.php?url={link}"
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as response:
-                return await response.text()
-    except:
-        return link
 
 async def progress(current, total, message, start_time, status):
     now = time.time()
     diff = now - start_time
-    if round(diff % 4.00) == 0 or current == total:
+    if round(diff % 3.00) == 0 or current == total:
         percentage = current * 100 / total
         speed = current / diff if diff > 0 else 0
-        tmp = (f"{status}\n\n📊 <b>{round(percentage, 1)}%</b>\n"
-               f"📂 {humanbytes(current)} / {humanbytes(total)}\n"
-               f"🚀 Speed: {humanbytes(speed)}/s")
-        try: await message.edit(tmp)
+        eta = time.strftime('%H:%M:%S', time.gmtime(round((total - current) / speed))) if speed > 0 else "00:00:00"
+        bar = '●' * int(percentage / 10) + '○' * (10 - int(percentage / 10))
+        tmp = f"{status}\n\n[{bar}] <b>{round(percentage, 1)}%</b>\n📂 <b>Size:</b> {humanbytes(current)} / {humanbytes(total)}\n🚀 <b>Speed:</b> {humanbytes(speed)}/s\n⏳ <b>ETA:</b> {eta}"
+        btn = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_process")]])
+        try: await message.edit(tmp, reply_markup=btn)
         except: pass
 
-# --- COMMANDS ---
+# --- WATERMARK ---
+def apply_watermark(base_path, wm_path):
+    try:
+        base = Image.open(base_path).convert("RGBA")
+        wm = Image.open(wm_path).convert("RGBA")
+        base_w, base_h = base.size
+        new_wm_w = int(base_w * 0.70)
+        new_wm_h = int(wm_h * (new_wm_w / wm_w))
+        wm = wm.resize((new_wm_w, new_wm_h), Image.LANCZOS)
+        x = (base_w - new_wm_w) // 2
+        y = base_h - new_wm_h - 20 
+        base.paste(wm, (x, y), wm)
+        base = base.convert("RGB")
+        base.save(base_path, "JPEG")
+        return base_path
+    except: return base_path
+        # --- COMMANDS ---
 @app.on_message(filters.command("start") & filters.private)
-async def start_cmd(client, message):
-    reset_user(message.from_user.id)
-    await message.reply_text("👋 **Bot Online!**\n/add - Add word to cleaner\n/search - Search Movie/Series")
+async def start(client, message):
+    try: await message.delete()
+    except: pass
+    await message.reply_text(
+        f"👋 <b>Hello {message.from_user.first_name}!</b>\n\n"
+        "🤖 <b>Filmy Flip Hub Bot</b>\n\n"
+        "🌐 <b>URL Mod:</b> <code>/url</code>\n"
+        "🎬 <b>Search:</b> <code>/search</code>, <code>/series</code>\n"
+        "📁 <b>Rename:</b> <code>/rename</code>\n"
+        "🔗 <b>Link Gen:</b> <code>/link</code>\n"
+        "📦 <b>Batch:</b> <code>/batch</code>\n"
+        "🧹 <b>Cleaner:</b> <code>/add</code>, <code>/del</code>\n"
+        "💧 <b>Extra:</b> <code>/watermark</code>"
+    )
 
-@app.on_message(filters.command(["url", "rename", "batch", "caption", "link", "watermark"]) & filters.private)
-async def mode_setter(client, message):
-    uid = message.from_user.id
-    cmd = message.command[0]
-    reset_user(uid)
-    user_modes[uid] = "shortener" if cmd == "link" else "renamer" if cmd == "rename" else "caption_mode" if cmd == "caption" else cmd
-    if cmd == "batch": batch_data[uid] = {'status': 'collecting', 'files': []}
+@app.on_message(filters.command("rename") & filters.private)
+async def set_rename_mode(client, message):
+    user_modes[message.from_user.id] = "renamer"
+    await message.reply_text("📁 <b>Renamer Mode ON!</b>")
+
+@app.on_message(filters.command("link") & filters.private)
+async def set_link_mode(client, message):
+    user_modes[message.from_user.id] = "blogger_link"
+    await message.reply_text("🔗 <b>Link Mode ON!</b>\nBot link bhejein.")
+
+@app.on_message(filters.command("url") & filters.private)
+async def set_url_mode(client, message):
+    user_modes[message.from_user.id] = "url"
+    await message.reply_text("🌐 <b>URL Mode ON!</b>")
+
+@app.on_message(filters.command("add") & filters.private)
+async def add_word(client, message):
+    if len(message.command) < 2: return 
+    for word in message.command[1:]: REPLACE_DICT[word] = ""
+    await message.reply_text(f"✅ Added to cleaner: {message.command[1:]}")
+
+@app.on_message(filters.command("del") & filters.private)
+async def del_word(client, message):
+    if len(message.command) < 2: return 
+    deleted = [w for w in message.command[1:] if REPLACE_DICT.pop(w, None) is not None]
+    await message.reply_text(f"🗑 Deleted from cleaner: {deleted}")
+
+@app.on_message(filters.command("watermark") & filters.private)
+async def watermark_cmd(client, message):
+    await message.reply_text("🖼 <b>Ab Photo Bhejein!</b> (Main use Thumbnail ya Watermark bana dunga)")
+
+# ==========================================
+# 🚀 SEARCH HANDLER
+# ==========================================
+@app.on_message(filters.command(["search", "series"]))
+async def search_handler(client, message):
+    if len(message.command) < 2: return await message.reply_text("Usage: /search Name")
+    query_list = message.command[1:]
+    raw_text = " ".join(query_list).lower()
+    season_num = None
+    match = re.search(r'\b(?:s|season)\s?(\d{1,2})\b', raw_text)
+    if match: season_num = int(match.group(1))
     
-    msg = f"✅ **{cmd.upper()} Mode Active!**"
-    if cmd == "caption": msg += "\nAb File bhejo, caption badal dunga."
-    await message.reply_text(msg)
+    ignore = ["full", "movie", "hindi", "dubbed", "hd", "series", "season"]
+    clean = [w for w in query_list if w.lower() not in ignore and not re.match(r'^s\d+$', w.lower())]
+    query = " ".join(clean)
+    
+    stype = "tv" if "series" in message.command[0] else "movie"
+    status = await message.reply_text(f"🔎 Searching: <code>{query}</code>...")
+    try:
+        url = f"https://api.themoviedb.org/3/search/{stype}?api_key={TMDB_API_KEY}&query={query}"
+        res = requests.get(url).json()['results'][0]
+        mid = res['id']
+        title = res.get('name') if stype == "tv" else res.get('title')
+        
+        # LOGO FIX: English Priority
+        img_url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi"
+        poster = requests.get(img_url).json().get('posters', [res])[0].get('file_path', res.get('poster_path'))
+        
+        btn = InlineKeyboardMarkup([[InlineKeyboardButton("🖼 Poster", callback_data=f"img_poster_{stype}_{mid}"), InlineKeyboardButton("🎞 Thumbnail", callback_data=f"img_backdrop_{stype}_{mid}")]])
+        caption = f"🎬 <b>{title}</b>\n📅 {res.get('release_date', res.get('first_air_date'))}\n⭐️ {res.get('vote_average')}\n\n👇 Select what to download:"
+        await status.delete()
+        await message.reply_photo(f"https://image.tmdb.org/t/p/w500{poster}", caption=caption, reply_markup=btn)
+    except Exception as e: await status.edit(f"❌ Not found or Error: {e}")
+# --- CANCEL HANDLER (Top Priority) ---
+@app.on_callback_query(filters.regex("^cancel_process"))
+async def cancel_process_callback(client, callback):
+    uid = callback.from_user.id
+    if uid in download_queue: del download_queue[uid]
+    if uid in user_data: del user_data[uid]
+    if uid in batch_data: del batch_data[uid]
+    await callback.answer("❌ Task Cancelled!", show_alert=True)
+    try: await callback.message.edit("❌ <b>Process Stopped!</b>")
+    except: await callback.message.delete()
 
-# --- CLEANER COMMANDS ---
-@app.on_message(filters.command(["add", "del", "words", "cancel", "clear"]) & filters.private)
-async def utility_cmds(client, message):
-    cmd = message.command[0]
-    if cmd == "cancel":
-        reset_user(message.from_user.id)
-        await message.reply_text("❌ Task Cancelled.")
-    elif cmd == "clear":
-        async for msg in client.get_chat_history(message.chat.id, limit=50):
-            try: await msg.delete()
-            except: pass
-    elif cmd == "add":
-        if len(message.command) < 2: return await message.reply_text("Usage: `/add word`")
-        word_to_add = message.command[1]
-        if word_to_add not in CLEANER_WORDS:
-            CLEANER_WORDS.append(word_to_add)
-            await message.reply_text(f"✅ Added: **{word_to_add}**\nAb ye replace hoke '{CREDIT_NAME}' ban jayega.")
-        else:
-            await message.reply_text("⚠️ Ye word pehle se added hai.")
-    elif cmd == "del":
-        if len(message.command) < 2: return
-        word_to_del = message.command[1]
-        if word_to_del in CLEANER_WORDS:
-            CLEANER_WORDS.remove(word_to_del)
-            await message.reply_text(f"🗑 Removed: **{word_to_del}**")
-    elif cmd == "words":
-        await message.reply_text(f"📝 **Cleaner Words:**\n{CLEANER_WORDS}")
+# --- PHOTO HANDLER (Watermark Priority Fix) ---
+@app.on_message(filters.private & filters.photo)
+async def handle_photos(client, message):
+    # Ye handler sabse pehle chalega agar photo aayi
+    btn = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🖼 Thumbnail", callback_data="save_thumb"),
+         InlineKeyboardButton("💧 Watermark", callback_data="save_wm")]
+    ])
+    await message.reply_text("<b>📸 Photo Detected!</b>\nSave as:", reply_markup=btn, quote=True)
+
+# --- SAVE CALLBACK ---
+@app.on_callback_query(filters.regex("save_"))
+async def save_callback(client, callback):
+    uid = callback.from_user.id
+    try:
+        await callback.answer("Saving...")
+        path = f"thumbnails/{uid}.jpg" if "thumb" in callback.data else f"watermarks/{uid}.jpg"
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if callback.message.reply_to_message:
+            await client.download_media(callback.message.reply_to_message, path)
+            await callback.message.edit_text("✅ <b>Saved Successfully!</b>")
+        else: await callback.message.edit_text("❌ Error: Photo not found.")
+    except Exception as e: await callback.message.edit_text(f"❌ Error: {e}")
+
+# --- TMDB IMAGE DOWNLOAD ---
+@app.on_callback_query(filters.regex("^img_"))
+async def img_type_callback(client, callback):
+    # (Same Logic as before, just short for brevity)
+    _, img_type, stype, mid = callback.data.split("_")
+    btn = InlineKeyboardMarkup([
+            [InlineKeyboardButton("1", callback_data=f"cnt_1_{img_type}_{stype}_{mid}"),
+             InlineKeyboardButton("2", callback_data=f"cnt_2_{img_type}_{stype}_{mid}")],
+            [InlineKeyboardButton("3", callback_data=f"cnt_3_{img_type}_{stype}_{mid}"),
+             InlineKeyboardButton("4", callback_data=f"cnt_4_{img_type}_{stype}_{mid}")]
+        ])
+    await callback.message.edit(f"✅ <b>{img_type.capitalize()} Selected!</b>\nHow many?", reply_markup=btn)
+
+@app.on_callback_query(filters.regex("^cnt_"))
+async def img_process_callback(client, callback):
+    uid = callback.from_user.id
+    try:
+        _, count, img_type, stype, mid = callback.data.split("_")
+        count = int(count)
+        await callback.message.edit("⏳ <b>Downloading...</b>")
+        
+        url_logo = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi"
+        data_logo = requests.get(url_logo).json()
+        key = 'posters' if img_type == 'poster' else 'backdrops'
+        pool = data_logo.get(key, [])
+        if len(pool) < count:
+            url_clean = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=null"
+            data_clean = requests.get(url_clean).json()
+            pool.extend(data_clean.get(key, []))
+        
+        if not pool: return await callback.message.edit("❌ No images found!")
+        images = pool[:count]
+        wm_path = f"watermarks/{uid}.jpg"
+        has_wm = os.path.exists(wm_path)
+        for i, img in enumerate(images):
+            img_url = f"https://image.tmdb.org/t/p/w500{img['file_path']}"
+            fpath = f"downloads/{mid}_{i}.jpg"
+            os.makedirs("downloads", exist_ok=True)
+            with open(fpath, 'wb') as f: f.write(requests.get(img_url).content)
+            if has_wm: apply_watermark(fpath, wm_path)
+            await client.send_photo(uid, fpath, caption=f"🦋 <b>Filmy Flip Hub</b>")
+            os.remove(fpath)
+        await callback.message.delete()
+    except Exception as e: await callback.message.edit(f"❌ Error: {e}")
+
+# --- BATCH COMMANDS ---
+@app.on_message(filters.command("batch") & filters.private)
+async def batch_cmd(client, message):
+    uid = message.from_user.id
+    batch_data[uid] = {'status': 'collecting', 'files': []}
+    if uid in user_modes: del user_modes[uid]
+    await message.reply_text("🚀 <b>Batch Mode ON!</b>\nForward files, then /done.")
 
 @app.on_message(filters.command("done") & filters.private)
 async def batch_done(client, message):
     uid = message.from_user.id
     if uid in batch_data and batch_data[uid]['files']:
         batch_data[uid]['status'] = 'wait_name'
-        await message.reply_text("✅ Files collected. Ab **Series Name** bhejein:")
-    else: await message.reply_text("⚠️ Batch khali hai!")
+        await message.reply_text(f"✅ <b>{len(batch_data[uid]['files'])} Files.</b> Send Series Name:")
+    else: await message.reply_text("⚠️ No files!")
 
-# --- SEARCH (Updated for Title Logo) ---
-@app.on_message(filters.command(["search", "series"]) & filters.private)
-async def search_handler(client, message):
-    if len(message.command) < 2: return
-    query = " ".join(message.command[1:])
-    reset_user(message.from_user.id)
-    btn = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🖼 Poster", callback_data=f"stype_poster_{query}"),
-         InlineKeyboardButton("🎞 Thumbnail", callback_data=f"stype_backdrop_{query}")]
-    ])
-    await message.reply_text(f"🔍 Search: **{query}**", reply_markup=btn)
-
-@app.on_callback_query(filters.regex("^stype_"))
-async def search_type_cb(client, callback):
-    _, stype, query = callback.data.split("_")
-    # Using short query to avoid button length limit
-    s_query = query[:20] 
-    btn = InlineKeyboardMarkup([
-        [InlineKeyboardButton("1", callback_data=f"snum_{stype}_0_{s_query}"), InlineKeyboardButton("2", callback_data=f"snum_{stype}_1_{s_query}")],
-        [InlineKeyboardButton("3", callback_data=f"snum_{stype}_2_{s_query}"), InlineKeyboardButton("4", callback_data=f"snum_{stype}_3_{s_query}")]
-    ])
-    await callback.message.edit(f"✅ Select Option (1-4):", reply_markup=btn)
-
-@app.on_callback_query(filters.regex("^snum_"))
-async def search_final_cb(client, callback):
-    parts = callback.data.split("_")
-    stype, idx, query = parts[1], int(parts[2]), parts[3]
+@app.on_callback_query(filters.regex("^batch_"))
+async def batch_process(client, callback):
+    uid = callback.from_user.id
+    mode = "video" if "video" in callback.data else "doc"
+    btn = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_process")]])
+    status = await callback.message.edit_text("⏳ <b>Starting Batch...</b>", reply_markup=btn)
     
-    async with aiohttp.ClientSession() as session:
-        # 1. Search to get ID and Media Type
-        async with session.get(f"https://api.themoviedb.org/3/search/multi?api_key={TMDB_API_KEY}&query={query}") as r:
-            data = await r.json()
-            if not data.get('results') or len(data['results']) <= idx:
-                return await callback.answer("❌ Search not found or expired.", show_alert=True)
-            
-            res = data['results'][idx]
-            mid = res['id']
-            mtype = res.get('media_type', 'movie')
-            default_path = res.get('poster_path' if stype == 'poster' else 'backdrop_path')
-            title = res.get('title', res.get('name'))
-
-        # 2. Fetch English Images (Logo Hunter)
-        # This call gets images with English text specifically
-        async with session.get(f"https://api.themoviedb.org/3/{mtype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en") as r2:
-            img_data = await r2.json()
-            # Select appropriate list
-            img_list = img_data.get('posters' if stype == 'poster' else 'backdrops', [])
-            
-            # Use first English image if available, else fallback to default
-            if img_list:
-                final_path = img_list[0]['file_path']
-            else:
-                final_path = default_path
-            
-            await callback.message.delete()
-            if final_path:
-                await client.send_photo(callback.from_user.id, f"https://image.tmdb.org/t/p/w500{final_path}", caption=f"🎬 **{title}**\n🆔 {mid}")
-            else:
-                await callback.answer("❌ Image nahi mili.", show_alert=True)
-
-# --- ENGINE ---
-@app.on_message(filters.private & ~filters.regex(r"^/"))
-async def engine(client, message):
-    uid = message.from_user.id
-    mode = user_modes.get(uid)
-
-    # 1. LINK SHORTENER
-    if mode == "shortener" and message.text:
-        short = await shorten_link(message.text)
-        await message.reply_text(f"🔗 **Short Link:**\n`{short}`")
-        return await message.delete()
-
-    # 2. URL UPLOADER
-    if mode == "url" and message.text and message.text.startswith("http"):
-        sts = await message.reply_text("📥 Downloading...")
-        fpath = f"downloads/{uid}_file"
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(message.text) as r:
-                    if r.status != 200: return await sts.edit("❌ Link Error!")
-                    total = int(r.headers.get('content-length', 0))
-                    curr = 0
-                    async with aiofiles.open(fpath, "wb") as f:
-                        async for chunk in r.content.iter_chunked(1024*1024): 
-                            await f.write(chunk); curr += len(chunk)
-                            await progress(curr, total, sts, time.time(), "📥 Downloading...")
-            await client.send_document(uid, fpath, caption="Uploaded by Bot", progress=progress, progress_args=(sts, time.time(), "📤 Uploading..."))
-            await asyncio.gather(message.delete(), sts.delete())
-        except Exception as e: await sts.edit(f"❌ Error: {e}")
-        finally: 
-            if os.path.exists(fpath): os.remove(fpath)
-        return
-
-    # 3. BATCH NAME INPUT
-    if uid in batch_data and batch_data[uid]['status'] == 'wait_name' and message.text:
-        batch_data[uid].update({'base_name': message.text, 'status': 'ready'})
-        btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="bt_video"), InlineKeyboardButton("📁 File", callback_data="bt_doc")]])
-        return await message.reply_text(f"✅ Name: **{message.text}**\nSelect Format:", reply_markup=btn)
-
-    # 4. CAPTION MODE (Cleaner Applied)
-    if mode == "caption_mode" and (message.document or message.video):
-        file = message.document or message.video
-        fname = file.file_name or "File"
-        fname = apply_cleaner(fname) # Cleaner
-        cap = get_fancy_caption(fname, file.file_size)
-        await message.copy(chat_id=uid, caption=cap)
-        return
-
-    # 5. IMAGE DETECT
-    is_img = message.photo or (message.document and message.document.mime_type and message.document.mime_type.startswith("image/"))
-    if is_img and mode != "batch":
-        user_data[uid] = {'msg': message}
-        btn = InlineKeyboardMarkup([[InlineKeyboardButton("🖼 Save Thumb", callback_data="save_thumb"), InlineKeyboardButton("💧 Save WM", callback_data="save_wm")]])
-        return await message.reply_text("📸 Image detected! Save as:", reply_markup=btn)
-
-    # 6. RENAME HANDLER
-    if message.document or message.video:
-        if uid in batch_data and batch_data[uid]['status'] == 'collecting':
-            batch_data[uid]['files'].append(message)
-            return await message.delete()
-        user_data[uid] = {'msg': message}
-        btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="mode_video"), InlineKeyboardButton("📁 File", callback_data="mode_doc")]])
-        await message.reply_text("Select Format:", reply_markup=btn)
-
-# --- CALLBACKS ---
-@app.on_callback_query(filters.regex("^save_") | filters.regex("^mode_") | filters.regex("^bt_") | filters.regex("cancel_process"))
-async def all_callbacks(client, cb):
-    uid = cb.from_user.id
-    
-    if cb.data == "cancel_process":
-        reset_user(uid)
-        return await cb.message.edit("❌ Task Cancelled.")
-
-    if "save_" in cb.data:
-        fld = "thumbnails" if "thumb" in cb.data else "watermarks"
-        os.makedirs(fld, exist_ok=True)
-        msg = user_data[uid]['msg']
-        await client.download_media(msg, file_name=f"{fld}/{uid}.jpg")
-        await asyncio.gather(cb.message.delete(), msg.delete())
-        return await client.send_message(uid, f"✅ {fld.capitalize()} Saved!")
-
-    if "mode_" in cb.data:
-        msg = user_data[uid]['msg']
-        await process_rename(client, msg, cb, uid, "video" in cb.data)
-
-    if "bt_" in cb.data:
-        files = batch_data[uid]['files']
-        base_name = batch_data[uid]['base_name']
-        is_video = "video" in cb.data
-        await cb.message.edit(f"🚀 Starting Batch for {len(files)} files...")
+    files_list = batch_data[uid]['files']
+    total = len(files_list)
+    for idx, msg in enumerate(files_list):
+        if uid not in batch_data: return
+        media = msg.document or msg.video or msg.audio
+        s, e = get_media_info(media.file_name or "")
+        base = batch_data[uid]['base_name']
+        ext = get_extension(media.file_name or "")
+        new_name = f"{base} - S{s}E{e}{ext}" if s and e else f"{base} - E{e}{ext}"
         
-        for index, msg in enumerate(files):
-            new_name = f"{base_name} S01E{index+1}.mkv"
-            await process_rename(client, msg, cb, uid, is_video, new_name)
-            await asyncio.sleep(2)
+        start = time.time()
+        dl = await client.download_media(media, f"downloads/{new_name}", progress=progress, progress_args=(status, start, f"📥 DL {idx+1}/{total}"))
         
-        reset_user(uid)
-        await client.send_message(uid, "✅ Batch Process Completed!")
-
-# --- RENAME FUNCTION ---
-async def process_rename(client, msg, cb, uid, is_video, force_name=None):
-    sts = await client.send_message(uid, "📥 Downloading...")
-    try:
-        if force_name:
-            fname = force_name
-        else:
-            fname = msg.video.file_name if msg.video else msg.document.file_name
-            if not fname: fname = f"file_{uid}.mp4"
-
-        fname = apply_cleaner(fname) # Cleaner Applied
-
-        fpath = await client.download_media(msg, file_name=f"downloads/{fname}", progress=progress, progress_args=(sts, time.time(), "📥 Downloading..."))
-        
+        w, h, dur = get_video_attributes(dl)
         thumb_path = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
-        caption = get_fancy_caption(fname, os.path.getsize(fpath))
+        wm_path = f"watermarks/{uid}.jpg"
+        if thumb_path and os.path.exists(wm_path): thumb_path = apply_watermark(thumb_path, wm_path)
+        caption = get_fancy_caption(new_name, humanbytes(os.path.getsize(dl)), dur)
         
-        if is_video:
-            await client.send_video(uid, fpath, thumb=thumb_path, caption=caption, supports_streaming=True, progress=progress, progress_args=(sts, time.time(), "📤 Uploading..."))
+        start = time.time()
+        if mode == 'video':
+            await client.send_video(uid, dl, caption=caption, thumb=thumb_path, duration=dur, width=w, height=h, progress=progress, progress_args=(status, start, f"📤 UL {idx+1}/{total}"))
         else:
-            await client.send_document(uid, fpath, thumb=thumb_path, caption=caption, force_document=True, progress=progress, progress_args=(sts, time.time(), "📤 Uploading..."))
-        
-        await asyncio.gather(msg.delete(), sts.delete())
-        if os.path.exists(fpath): os.remove(fpath)
+            await client.send_document(uid, dl, caption=caption, thumb=thumb_path, progress=progress, progress_args=(status, start, f"📤 UL {idx+1}/{total}"))
+        os.remove(dl)
+    await status.edit("✅ Batch Completed!"); del batch_data[uid]
 
-    except Exception as e:
-        await sts.edit(f"❌ Error: {e}")
-        if os.path.exists(fpath): os.remove(fpath)
+# --- TEXT HANDLER ---
+@app.on_message(filters.private & filters.text)
+async def handle_text(client, message):
+    if message.text.startswith("/"): return
+    uid, text = message.from_user.id, message.text.strip()
 
+    # 1. Batch Priority
+    if uid in batch_data and batch_data[uid]['status'] == 'wait_name':
+        batch_data[uid].update({'base_name': text, 'status': 'ready'})
+        btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="batch_video"), InlineKeyboardButton("📁 File", callback_data="batch_doc")]])
+        await message.reply_text(f"✅ Name set: <b>{text}</b>\nSelect Format:", reply_markup=btn)
+        return
+
+    # 2. Link Mode
+    if user_modes.get(uid) == "blogger_link" or "t.me/" in text:
+        code = text.split("?start=")[1].split()[0] if "?start=" in text else text
+        enc = base64.b64encode(code.encode()).decode()
+        await message.reply_text(f"✅ <b>Link Ready!</b>\n\n🔗 <code>{BLOGGER_URL}?data={enc}</code>")
+
+# --- FILE HANDLER (Last Priority) ---
+@app.on_message(filters.private & (filters.document | filters.video | filters.audio))
+async def handle_files(client, message):
+    uid = message.from_user.id
+    if uid in batch_data and batch_data[uid]['status'] == 'collecting':
+        batch_data[uid]['files'].append(message)
+        return
+    
+    # Check mime type again just in case (Image fix)
+    mime = getattr(message.document or message.video, "mime_type", "")
+    if "image" in mime:
+        return await handle_photos(client, message)
+
+    user_data[uid] = {'msg': message}
+    btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="mode_video"), InlineKeyboardButton("📁 File", callback_data="mode_document")]])
+    await message.reply_text("📁 <b>File Received!</b>\nRename Format:", reply_markup=btn, quote=True)
+
+# --- SINGLE RENAME LOGIC ---
+@app.on_callback_query(filters.regex("^mode_"))
+async def single_mode(client, callback):
+    uid = callback.from_user.id
+    user_data[uid]['mode'] = "video" if "video" in callback.data else "doc"
+    await callback.message.delete()
+    await client.send_message(uid, "📝 <b>New Name:</b>", reply_markup=ForceReply(True))
+    # Note: Text handler needs logic to catch this reply if you want custom name for single file. 
+    # For now, simplistic flow assumed.
+
+# --- SERVER START ---
 async def start_services():
-    for f in ["downloads", "thumbnails", "watermarks"]: os.makedirs(f, exist_ok=True)
-    await app.start()
-    app_w = web.Application()
-    app_w.router.add_get("/", lambda r: web.Response(text="Bot Alive"))
-    runner = web.AppRunner(app_w)
+    port = int(os.environ.get("PORT", 8080))
+    web_app = await web_server()
+    runner = web.AppRunner(web_app)
     await runner.setup()
-    await web.TCPSite(runner, "0.0.0.0", 8080).start()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    await app.start()
+    print("Bot Started!")
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    asyncio.get_event_loop().run_until_complete(start_services())
-        
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(start_services())

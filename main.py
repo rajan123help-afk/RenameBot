@@ -6,25 +6,27 @@ import re
 import asyncio
 import requests
 import shutil
-import html  # 🔥 NEW: Safety ke liye
+import html
 from aiohttp import web
 import aiofiles
 from PIL import Image
 from hachoir.metadata import extractMetadata
 from hachoir.parser import createParser
-# 🔥 IMPORTANT: enums zaroori hai styling ke liye
+# 🔥 Enums zaroori hai styling ke liye
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
 
-# --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "12345"))
-API_HASH = os.environ.get("API_HASH", "hash")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "token")
+# --- CONFIGURATION (⚠️ Yahan Apna Data Check Karein) ---
+# Agar Render ke Environment Variables mein set hai to theek, warna yahan likhein:
+API_ID = int(os.environ.get("API_ID", "12345"))  # <-- Apna API ID Dalein
+API_HASH = os.environ.get("API_HASH", "hash")     # <-- Apna API HASH Dalein
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "token")  # <-- Apna BOT TOKEN Dalein
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "02a832d91755c2f5e8a2d1a6740a8674") 
+
 CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
-# 🔥 Client Setup with HTML Mode
+# 🔥 Force HTML Mode
 app = Client(
     "filmy_bot", 
     api_id=API_ID, 
@@ -40,7 +42,7 @@ download_queue = {}
 user_modes = {} 
 REPLACE_DICT = {}
 
-# --- WEB SERVER ---
+# --- WEB SERVER (Render Keep Alive) ---
 routes = web.RouteTableDef()
 @routes.get("/", allow_head=True)
 async def root_route_handler(request):
@@ -71,18 +73,16 @@ def get_media_info(name):
     e = re.search(r"[Ee](\d{1,3})", name)
     return (s.group(1) if s else None), (e.group(1) if e else None)
 
-# 🔥 FIX: Caption Style with Safety
+# 🔥 CAPTION STYLE (Green Line Fix)
 def get_fancy_caption(filename, filesize, duration=0):
-    # Filename ko safe banao taaki HTML na tute
-    safe_filename = html.escape(filename)
-    caption = f"<b>{safe_filename}</b>\n\n"
-    
+    safe_name = html.escape(filename)
+    caption = f"<b>{safe_name}</b>\n\n"
     s, e = get_media_info(filename)
     if s: caption += f"💿 <b>Season ➥ {s}</b>\n"
     if e: caption += f"📺 <b>Episode ➥ {e}</b>\n"
     if s or e: caption += "\n"
     
-    # Blockquote (Green Line)
+    # <blockquote> tag Green Line layega
     caption += f"<blockquote><b>File Size ♻️ ➥ {filesize}</b></blockquote>\n"
     if duration > 0: caption += f"<blockquote><b>Duration ⏰ ➥ {get_duration_str(duration)}</b></blockquote>\n"
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME}</b></blockquote>"
@@ -104,7 +104,6 @@ def auto_clean(text):
     for k, v in REPLACE_DICT.items(): text = text.replace(k, v)
     return text.strip()
 
-# --- WATERMARK ---
 def apply_watermark(base_path, wm_path):
     try:
         base = Image.open(base_path).convert("RGBA")
@@ -122,7 +121,6 @@ def apply_watermark(base_path, wm_path):
         return base_path
     except: return base_path
 
-# --- PROGRESS BAR ---
 async def progress(current, total, message, start_time, status):
     now = time.time()
     diff = now - start_time
@@ -201,11 +199,7 @@ async def set_url_mode(client, message):
 async def search_handler(client, message):
     if len(message.command) < 2: return await message.reply_text("Usage: /search Name")
     query_list = message.command[1:]
-    raw_text = " ".join(query_list).lower()
-    match = re.search(r'\b(?:s|season)\s?(\d{1,2})\b', raw_text)
-    
-    ignore = ["full", "movie", "hindi", "dubbed", "hd", "series", "season"]
-    clean = [w for w in query_list if w.lower() not in ignore and not re.match(r'^s\d+$', w.lower())]
+    clean = [w for w in query_list if not re.match(r'^s\d+$', w.lower())]
     query = " ".join(clean)
     stype = "tv" if "series" in message.command[0] else "movie"
     
@@ -215,7 +209,6 @@ async def search_handler(client, message):
         res = requests.get(url).json()['results'][0]
         mid = res['id']
         title = res.get('name') if stype == "tv" else res.get('title')
-        
         img_url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi"
         poster = requests.get(img_url).json().get('posters', [res])[0].get('file_path', res.get('poster_path'))
         
@@ -305,11 +298,9 @@ async def handle_text(client, message):
         enc = base64.b64encode(code.encode()).decode()
         await message.reply_text(f"✅ <b>Link Ready!</b>\n\n🔗 <code>{BLOGGER_URL}?data={enc}</code>")
 
-# --- FILE HANDLER (Explicit Parse Mode Added) ---
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio))
 async def handle_files(client, message):
     uid = message.from_user.id
-    
     if uid in batch_data and batch_data[uid]['status'] == 'collecting':
         batch_data[uid]['files'].append(message)
         return
@@ -324,16 +315,11 @@ async def handle_files(client, message):
             file_size = humanbytes(getattr(media, "file_size", 0))
             duration = getattr(media, "duration", 0) or 0
             caption = get_fancy_caption(media.file_name or "File", file_size, duration)
-            
-            # 🔥 FORCE HTML MODE HERE
-            if message.video:
-                await client.send_video(uid, media.file_id, caption=caption, parse_mode=enums.ParseMode.HTML)
-            else:
-                await client.send_document(uid, media.file_id, caption=caption, parse_mode=enums.ParseMode.HTML)
-            
+            # 🔥 Force HTML Mode
+            if message.video: await client.send_video(uid, media.file_id, caption=caption, parse_mode=enums.ParseMode.HTML)
+            else: await client.send_document(uid, media.file_id, caption=caption, parse_mode=enums.ParseMode.HTML)
             await status.delete()
-        except Exception as e:
-            await status.edit(f"❌ Error: {e}")
+        except Exception as e: await status.edit(f"❌ Error: {e}")
         return
 
     user_data[uid] = {'msg': message}
@@ -373,7 +359,6 @@ async def batch_process(client, callback):
         caption = get_fancy_caption(new_name, humanbytes(os.path.getsize(dl)), dur)
         
         start = time.time()
-        # 🔥 FORCE HTML MODE HERE TOO
         if mode == 'video':
             await client.send_video(uid, dl, caption=caption, thumb=thumb_path, duration=dur, width=w, height=h, progress=progress, progress_args=(status, start, f"📤 UL {idx+1}/{total}"), parse_mode=enums.ParseMode.HTML)
         else:
@@ -382,16 +367,22 @@ async def batch_process(client, callback):
     await status.edit("✅ Batch Completed!"); del batch_data[uid]
 
 async def start_services():
-    port = int(os.environ.get("PORT", 8080))
-    web_app = await web_server()
-    runner = web.AppRunner(web_app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
-    await app.start()
-    print("Bot Started!")
-    await asyncio.Event().wait()
+    try:
+        port = int(os.environ.get("PORT", 8080))
+        web_app = await web_server()
+        runner = web.AppRunner(web_app)
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", port)
+        await site.start()
+        print("Web Server Started.")
+        print("Starting Bot...")
+        await app.start()
+        print("Bot is Alive!")
+        await asyncio.Event().wait()
+    except Exception as e:
+        print(f"❌ CRITICAL ERROR: {e}")
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_services())
+    

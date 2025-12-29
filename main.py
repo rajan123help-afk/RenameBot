@@ -8,6 +8,7 @@ import requests
 import shutil
 import html
 import aiofiles
+import aiohttp  # ✅ YE LINE MISSING THI, AB ADD KAR DI HAI
 from PIL import Image
 from aiohttp import web
 from pyrogram import Client, filters, enums
@@ -192,7 +193,7 @@ async def type_callback(client, callback):
         await callback.message.edit(f"✅ <b>{img_type.capitalize()} Selected!</b>\nKitni images chahiye?", reply_markup=btn)
     except: pass
 
-# 🔥 NUMBER CALLBACK (Sends multiple images WITH WATERMARK) - FIX 3
+# 🔥 NUMBER CALLBACK (Sends multiple images WITH WATERMARK)
 @app.on_callback_query(filters.regex("^num_"))
 async def num_callback(client, callback):
     try:
@@ -217,7 +218,7 @@ async def num_callback(client, callback):
             full_url = f"https://image.tmdb.org/t/p/original{img_path}"
             temp_path = f"downloads/temp_{uid}_{i}.jpg"
 
-            # Download TMDB Image locally
+            # Download TMDB Image locally (Requires aiohttp)
             async with aiohttp.ClientSession() as session:
                 async with session.get(full_url) as resp:
                     if resp.status == 200:
@@ -265,7 +266,6 @@ async def save_img_callback(client, callback):
 @app.on_message(filters.private & filters.regex(r"^https?://"))
 async def url_handler(client, message):
     uid = message.from_user.id
-    # If in link mode, ignore here (handled in text_handler)
     if user_modes.get(uid) == "link": return 
 
     download_queue[uid] = message.text.strip()
@@ -305,7 +305,7 @@ async def dl_process(client, callback):
         else: await client.send_document(uid, path, caption=cap, thumb=thumb_path, progress=progress, progress_args=(status, start, "📤 Uploading"))
         os.remove(path); del download_queue[uid]
         await status.delete()
-    except Exception as e: await status.edit(f"❌ Error: {e} (Direct Link Required)")
+    except Exception as e: await status.edit(f"❌ Error: {e}")
 
 # --- BATCH & TEXT ---
 @app.on_message(filters.command("batch") & filters.private)
@@ -332,14 +332,12 @@ async def text_handler(client, message):
         await message.reply_text(f"✅ Name: {text}\nStart?", reply_markup=btn)
         return
 
-    # 🔥 TELEGRAM LINK FIX (Problem 1)
     if user_modes.get(uid) == "link":
         code = text
-        if "t.me/" in text: # If full telegram link sent
-            code = text.split("/")[-1] # Get the last part (message ID)
+        if "t.me/" in text: 
+            code = text.split("/")[-1] 
         elif "?start=" in text:
             code = text.split("?start=")[1].split()[0]
-            
         enc = base64.b64encode(code.encode()).decode()
         await message.reply_text(f"🔗 <code>{BLOGGER_URL}?data={enc}</code>")
 
@@ -377,20 +375,18 @@ async def cancel_handler(client, callback):
     await callback.answer("Cancelled!")
     await callback.message.delete()
 
-# 🔥 IMAGE AS FILE FIX (Problem 2)
+# 🔥 IMAGE AS FILE FIX
 @app.on_message(filters.private & filters.document)
 async def document_handler(client, message):
     uid = message.from_user.id
-    # Check if document is an image
     if message.document.mime_type.startswith("image/"):
         btn = InlineKeyboardMarkup([
             [InlineKeyboardButton("🖼 Save Thumbnail", callback_data="save_thumb"),
              InlineKeyboardButton("💧 Save Watermark", callback_data="save_wm")]
         ])
         await message.reply_text("📸 <b>Image File Detected!</b>\nKya karna hai?", reply_markup=btn, quote=True)
-        return # Stop here, don't process as regular file
+        return 
 
-    # Normal file processing (Batch/Caption) continues here...
     if uid in batch_data and 'step' not in batch_data[uid]:
         batch_data[uid]['files'].append(message)
     elif user_modes.get(uid) == "caption":

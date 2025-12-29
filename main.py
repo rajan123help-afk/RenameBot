@@ -24,7 +24,7 @@ BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_ultra_max", 
+    "filmy_pro_final_fix", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -227,9 +227,9 @@ async def num_callback(client, callback):
             data = requests.get(url).json()
             pool = data.get('posters' if img_type == 'poster' else 'backdrops', [])
             
-            # If no season images, Show Alert and switch to main (NO SPAM MESSAGE)
+            # 🔥 FIX: No spam message, just silently switch to main if empty
             if not pool:
-                await callback.answer(f"⚠️ Season {s_num} specific images not found. Showing main images.", show_alert=True)
+                pass 
 
         # Fallback (Main Images)
         if not pool:
@@ -264,7 +264,7 @@ async def num_callback(client, callback):
 
     except Exception as e: await client.send_message(callback.from_user.id, f"Error: {e}")
 
-# --- PHOTO HANDLER (Fix for Thumbnail) ---
+# --- PHOTO HANDLER (Absolute Fix for Saving Freeze) ---
 @app.on_message(filters.private & filters.photo)
 async def photo_handler(client, message):
     btn = InlineKeyboardMarkup([
@@ -281,12 +281,19 @@ async def save_img_callback(client, callback):
     os.makedirs(mode, exist_ok=True)
     path = f"{mode}/{uid}.jpg"
     
-    # 🔥 SAFE DOWNLOAD METHOD (Fixes "Saving..." freeze)
     await callback.message.edit("⏳ <b>Saving...</b>")
     try:
-        # Using reply_to_message directly is safer
-        msg_to_download = callback.message.reply_to_message
-        await client.download_media(msg_to_download, file_name=path)
+        # 🔥 ULTRA SAFE DOWNLOAD METHOD (Using File ID)
+        reply = callback.message.reply_to_message
+        if reply.photo:
+            file_id = reply.photo.file_id
+        elif reply.document:
+            file_id = reply.document.file_id
+        else:
+            return await callback.message.edit("❌ Media error!")
+
+        # Download directly using file_id (No Hangs)
+        await client.download_media(file_id, file_name=path)
         
         # Force Convert to JPEG
         img = Image.open(path).convert("RGB")
@@ -331,7 +338,6 @@ async def dl_process(client, callback):
         file_size = humanbytes(os.path.getsize(path))
         cap = get_fancy_caption(fname, file_size)
         
-        # Priority: Watermark applies on Thumbnail
         thumb_path = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
         wm_path = f"watermarks/{uid}.jpg"
         
@@ -450,4 +456,3 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
-    

@@ -203,7 +203,7 @@ async def batch_done(client, message):
         await message.reply_text(f"✅ <b>{len(batch_data[uid]['files'])} Files collected.</b>\nAb Series Name bhejein:")
     else: await message.reply_text("⚠️ Pehle files bhejein!")
 
-# --- SEARCH ---
+# --- SEARCH (LOGO FIX APPLIED) ---
 @app.on_message(filters.command(["search", "series"]))
 async def search_handler(client, message):
     if len(message.command) < 2: return await message.reply_text("Usage: /search Name")
@@ -243,15 +243,18 @@ async def img_process_callback(client, callback):
         _, count, img_type, stype, mid = callback.data.split("_")
         count = int(count)
         await callback.message.edit("⏳ <b>Downloading...</b>")
+        
+        # 🔥 FIX: Only Fetch Images with EN/HI (Logos)
         url_logo = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi"
         data_logo = requests.get(url_logo).json()
         key = 'posters' if img_type == 'poster' else 'backdrops'
         pool = data_logo.get(key, [])
-        if len(pool) < count:
-            url_clean = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=null"
-            data_clean = requests.get(url_clean).json()
-            pool.extend(data_clean.get(key, []))
+        
+        # Removed Fallback to Clean Images to ensure Title Logo is present
+        
+        if not pool: return await callback.message.edit("❌ No Title Logo images found!")
         images = pool[:count]
+        
         wm_path = f"watermarks/{uid}.jpg"
         has_wm = os.path.exists(wm_path)
         for i, img in enumerate(images):

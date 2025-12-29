@@ -6,12 +6,13 @@ import re
 import asyncio
 import requests
 import shutil
+import html  # 🔥 NEW: Safety ke liye
 from aiohttp import web
 import aiofiles
 from PIL import Image
 from hachoir.metadata import extractMetadata
 from hachoir.parser import createParser
-# 🔥 IMPORTANT: enums import karna zaroori hai styling ke liye
+# 🔥 IMPORTANT: enums zaroori hai styling ke liye
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
 
@@ -23,7 +24,7 @@ TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "02a832d91755c2f5e8a2d1a6740a8674"
 CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
-# 🔥 FIX: Global Parse Mode HTML set kiya
+# 🔥 Client Setup with HTML Mode
 app = Client(
     "filmy_bot", 
     api_id=API_ID, 
@@ -39,9 +40,8 @@ download_queue = {}
 user_modes = {} 
 REPLACE_DICT = {}
 
-# --- WEB SERVER (Render Keep Alive) ---
+# --- WEB SERVER ---
 routes = web.RouteTableDef()
-
 @routes.get("/", allow_head=True)
 async def root_route_handler(request):
     return web.json_response({"status": "running"})
@@ -71,15 +71,18 @@ def get_media_info(name):
     e = re.search(r"[Ee](\d{1,3})", name)
     return (s.group(1) if s else None), (e.group(1) if e else None)
 
-# 🔥 FIX: Quote Style Check
+# 🔥 FIX: Caption Style with Safety
 def get_fancy_caption(filename, filesize, duration=0):
-    caption = f"<b>{filename}</b>\n\n"
+    # Filename ko safe banao taaki HTML na tute
+    safe_filename = html.escape(filename)
+    caption = f"<b>{safe_filename}</b>\n\n"
+    
     s, e = get_media_info(filename)
     if s: caption += f"💿 <b>Season ➥ {s}</b>\n"
     if e: caption += f"📺 <b>Episode ➥ {e}</b>\n"
     if s or e: caption += "\n"
     
-    # Ye blockquote tabhi chalega jab HTML mode ON hoga
+    # Blockquote (Green Line)
     caption += f"<blockquote><b>File Size ♻️ ➥ {filesize}</b></blockquote>\n"
     if duration > 0: caption += f"<blockquote><b>Duration ⏰ ➥ {get_duration_str(duration)}</b></blockquote>\n"
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME}</b></blockquote>"
@@ -302,31 +305,27 @@ async def handle_text(client, message):
         enc = base64.b64encode(code.encode()).decode()
         await message.reply_text(f"✅ <b>Link Ready!</b>\n\n🔗 <code>{BLOGGER_URL}?data={enc}</code>")
 
+# --- FILE HANDLER (Explicit Parse Mode Added) ---
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio))
 async def handle_files(client, message):
     uid = message.from_user.id
     
-    # 1. Batch Collection
     if uid in batch_data and batch_data[uid]['status'] == 'collecting':
         batch_data[uid]['files'].append(message)
         return
     
-    # 2. Image Check
     mime = getattr(message.document or message.video, "mime_type", "")
     if "image" in mime: return await handle_photos(client, message)
 
-    # 3. 🔥 CAPTION MODE (Checked & Fixed)
     if user_modes.get(uid) == "caption_only":
         status = await message.reply_text("⏳ <b>Processing Caption...</b>")
         try:
             media = message.document or message.video or message.audio
-            
-            # Create Caption
             file_size = humanbytes(getattr(media, "file_size", 0))
             duration = getattr(media, "duration", 0) or 0
             caption = get_fancy_caption(media.file_name or "File", file_size, duration)
             
-            # Send with forced HTML mode
+            # 🔥 FORCE HTML MODE HERE
             if message.video:
                 await client.send_video(uid, media.file_id, caption=caption, parse_mode=enums.ParseMode.HTML)
             else:
@@ -337,7 +336,6 @@ async def handle_files(client, message):
             await status.edit(f"❌ Error: {e}")
         return
 
-    # 4. Default Rename
     user_data[uid] = {'msg': message}
     btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="mode_video"), InlineKeyboardButton("📁 File", callback_data="mode_document")]])
     await message.reply_text("📁 <b>File Received!</b>\nRename Format:", reply_markup=btn, quote=True)
@@ -375,7 +373,7 @@ async def batch_process(client, callback):
         caption = get_fancy_caption(new_name, humanbytes(os.path.getsize(dl)), dur)
         
         start = time.time()
-        # 🔥 Forced HTML Parse Mode here too
+        # 🔥 FORCE HTML MODE HERE TOO
         if mode == 'video':
             await client.send_video(uid, dl, caption=caption, thumb=thumb_path, duration=dur, width=w, height=h, progress=progress, progress_args=(status, start, f"📤 UL {idx+1}/{total}"), parse_mode=enums.ParseMode.HTML)
         else:
@@ -397,4 +395,3 @@ async def start_services():
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_services())
-    

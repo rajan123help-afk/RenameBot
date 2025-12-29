@@ -2,5 +2,6 @@ pyrogram
 tgcrypto
 aiohttp
 aiofiles
+requests
 Pillow
 hachoir

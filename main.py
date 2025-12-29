@@ -7,7 +7,6 @@ import asyncio
 import requests
 import shutil
 from aiohttp import web
-import aiohttp
 import aiofiles
 from PIL import Image
 from hachoir.metadata import extractMetadata
@@ -31,8 +30,6 @@ batch_data = {}
 download_queue = {}
 user_modes = {} 
 REPLACE_DICT = {}
-ACTIVE_TASKS = 0
-MAX_TASK_LIMIT = 5
 
 # --- WEB SERVER (Render Keep Alive) ---
 routes = web.RouteTableDef()
@@ -144,11 +141,22 @@ async def start(client, message):
         "🌐 <b>URL Mod:</b> <code>/url</code>\n"
         "🎬 <b>Search:</b> <code>/search</code>, <code>/series</code>\n"
         "📁 <b>Rename:</b> <code>/rename</code>\n"
+        "📝 <b>Caption Only:</b> <code>/caption</code>\n"
         "🔗 <b>Link Gen:</b> <code>/link</code>\n"
         "📦 <b>Batch:</b> <code>/batch</code>\n"
         "🧹 <b>Cleaner:</b> <code>/add</code>, <code>/del</code>\n"
         "💧 <b>Extra:</b> <code>/watermark</code>"
     )
+
+@app.on_message(filters.command("rename") & filters.private)
+async def set_rename_mode(client, message):
+    user_modes[message.from_user.id] = "renamer"
+    await message.reply_text("📁 <b>Renamer Mode ON!</b>")
+
+@app.on_message(filters.command("caption") & filters.private)
+async def set_caption_mode(client, message):
+    user_modes[message.from_user.id] = "caption_only"
+    await message.reply_text("📝 <b>Caption Mode ON!</b>\nFile bhejein, main bas caption badal dunga.")
 
 @app.on_message(filters.command("batch") & filters.private)
 async def batch_cmd(client, message):
@@ -198,7 +206,6 @@ async def search_handler(client, message):
         mid = res['id']
         title = res.get('name') if stype == "tv" else res.get('title')
         
-        # English Priority for Logo
         img_url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi"
         poster = requests.get(img_url).json().get('posters', [res])[0].get('file_path', res.get('poster_path'))
         
@@ -288,16 +295,34 @@ async def handle_text(client, message):
         enc = base64.b64encode(code.encode()).decode()
         await message.reply_text(f"✅ <b>Link Ready!</b>\n\n🔗 <code>{BLOGGER_URL}?data={enc}</code>")
 
+# --- FILE HANDLER (Corrected Priority) ---
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio))
 async def handle_files(client, message):
     uid = message.from_user.id
+    
+    # 1. Batch Collection
     if uid in batch_data and batch_data[uid]['status'] == 'collecting':
         batch_data[uid]['files'].append(message)
         return
     
+    # 2. Image Check
     mime = getattr(message.document or message.video, "mime_type", "")
     if "image" in mime: return await handle_photos(client, message)
 
+    # 3. 🔥 CAPTION MODE CHECK (Ye Missing tha!)
+    if user_modes.get(uid) == "caption_only":
+        try:
+            media = message.document or message.video or message.audio
+            caption = get_fancy_caption(media.file_name or "File", humanbytes(getattr(media, "file_size", 0)), getattr(media, "duration", 0))
+            if message.video:
+                await client.send_video(uid, media.file_id, caption=caption)
+            else:
+                await client.send_document(uid, media.file_id, caption=caption)
+        except Exception as e:
+            await message.reply_text(f"❌ Error: {e}")
+        return
+
+    # 4. Default Rename
     user_data[uid] = {'msg': message}
     btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="mode_video"), InlineKeyboardButton("📁 File", callback_data="mode_document")]])
     await message.reply_text("📁 <b>File Received!</b>\nRename Format:", reply_markup=btn, quote=True)
@@ -308,7 +333,6 @@ async def single_mode(client, callback):
     user_data[uid]['mode'] = "video" if "video" in callback.data else "doc"
     await callback.message.delete()
     await client.send_message(uid, "📝 <b>New Name:</b>", reply_markup=ForceReply(True))
-    # Note: Single Rename logic is simplified here.
 
 @app.on_callback_query(filters.regex("^batch_"))
 async def batch_process(client, callback):
@@ -351,7 +375,7 @@ async def start_services():
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
     await app.start()
-    print("Bot is Alive!")
+    print("Bot Started!")
     await asyncio.Event().wait()
 
 if __name__ == "__main__":

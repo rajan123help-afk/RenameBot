@@ -11,7 +11,7 @@ import aiofiles
 from PIL import Image
 from hachoir.metadata import extractMetadata
 from hachoir.parser import createParser
-from pyrogram import Client, filters
+from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
 
 # --- CONFIGURATION ---
@@ -22,7 +22,8 @@ TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "02a832d91755c2f5e8a2d1a6740a8674"
 CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
-app = Client("filmy_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+# 🔥 FIX: Parse Mode HTML set kiya taaki Green Line (Quote) dikhe
+app = Client("filmy_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, parse_mode=enums.ParseMode.HTML)
 
 # --- GLOBAL VARIABLES ---
 user_data = {}
@@ -63,12 +64,15 @@ def get_media_info(name):
     e = re.search(r"[Ee](\d{1,3})", name)
     return (s.group(1) if s else None), (e.group(1) if e else None)
 
+# 🔥 FIX: Caption Style Proper HTML Quote ke saath
 def get_fancy_caption(filename, filesize, duration=0):
     caption = f"<b>{filename}</b>\n\n"
     s, e = get_media_info(filename)
     if s: caption += f"💿 <b>Season ➥ {s}</b>\n"
     if e: caption += f"📺 <b>Episode ➥ {e}</b>\n"
     if s or e: caption += "\n"
+    
+    # Ye <blockquote> tag ab Green Line banayega kyunki HTML mode ON hai
     caption += f"<blockquote><b>File Size ♻️ ➥ {filesize}</b></blockquote>\n"
     if duration > 0: caption += f"<blockquote><b>Duration ⏰ ➥ {get_duration_str(duration)}</b></blockquote>\n"
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME}</b></blockquote>"
@@ -138,14 +142,10 @@ async def start(client, message):
     await message.reply_text(
         f"👋 <b>Hello {message.from_user.first_name}!</b>\n\n"
         "🤖 <b>Filmy Flip Hub Bot</b>\n\n"
-        "🌐 <b>URL Mod:</b> <code>/url</code>\n"
-        "🎬 <b>Search:</b> <code>/search</code>, <code>/series</code>\n"
+        "📝 <b>Caption Mode:</b> <code>/caption</code>\n"
         "📁 <b>Rename:</b> <code>/rename</code>\n"
-        "📝 <b>Caption Only:</b> <code>/caption</code>\n"
-        "🔗 <b>Link Gen:</b> <code>/link</code>\n"
         "📦 <b>Batch:</b> <code>/batch</code>\n"
-        "🧹 <b>Cleaner:</b> <code>/add</code>, <code>/del</code>\n"
-        "💧 <b>Extra:</b> <code>/watermark</code>"
+        "💧 <b>Thumbnail:</b> <code>/watermark</code>"
     )
 
 @app.on_message(filters.command("rename") & filters.private)
@@ -156,7 +156,7 @@ async def set_rename_mode(client, message):
 @app.on_message(filters.command("caption") & filters.private)
 async def set_caption_mode(client, message):
     user_modes[message.from_user.id] = "caption_only"
-    await message.reply_text("📝 <b>Caption Mode ON!</b>\nFile bhejein, main bas caption badal dunga.")
+    await message.reply_text("📝 <b>Caption Mode ON!</b>\nAb file bhejo, main bas caption badal dunga.")
 
 @app.on_message(filters.command("batch") & filters.private)
 async def batch_cmd(client, message):
@@ -295,7 +295,7 @@ async def handle_text(client, message):
         enc = base64.b64encode(code.encode()).decode()
         await message.reply_text(f"✅ <b>Link Ready!</b>\n\n🔗 <code>{BLOGGER_URL}?data={enc}</code>")
 
-# --- FILE HANDLER (Corrected Priority) ---
+# --- FILE HANDLER (Caption Mode Logic FIXED) ---
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio))
 async def handle_files(client, message):
     uid = message.from_user.id
@@ -309,20 +309,26 @@ async def handle_files(client, message):
     mime = getattr(message.document or message.video, "mime_type", "")
     if "image" in mime: return await handle_photos(client, message)
 
-    # 3. 🔥 CAPTION MODE CHECK (Ye Missing tha!)
+    # 3. 🔥 CAPTION MODE CHECK (Top Priority)
     if user_modes.get(uid) == "caption_only":
+        status = await message.reply_text("⏳ <b>Processing Caption...</b>")
         try:
             media = message.document or message.video or message.audio
-            caption = get_fancy_caption(media.file_name or "File", humanbytes(getattr(media, "file_size", 0)), getattr(media, "duration", 0))
+            # Purana caption logic use karo
+            file_size = humanbytes(getattr(media, "file_size", 0))
+            duration = getattr(media, "duration", 0) or 0
+            caption = get_fancy_caption(media.file_name or "Unknown File", file_size, duration)
+            
             if message.video:
                 await client.send_video(uid, media.file_id, caption=caption)
             else:
                 await client.send_document(uid, media.file_id, caption=caption)
+            await status.delete()
         except Exception as e:
-            await message.reply_text(f"❌ Error: {e}")
+            await status.edit(f"❌ Error: {e}")
         return
 
-    # 4. Default Rename
+    # 4. Default Rename (Video/File Buttons)
     user_data[uid] = {'msg': message}
     btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="mode_video"), InlineKeyboardButton("📁 File", callback_data="mode_document")]])
     await message.reply_text("📁 <b>File Received!</b>\nRename Format:", reply_markup=btn, quote=True)
@@ -381,4 +387,4 @@ async def start_services():
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_services())
-    
+        

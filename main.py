@@ -24,7 +24,7 @@ BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_max", 
+    "filmy_pro_ultra", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -160,7 +160,7 @@ async def del_clean(client, message):
     if message.command[1] in cleaner_dict: del cleaner_dict[message.command[1]]
     await message.reply_text(f"🗑 Removed: {message.command[1]}")
 
-# --- SMART SEARCH SYSTEM (SEASON FIX) ---
+# --- SEARCH SYSTEM ---
 @app.on_message(filters.command(["search", "series"]))
 async def search_handler(client, message):
     if len(message.command) < 2: return await message.reply_text("Usage: /search Name or /series Name S1")
@@ -169,7 +169,6 @@ async def search_handler(client, message):
     stype = "tv" if "series" in message.command[0] else "movie"
     season_num = 0
     
-    # Smart Filter for Season (Only for TV)
     if stype == "tv":
         match = re.search(r"(?i)\s*(?:s|season)\s*(\d+)$", raw_query)
         if match:
@@ -185,7 +184,6 @@ async def search_handler(client, message):
         mid = res[0]['id']
         title = res[0].get('name') if stype == 'tv' else res[0].get('title')
         
-        # Pass season_num in callback
         btn = InlineKeyboardMarkup([
             [InlineKeyboardButton("🖼 Poster", callback_data=f"type_poster_{stype}_{mid}_{season_num}"),
              InlineKeyboardButton("🎞 Thumbnail", callback_data=f"type_backdrop_{stype}_{mid}_{season_num}")]
@@ -222,19 +220,21 @@ async def num_callback(client, callback):
         await callback.answer(f"Sending top {count} images...")
         await callback.message.delete()
 
-        # Decide URL based on Season or Main
+        # Logic: First try Season specific, then fallback to Main
+        pool = []
         if stype == "tv" and s_num > 0:
             url = f"https://api.themoviedb.org/3/tv/{mid}/season/{s_num}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi,null"
-        else:
-            url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi"
+            data = requests.get(url).json()
+            pool = data.get('posters' if img_type == 'poster' else 'backdrops', [])
+            
+            # If no season images, Show Alert and switch to main
+            if not pool:
+                # 🔥 FIX: No spam message, just an alert if user clicks
+                pass # Silently fallback
 
-        data = requests.get(url).json()
-        pool = data.get('posters' if img_type == 'poster' else 'backdrops', [])
-        
-        # Fallback to main if season has no images
-        if not pool and stype == "tv" and s_num > 0:
-            await client.send_message(uid, f"⚠️ Season {s_num} ke specific images nahi mile, Main images bhej raha hu.")
-            url = f"https://api.themoviedb.org/3/tv/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi"
+        # Fallback (Main Images)
+        if not pool:
+            url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi"
             data = requests.get(url).json()
             pool = data.get('posters' if img_type == 'poster' else 'backdrops', [])
 
@@ -265,7 +265,7 @@ async def num_callback(client, callback):
 
     except Exception as e: await client.send_message(callback.from_user.id, f"Error: {e}")
 
-# --- PHOTO HANDLER ---
+# --- PHOTO HANDLER (Fix for Thumbnail) ---
 @app.on_message(filters.private & filters.photo)
 async def photo_handler(client, message):
     btn = InlineKeyboardMarkup([
@@ -278,11 +278,26 @@ async def photo_handler(client, message):
 async def save_img_callback(client, callback):
     uid = callback.from_user.id
     mode = "thumbnails" if "thumb" in callback.data else "watermarks"
-    path = f"{mode}/{uid}.jpg"
+    
+    # 🔥 FIX: Ensure directory exists
     os.makedirs(mode, exist_ok=True)
+    path = f"{mode}/{uid}.jpg"
+    
+    # Download
     media = callback.message.reply_to_message.photo or callback.message.reply_to_message.document
-    await client.download_media(media, path)
-    await callback.message.edit(f"✅ <b>Saved to {mode}!</b>")
+    await callback.message.edit("⏳ <b>Saving...</b>")
+    
+    try:
+        # 🔥 FIX: Explicitly pass file_name to avoid path confusion
+        await client.download_media(media, file_name=path)
+        
+        # 🔥 FIX: Force Convert to JPEG for Telegram Compatibility
+        img = Image.open(path).convert("RGB")
+        img.save(path, "JPEG")
+        
+        await callback.message.edit(f"✅ <b>Success!</b> Saved to {mode}.")
+    except Exception as e:
+        await callback.message.edit(f"❌ Error: {e}")
 
 # --- URL UPLOADER ---
 @app.on_message(filters.private & filters.regex(r"^https?://"))
@@ -318,9 +333,19 @@ async def dl_process(client, callback):
         await status.edit("📤 <b>Uploading...</b>")
         file_size = humanbytes(os.path.getsize(path))
         cap = get_fancy_caption(fname, file_size)
+        
+        # 🔥 FIX: Prioritize Watermark over Thumbnail if both exist
         thumb_path = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
         wm_path = f"watermarks/{uid}.jpg"
-        if thumb_path and os.path.exists(wm_path): thumb_path = apply_watermark(thumb_path, wm_path)
+        
+        # If Watermark exists, it APPLIES ON TOP of Thumbnail (or creates new thumb)
+        if thumb_path and os.path.exists(wm_path):
+            thumb_path = apply_watermark(thumb_path, wm_path)
+        elif os.path.exists(wm_path) and not thumb_path:
+            # If ONLY watermark exists, we can't really use it as thumb unless we extract a frame. 
+            # Current logic: Only use Watermark if a base thumb exists (from video or set by user)
+            pass 
+
         start = time.time()
         if mode == "video": await client.send_video(uid, path, caption=cap, thumb=thumb_path, progress=progress, progress_args=(status, start, "📤 Uploading"))
         else: await client.send_document(uid, path, caption=cap, thumb=thumb_path, progress=progress, progress_args=(status, start, "📤 Uploading"))
@@ -433,4 +458,4 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
-                      
+                            

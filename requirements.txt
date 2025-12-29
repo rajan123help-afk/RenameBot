@@ -1,4 +1,4 @@
-https://github.com/Pyrogram/pyrogram/archive/master.zip
+pyrofork
 tgcrypto
 aiohttp
 requests

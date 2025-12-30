@@ -27,7 +27,7 @@ BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_name_fix_v6", 
+    "filmy_pro_caption_fix_v7", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -76,49 +76,30 @@ def get_duration_str(duration):
     h, m = divmod(m, 60)
     return f"{h}h {m}m {s}s" if h > 0 else f"{m}m {s}s"
 
-# 🔥 NEW: POWERFUL NAME EXTRACTOR (Server Bypass)
+# 🔥 SERVER-SIDE NAME FETCHING
 async def get_real_filename(url):
     try:
-        # Browser jaisa behavior dikhane ke liye Headers
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        }
+        headers = {"User-Agent": "Mozilla/5.0"}
         async with aiohttp.ClientSession() as session:
-            # allow_redirects=True is vital for shortened links
             async with session.get(url, headers=headers, allow_redirects=True, timeout=10) as resp:
                 if "Content-Disposition" in resp.headers:
                     cd = resp.headers["Content-Disposition"]
-                    # Try to find filename="..."
                     fname_match = re.search(r'filename="?([^"]+)"?', cd)
-                    if fname_match:
-                        return unquote(fname_match.group(1))
-                    # Try to find filename*=UTF-8''...
+                    if fname_match: return unquote(fname_match.group(1))
                     utf_match = re.search(r"filename\*=UTF-8''(.+)", cd)
-                    if utf_match:
-                        return unquote(utf_match.group(1))
-    except Exception as e:
-        print(f"Name Fetch Error: {e}")
-        pass
-    
-    # Fallback: Agar server fail ho jaye toh URL ka last part lo
+                    if utf_match: return unquote(utf_match.group(1))
+    except: pass
     return unquote(url.split("/")[-1].split("?")[0])
 
-# 🔥 UNIVERSAL S/E PARSER (Ganyu Logic)
+# 🔥 UNIVERSAL S/E REGEX
 def get_media_info(name):
     name = unquote(name).replace(".", " ").replace("_", " ").replace("-", " ")
-    
-    # Pattern: S01.EP03 / S1 E3
     match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", name)
     if match1: return match1.group(1), match1.group(2)
-    
-    # Pattern: 1x03
     match2 = re.search(r"(\d{1,2})x(\d{1,3})", name)
     if match2: return match2.group(1), match2.group(2)
-    
-    # Pattern: EP 03
     match3 = re.search(r"(?i)(?:ep|episode|e)\s*[\.]?\s*(\d{1,3})", name)
     if match3: return None, match3.group(1)
-    
     return None, None
 
 def clean_filename(name):
@@ -138,19 +119,29 @@ def get_fancy_caption(filename, filesize, duration=0):
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME}</b></blockquote>"
     return caption
 
-# 🔥 WATERMARK LOGIC
+# 🔥 WATERMARK LOGIC (Improved for Posters)
 def apply_watermark(base_path, wm_path):
     try:
         base = Image.open(base_path).convert("RGBA")
         wm = Image.open(wm_path).convert("RGBA")
+        
         base_w, base_h = base.size
         wm_w, wm_h = wm.size
-        new_wm_w = int(base_w * 0.70) 
+        
+        # Determine strict 70% width
+        new_wm_w = int(base_w * 0.70)
         ratio = new_wm_w / wm_w
         new_wm_h = int(wm_h * ratio)
+        
         wm = wm.resize((new_wm_w, new_wm_h), Image.Resampling.LANCZOS)
+        
+        # Position: Center Bottom
         x = (base_w - new_wm_w) // 2
-        y = base_h - new_wm_h - 20
+        y = base_h - new_wm_h - 20 
+        
+        # Safety check: If Y is negative (watermark taller than image), force to bottom 0
+        if y < 0: y = base_h - new_wm_h
+        
         base.paste(wm, (x, y), wm)
         base = base.convert("RGB")
         base.save(base_path, "JPEG")
@@ -198,7 +189,7 @@ async def start(client, message):
 @app.on_message(filters.command("caption") & filters.private)
 async def set_caption(client, message):
     user_modes[message.from_user.id] = "caption"
-    await message.reply_text("📝 <b>Caption Mode ON!</b>")
+    await message.reply_text("📝 <b>Caption Mode ON!</b> Ab File/Video bhejein.")
 
 @app.on_message(filters.command("link") & filters.private)
 async def set_link(client, message):
@@ -221,7 +212,7 @@ async def del_clean(client, message):
     if len(message.command) < 2: return
     if message.command[1] in cleaner_dict: del cleaner_dict[message.command[1]]
     await message.reply_text(f"🗑 Removed: {message.command[1]}")
-# --- SEARCH ---
+    # --- SEARCH ---
 @app.on_message(filters.command(["search", "series"]))
 async def search_handler(client, message):
     if len(message.command) < 2: return await message.reply_text("Usage: /search Name or /series Name S1")
@@ -294,37 +285,41 @@ async def num_callback(client, callback):
             time.sleep(0.5)
     except Exception as e: await client.send_message(callback.from_user.id, f"Error: {e}")
 
-# 🔥 PHOTO/FILE HANDLER (FIXED) 🔥
-@app.on_message(filters.private & (filters.photo | filters.document))
+# 🔥 UNIVERSAL MEDIA HANDLER (Video/Audio/Doc/Photo) 🔥
+@app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo))
 async def media_handler(client, message):
     uid = message.from_user.id
-    is_image = False
     
-    # 1. Check if it's a direct Photo
+    # 1. Check if it's an Image (For settings)
+    is_image = False
     if message.photo:
         is_image = True
-    # 2. Check if it's a Document acting as an Image
     elif message.document:
         mime = message.document.mime_type or ""
         fname = message.document.file_name or ""
-        # Check standard image extensions
         if mime.startswith("image/") or fname.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
             is_image = True
 
-    # ✅ IF IMAGE: Show Buttons immediately
     if is_image:
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🖼 Save Thumbnail", callback_data="save_thumb"), InlineKeyboardButton("💧 Save Watermark", callback_data="save_wm")]])
         await message.reply_text("📸 <b>Image Detected!</b>\nThumbnail ya Watermark save karein?", reply_markup=btn, quote=True)
         return 
 
-    # ✅ IF NOT IMAGE (Video/Subtitle): Proceed to Batch Logic
-    if uid in batch_data and 'step' not in batch_data[uid]:
-        batch_data[uid]['files'].append(message)
-    elif user_modes.get(uid) == "caption":
+    # 2. CAPTION MODE (Fixed)
+    if user_modes.get(uid) == "caption":
         media = message.document or message.video or message.audio
         if media:
-            cap = get_fancy_caption(media.file_name or "File", humanbytes(media.file_size), 0)
+            file_name = getattr(media, "file_name", "Unknown File")
+            file_size = getattr(media, "file_size", 0)
+            duration = getattr(media, "duration", 0)
+            
+            cap = get_fancy_caption(file_name, humanbytes(file_size), duration)
             await message.copy(uid, caption=cap)
+        return
+
+    # 3. BATCH MODE
+    if uid in batch_data and 'step' not in batch_data[uid]:
+        batch_data[uid]['files'].append(message)
 
 @app.on_callback_query(filters.regex("^save_"))
 async def save_img_callback(client, callback):
@@ -341,27 +336,24 @@ async def save_img_callback(client, callback):
         
         temp_path = f"downloads/{uid}_temp_img"
         os.makedirs("downloads", exist_ok=True)
-        
-        # Download (Works for both Photo and Document)
         await client.download_media(message=reply, file_name=temp_path)
         
-        # Convert Logic
         img = Image.open(temp_path)
         if mode == "watermarks":
              img = img.convert("RGBA")
              img.save(path, "PNG")
-             msg = "✅ <b>Watermark Set!</b> (PNG format)"
+             msg = "✅ <b>Watermark Set!</b> (PNG)"
         else:
              img = img.convert("RGB")
              img.save(path, "JPEG")
-             msg = "✅ <b>Thumbnail Set!</b> (JPG format)"
+             msg = "✅ <b>Thumbnail Set!</b> (JPG)"
              
         os.remove(temp_path)
         await callback.message.edit(msg)
     except Exception as e: 
         await callback.message.edit(f"❌ Error: {e}")
 
-# --- URL HANDLER (SERVER FETCH) ---
+# --- URL HANDLER ---
 @app.on_message(filters.private & filters.regex(r"^https?://"))
 async def url_handler(client, message):
     uid = message.from_user.id
@@ -375,10 +367,7 @@ async def url_handler(client, message):
         return
     
     status = await message.reply_text("🔗 <b>Checking Server...</b>")
-    
-    # 🔥 ASK SERVER FOR REAL NAME (Needs Part 1 update)
     real_name = await get_real_filename(text)
-    
     download_queue[uid] = {'url': text, 'original_name': real_name}
     
     await status.delete()
@@ -401,18 +390,12 @@ async def dl_process(client, callback):
     
     try:
         start = time.time()
-        
-        # 2. Detect S/E (Advanced Regex)
         s, e = get_media_info(original_fname)
         ext = os.path.splitext(original_fname)[1] or ".mkv"
         
-        # 3. Final Name
-        if s and e:
-            final_fname = f"{custom_name} - S{s}E{e}{ext}"
-        elif e and not s:
-                final_fname = f"{custom_name} - Episode {e}{ext}"
-        else:
-            final_fname = f"{custom_name}{ext}"
+        if s and e: final_fname = f"{custom_name} - S{s}E{e}{ext}"
+        elif e and not s: final_fname = f"{custom_name} - Episode {e}{ext}"
+        else: final_fname = f"{custom_name}{ext}"
         
         final_fname = clean_filename(final_fname)
         path = f"downloads/{uid}_{final_fname}"
@@ -432,20 +415,16 @@ async def dl_process(client, callback):
         duration = get_duration(path)
         cap = get_fancy_caption(final_fname, humanbytes(os.path.getsize(path)), duration)
         
-        # 🔥 THUMBNAIL LOGIC
         thumb_path = None
-        if os.path.exists(f"thumbnails/{uid}.jpg"):
-            thumb_path = f"thumbnails/{uid}.jpg"
+        if os.path.exists(f"thumbnails/{uid}.jpg"): thumb_path = f"thumbnails/{uid}.jpg"
         elif os.path.exists(f"watermarks/{uid}.png"):
-             # Use Watermark as Thumb
              temp_thumb = f"thumbnails/{uid}_wm_thumb.jpg"
              img = Image.open(f"watermarks/{uid}.png").convert("RGB")
              img.save(temp_thumb, "JPEG")
              thumb_path = temp_thumb
         
         wm_path = f"watermarks/{uid}.png"
-        if thumb_path and os.path.exists(wm_path):
-             thumb_path = apply_watermark(thumb_path, wm_path)
+        if thumb_path and os.path.exists(wm_path): thumb_path = apply_watermark(thumb_path, wm_path)
         
         start = time.time()
         if mode == "video": await client.send_video(uid, path, caption=cap, duration=duration, thumb=thumb_path, progress=progress, progress_args=(status, start, f"📤 Uploading: {final_fname}"))

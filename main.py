@@ -27,7 +27,7 @@ BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_universal_regex", 
+    "filmy_pro_dot_fix_v4", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -76,22 +76,21 @@ def get_duration_str(duration):
     h, m = divmod(m, 60)
     return f"{h}h {m}m {s}s" if h > 0 else f"{m}m {s}s"
 
-# 🔥 UNIVERSAL MEDIA INFO (Updated for EP/Ep/E support)
+# 🔥 NEW REGEX LOGIC FOR S01.EP03
 def get_media_info(name):
-    # 1. Clean Junk
-    name = unquote(name).replace(".", " ").replace("_", " ").replace("-", " ")
+    name = unquote(name) # Decode first
     
-    # Priority 1: "S1 EP1" or "Season 1 Ep 05" (Season + Episode)
-    # This handles: S01E01, S1EP1, Season 1 Episode 1
-    match1 = re.search(r"(?i)(?:Season|S)\s*(\d{1,2}).*?(?:Episode|Ep|E)\s*(\d{1,3})", name)
+    # Pattern 1: Handles "S01.EP03", "S01 EP03", "S1.E3" (With Dots/Spaces)
+    # This is the specific fix for your issue
+    match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", name)
     if match1: return match1.group(1), match1.group(2)
     
-    # Priority 2: "1x05" format
+    # Pattern 2: "1x03"
     match2 = re.search(r"(\d{1,2})x(\d{1,3})", name)
     if match2: return match2.group(1), match2.group(2)
     
-    # Priority 3: "EP 1" or "Episode 05" (Only Episode, No Season)
-    match3 = re.search(r"(?i)(?:Episode|Ep|E)\s*(\d{1,3})", name)
+    # Pattern 3: "EP 03" (Only Episode)
+    match3 = re.search(r"(?i)(?:ep|episode|e)\s*[\.]?\s*(\d{1,3})", name)
     if match3: return None, match3.group(1)
     
     return None, None
@@ -113,24 +112,19 @@ def get_fancy_caption(filename, filesize, duration=0):
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME}</b></blockquote>"
     return caption
 
-# 🔥 WATERMARK LOGIC (70%)
+# 🔥 WATERMARK LOGIC
 def apply_watermark(base_path, wm_path):
     try:
         base = Image.open(base_path).convert("RGBA")
         wm = Image.open(wm_path).convert("RGBA")
-        
         base_w, base_h = base.size
         wm_w, wm_h = wm.size
-        
-        # Size 70%
         new_wm_w = int(base_w * 0.70) 
         ratio = new_wm_w / wm_w
         new_wm_h = int(wm_h * ratio)
-        
         wm = wm.resize((new_wm_w, new_wm_h), Image.Resampling.LANCZOS)
         x = (base_w - new_wm_w) // 2
         y = base_h - new_wm_h - 20
-        
         base.paste(wm, (x, y), wm)
         base = base.convert("RGB")
         base.save(base_path, "JPEG")
@@ -304,7 +298,7 @@ async def save_img_callback(client, callback):
         await callback.message.edit(f"✅ <b>Set Successfully!</b>")
     except Exception as e: await callback.message.edit(f"❌ Error: {e}")
 
-# --- URL HANDLER (STRICT MODE) ---
+# --- URL HANDLER ---
 @app.on_message(filters.private & filters.regex(r"^https?://"))
 async def url_handler(client, message):
     uid = message.from_user.id
@@ -338,7 +332,7 @@ async def dl_process(client, callback):
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
                 
-                # 1. Get Real Filename
+                # 1. Real Filename
                 original_fname = ""
                 if "Content-Disposition" in resp.headers:
                     cd = resp.headers["Content-Disposition"]
@@ -376,26 +370,31 @@ async def dl_process(client, callback):
         duration = get_duration(path)
         cap = get_fancy_caption(final_fname, humanbytes(os.path.getsize(path)), duration)
         
-        # 🔥 THUMBNAIL LOGIC
+        # 🔥 SIMPLE & SOLID THUMBNAIL LOGIC
         thumb_path = None
+        
+        # Case A: User set a standard JPG Thumbnail
         if os.path.exists(f"thumbnails/{uid}.jpg"):
             thumb_path = f"thumbnails/{uid}.jpg"
+            # If watermark exists, put it on top of the thumbnail
+            if os.path.exists(f"watermarks/{uid}.png"):
+                thumb_path = apply_watermark(thumb_path, f"watermarks/{uid}.png")
+        
+        # Case B: User ONLY set a Watermark (PNG) - Use it AS thumbnail
         elif os.path.exists(f"watermarks/{uid}.png"):
-             temp_thumb = f"thumbnails/{uid}_wm_thumb.jpg"
+             # Convert PNG watermark to JPG thumb
+             temp_thumb = f"thumbnails/{uid}_gen.jpg"
              img = Image.open(f"watermarks/{uid}.png").convert("RGB")
              img.save(temp_thumb, "JPEG")
              thumb_path = temp_thumb
-        
-        wm_path = f"watermarks/{uid}.png"
-        if thumb_path and os.path.exists(wm_path):
-             thumb_path = apply_watermark(thumb_path, wm_path)
         
         start = time.time()
         if mode == "video": await client.send_video(uid, path, caption=cap, duration=duration, thumb=thumb_path, progress=progress, progress_args=(status, start, f"📤 Uploading: {final_fname}"))
         else: await client.send_document(uid, path, caption=cap, thumb=thumb_path, progress=progress, progress_args=(status, start, f"📤 Uploading: {final_fname}"))
         
+        # Cleanup
         os.remove(path)
-        if thumb_path and "_wm_thumb" in thumb_path: os.remove(thumb_path)
+        if thumb_path and "_gen" in thumb_path: os.remove(thumb_path)
         del download_queue[uid]
         await status.delete()
         

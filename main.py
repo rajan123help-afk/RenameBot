@@ -291,7 +291,7 @@ async def save_img_callback(client, callback):
         await callback.message.edit(f"✅ <b>Set Successfully!</b>")
     except Exception as e: await callback.message.edit(f"❌ Error: {e}")
 
-# --- URL HANDLER (SMART S/E DETECTION) ---
+# --- URL HANDLER (SMART REAL-TIME FILENAME) ---
 @app.on_message(filters.private & filters.regex(r"^https?://"))
 async def url_handler(client, message):
     uid = message.from_user.id
@@ -304,7 +304,6 @@ async def url_handler(client, message):
         await message.reply_text(f"🔗 <code>{BLOGGER_URL}?data={enc}</code>")
         return
     
-    # Ask for Name
     download_queue[uid] = {'url': text}
     await message.reply_text("📝 <b>File ka Name bhejein:</b>", reply_markup=ForceReply(True))
 
@@ -319,29 +318,36 @@ async def dl_process(client, callback):
     mode = "video" if "vid" in callback.data else "doc"
     
     await callback.message.delete()
-    status = await callback.message.reply_text("📥 <b>Starting...</b>")
-    
-    # 🔥 AUTO DETECT FROM URL & COMBINE WITH NAME
-    original_fname = url.split("/")[-1]
-    if "?" in original_fname: original_fname = original_fname.split("?")[0]
-    
-    s, e = get_media_info(original_fname) # Check S01E02 in URL
-    
-    # If S/E found in URL, add it to your custom name
-    ext = os.path.splitext(original_fname)[1] or ".mkv"
-    
-    if s and e:
-        final_fname = f"{custom_name} - S{s}E{e}{ext}"
-    else:
-        final_fname = f"{custom_name}{ext}" # Fallback if no S/E found
-    
-    path = f"downloads/{uid}_{final_fname}"
-    os.makedirs("downloads", exist_ok=True)
+    status = await callback.message.reply_text("📥 <b>Connecting...</b>")
     
     try:
         start = time.time()
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
+                
+                # 🔥 SMART LOGIC: Get Real Filename from Server Headers
+                original_fname = ""
+                if "Content-Disposition" in resp.headers:
+                    cd = resp.headers["Content-Disposition"]
+                    fname_match = re.search(r'filename="?([^"]+)"?', cd)
+                    if fname_match: original_fname = fname_match.group(1)
+                
+                if not original_fname:
+                    original_fname = url.split("/")[-1].split("?")[0]
+                
+                # Detect Season/Episode from Real Filename
+                s, e = get_media_info(original_fname)
+                ext = os.path.splitext(original_fname)[1] or ".mkv"
+                
+                if s and e:
+                    final_fname = f"{custom_name} - S{s}E{e}{ext}"
+                else:
+                    final_fname = f"{custom_name}{ext}"
+                
+                path = f"downloads/{uid}_{final_fname}"
+                os.makedirs("downloads", exist_ok=True)
+                
+                # Download
                 total = int(resp.headers.get("Content-Length", 0))
                 with open(path, "wb") as f:
                     dl = 0
@@ -349,12 +355,15 @@ async def dl_process(client, callback):
                         if uid not in download_queue: await status.edit("❌ Cancelled"); return
                         f.write(chunk); dl += len(chunk)
                         if time.time() - start > 5: await progress(dl, total, status, start, f"📥 Downloading: {final_fname}")
+        
         await status.edit("📤 <b>Uploading...</b>")
         duration = get_duration(path)
         cap = get_fancy_caption(final_fname, humanbytes(os.path.getsize(path)), duration)
+        
         thumb_path = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
         wm_path = f"watermarks/{uid}.png"
         if thumb_path and os.path.exists(wm_path): thumb_path = apply_watermark(thumb_path, wm_path)
+        
         start = time.time()
         if mode == "video": await client.send_video(uid, path, caption=cap, duration=duration, thumb=thumb_path, progress=progress, progress_args=(status, start, f"📤 Uploading: {final_fname}"))
         else: await client.send_document(uid, path, caption=cap, thumb=thumb_path, progress=progress, progress_args=(status, start, f"📤 Uploading: {final_fname}"))
@@ -381,21 +390,18 @@ async def text_handler(client, message):
     uid = message.from_user.id
     text = message.text.strip()
     
-    # 🔥 STEP 2: Capture Name for URL
     if uid in download_queue and isinstance(download_queue[uid], dict) and 'name' not in download_queue[uid]:
         download_queue[uid]['name'] = text
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="dl_vid"), InlineKeyboardButton("📁 File", callback_data="dl_doc")]])
         await message.reply_text(f"✅ Name: <b>{text}</b>\nDownload as:", reply_markup=btn)
         return
 
-    # Batch Naming
     if uid in batch_data and batch_data[uid].get('step') == 'naming':
         batch_data[uid]['name'] = text
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="batch_run_vid"), InlineKeyboardButton("📁 File", callback_data="batch_run_doc")]])
         await message.reply_text(f"✅ Name: {text}\nStart?", reply_markup=btn)
         return
     
-    # Link Convert
     if user_modes.get(uid) == "link":
         code = text
         if "t.me/" in text: code = text.split("/")[-1] 
@@ -465,7 +471,7 @@ async def media_handler(client, message):
         if message.video: await client.send_video(uid, media.file_id, caption=cap)
         else: await client.send_audio(uid, media.file_id, caption=cap)
 
-# --- START (CORRECTED) ---
+# --- START ---
 async def start_services():
     web_app = web.Application(client_max_size=30000000)
     web_app.add_routes(routes)

@@ -27,7 +27,7 @@ BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_ganyu_style", 
+    "filmy_pro_final_v5", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -76,20 +76,35 @@ def get_duration_str(duration):
     h, m = divmod(m, 60)
     return f"{h}h {m}m {s}s" if h > 0 else f"{m}m {s}s"
 
-# 🔥 SUPER ADVANCED REGEX (S01.EP03 FIX)
+# 🔥 NEW FUNCTION: ASK SERVER FOR REAL NAME (Missing in previous code)
+async def get_real_filename(url):
+    try:
+        async with aiohttp.ClientSession() as session:
+            # We use GET with allow_redirects=True to follow shortened links
+            async with session.get(url, allow_redirects=True) as resp:
+                if "Content-Disposition" in resp.headers:
+                    cd = resp.headers["Content-Disposition"]
+                    fname_match = re.search(r'filename="?([^"]+)"?', cd)
+                    if fname_match:
+                        return unquote(fname_match.group(1))
+    except:
+        pass
+    # Fallback to URL if server doesn't reply
+    return unquote(url.split("/")[-1].split("?")[0])
+
+# 🔥 UNIVERSAL S/E PARSER (Ganyu Logic)
 def get_media_info(name):
-    name = unquote(name) # Decode first
+    name = unquote(name).replace(".", " ").replace("_", " ").replace("-", " ")
     
-    # Pattern 1: Handles "S01.EP03", "S01.E03", "S1 E3" (With Dots/Spaces)
-    # The [\.]? allows for optional dots between parts
+    # S01.EP03 / S1 E3
     match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", name)
     if match1: return match1.group(1), match1.group(2)
     
-    # Pattern 2: "1x03"
+    # 1x03
     match2 = re.search(r"(\d{1,2})x(\d{1,3})", name)
     if match2: return match2.group(1), match2.group(2)
     
-    # Pattern 3: "EP 03" or "EP.03" (Only Episode)
+    # EP 03
     match3 = re.search(r"(?i)(?:ep|episode|e)\s*[\.]?\s*(\d{1,3})", name)
     if match3: return None, match3.group(1)
     
@@ -112,7 +127,7 @@ def get_fancy_caption(filename, filesize, duration=0):
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME}</b></blockquote>"
     return caption
 
-# 🔥 WATERMARK LOGIC (70%)
+# 🔥 WATERMARK LOGIC
 def apply_watermark(base_path, wm_path):
     try:
         base = Image.open(base_path).convert("RGBA")
@@ -152,7 +167,8 @@ async def progress(current, total, message, start_time, task_name):
 <b>⚡ Speed:</b> {humanbytes(speed)}/s
 <b>⏳ ETA:</b> {eta}"""
         try:
-            await message.edit(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_task")]]))
+            await message.edit(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_task")]])
+            )
         except: pass
 
 # --- COMMANDS ---
@@ -268,11 +284,37 @@ async def num_callback(client, callback):
             time.sleep(0.5)
     except Exception as e: await client.send_message(callback.from_user.id, f"Error: {e}")
 
-# --- PHOTO HANDLER (FIXED) ---
-@app.on_message(filters.private & filters.photo)
-async def photo_handler(client, message):
-    btn = InlineKeyboardMarkup([[InlineKeyboardButton("🖼 Save Thumbnail", callback_data="save_thumb"), InlineKeyboardButton("💧 Save Watermark", callback_data="save_wm")]])
-    await message.reply_text("📸 <b>Image Detected!</b>\nKya karna hai?", reply_markup=btn, quote=True)
+# 🔥 PHOTO/FILE HANDLER (FIXED) 🔥
+@app.on_message(filters.private & (filters.photo | filters.document))
+async def media_handler(client, message):
+    uid = message.from_user.id
+    is_image = False
+    
+    # 1. Check if it's a direct Photo
+    if message.photo:
+        is_image = True
+    # 2. Check if it's a Document acting as an Image
+    elif message.document:
+        mime = message.document.mime_type or ""
+        fname = message.document.file_name or ""
+        # Check standard image extensions
+        if mime.startswith("image/") or fname.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
+            is_image = True
+
+    # ✅ IF IMAGE: Show Buttons immediately
+    if is_image:
+        btn = InlineKeyboardMarkup([[InlineKeyboardButton("🖼 Save Thumbnail", callback_data="save_thumb"), InlineKeyboardButton("💧 Save Watermark", callback_data="save_wm")]])
+        await message.reply_text("📸 <b>Image Detected!</b>\nThumbnail ya Watermark save karein?", reply_markup=btn, quote=True)
+        return 
+
+    # ✅ IF NOT IMAGE (Video/Subtitle): Proceed to Batch Logic
+    if uid in batch_data and 'step' not in batch_data[uid]:
+        batch_data[uid]['files'].append(message)
+    elif user_modes.get(uid) == "caption":
+        media = message.document or message.video or message.audio
+        if media:
+            cap = get_fancy_caption(media.file_name or "File", humanbytes(media.file_size), 0)
+            await message.copy(uid, caption=cap)
 
 @app.on_callback_query(filters.regex("^save_"))
 async def save_img_callback(client, callback):
@@ -281,24 +323,35 @@ async def save_img_callback(client, callback):
     os.makedirs(mode, exist_ok=True)
     ext = ".png" if mode == "watermarks" else ".jpg"
     path = f"{mode}/{uid}{ext}"
+    
     await callback.message.edit("⏳ <b>Processing...</b>")
     try:
         reply = callback.message.reply_to_message
-        if not reply: return await callback.message.edit("❌ Error.")
-        temp_path = f"downloads/{uid}_temp.png"
+        if not reply: return await callback.message.edit("❌ Error: Purana msg delete ho gaya.")
+        
+        temp_path = f"downloads/{uid}_temp_img"
         os.makedirs("downloads", exist_ok=True)
+        
+        # Download (Works for both Photo and Document)
         await client.download_media(message=reply, file_name=temp_path)
+        
+        # Convert Logic
+        img = Image.open(temp_path)
         if mode == "watermarks":
-            img = Image.open(temp_path).convert("RGBA")
-            img.save(path, "PNG")
+             img = img.convert("RGBA")
+             img.save(path, "PNG")
+             msg = "✅ <b>Watermark Set!</b> (PNG format)"
         else:
-            img = Image.open(temp_path).convert("RGB")
-            img.save(path, "JPEG")
+             img = img.convert("RGB")
+             img.save(path, "JPEG")
+             msg = "✅ <b>Thumbnail Set!</b> (JPG format)"
+             
         os.remove(temp_path)
-        await callback.message.edit(f"✅ <b>Set Successfully!</b>")
-    except Exception as e: await callback.message.edit(f"❌ Error: {e}")
+        await callback.message.edit(msg)
+    except Exception as e: 
+        await callback.message.edit(f"❌ Error: {e}")
 
-# --- URL HANDLER (SHOW ORIGINAL NAME) ---
+# --- URL HANDLER (SERVER FETCH) ---
 @app.on_message(filters.private & filters.regex(r"^https?://"))
 async def url_handler(client, message):
     uid = message.from_user.id
@@ -311,17 +364,15 @@ async def url_handler(client, message):
         await message.reply_text(f"🔗 <code>{BLOGGER_URL}?data={enc}</code>")
         return
     
-    # 🔥 EXTRACT ORIGINAL NAME FROM URL
-    try:
-        original_fname = unquote(text.split("/")[-1].split("?")[0])
-    except:
-        original_fname = "Unknown_File"
-
-    download_queue[uid] = {'url': text}
+    status = await message.reply_text("🔗 <b>Checking Server...</b>")
     
-    # 🔥 SHOW OLD NAME IN REPLY
-    reply_txt = f"📂 <b>Original File Name:</b>\n<code>{original_fname}</code>\n\n📝 <b>New Name bhejein:</b>"
+    # 🔥 ASK SERVER FOR REAL NAME (Needs Part 1 update)
+    real_name = await get_real_filename(text)
     
+    download_queue[uid] = {'url': text, 'original_name': real_name}
+    
+    await status.delete()
+    reply_txt = f"📂 <b>Original File Name:</b>\n<code>{real_name}</code>\n\n📝 <b>New Name bhejein:</b>"
     await message.reply_text(reply_txt, reply_markup=ForceReply(True))
 
 @app.on_callback_query(filters.regex("^dl_"))
@@ -331,6 +382,7 @@ async def dl_process(client, callback):
     if not data: return await callback.answer("Expired!")
     
     url = data['url']
+    original_fname = data.get('original_name', 'video.mkv')
     custom_name = data['name'] 
     mode = "video" if "vid" in callback.data else "doc"
     
@@ -339,35 +391,25 @@ async def dl_process(client, callback):
     
     try:
         start = time.time()
+        
+        # 2. Detect S/E (Advanced Regex)
+        s, e = get_media_info(original_fname)
+        ext = os.path.splitext(original_fname)[1] or ".mkv"
+        
+        # 3. Final Name
+        if s and e:
+            final_fname = f"{custom_name} - S{s}E{e}{ext}"
+        elif e and not s:
+                final_fname = f"{custom_name} - Episode {e}{ext}"
+        else:
+            final_fname = f"{custom_name}{ext}"
+        
+        final_fname = clean_filename(final_fname)
+        path = f"downloads/{uid}_{final_fname}"
+        os.makedirs("downloads", exist_ok=True)
+        
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
-                
-                # 1. Real Filename from Server (More Accurate)
-                original_fname = ""
-                if "Content-Disposition" in resp.headers:
-                    cd = resp.headers["Content-Disposition"]
-                    fname_match = re.search(r'filename="?([^"]+)"?', cd)
-                    if fname_match: original_fname = unquote(fname_match.group(1))
-                
-                if not original_fname:
-                    original_fname = unquote(url.split("/")[-1].split("?")[0])
-                
-                # 2. Detect S/E (Advanced Logic)
-                s, e = get_media_info(original_fname)
-                ext = os.path.splitext(original_fname)[1] or ".mkv"
-                
-                # 3. Final Name Construction
-                if s and e:
-                    final_fname = f"{custom_name} - S{s}E{e}{ext}"
-                elif e and not s:
-                     final_fname = f"{custom_name} - Episode {e}{ext}"
-                else:
-                    final_fname = f"{custom_name}{ext}"
-                
-                final_fname = clean_filename(final_fname)
-                path = f"downloads/{uid}_{final_fname}"
-                os.makedirs("downloads", exist_ok=True)
-                
                 total = int(resp.headers.get("Content-Length", 0))
                 with open(path, "wb") as f:
                     dl = 0
@@ -385,6 +427,7 @@ async def dl_process(client, callback):
         if os.path.exists(f"thumbnails/{uid}.jpg"):
             thumb_path = f"thumbnails/{uid}.jpg"
         elif os.path.exists(f"watermarks/{uid}.png"):
+             # Use Watermark as Thumb
              temp_thumb = f"thumbnails/{uid}_wm_thumb.jpg"
              img = Image.open(f"watermarks/{uid}.png").convert("RGB")
              img.save(temp_thumb, "JPEG")
@@ -471,6 +514,14 @@ async def batch_run(client, callback):
         except: pass
     await status.edit("🎉 <b>Batch Done!</b>")
     if uid in batch_data: del batch_data[uid]
+
+@app.on_callback_query(filters.regex("cancel_task"))
+async def cancel_handler(client, callback):
+    uid = callback.from_user.id
+    if uid in download_queue: del download_queue[uid]
+    if uid in batch_data: del batch_data[uid]
+    await callback.answer("Cancelled!")
+    await callback.message.delete()
 
 # --- START ---
 async def start_services():

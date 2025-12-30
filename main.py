@@ -27,7 +27,7 @@ BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_master_regex", 
+    "filmy_pro_universal_regex", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -76,26 +76,23 @@ def get_duration_str(duration):
     h, m = divmod(m, 60)
     return f"{h}h {m}m {s}s" if h > 0 else f"{m}m {s}s"
 
-# 🔥 ULTIMATE SEASON/EPISODE DETECTOR
+# 🔥 UNIVERSAL MEDIA INFO (Updated for EP/Ep/E support)
 def get_media_info(name):
     # 1. Clean Junk
     name = unquote(name).replace(".", " ").replace("_", " ").replace("-", " ")
     
-    # Pattern A: S01E05, S1 E5, s1e5
-    match1 = re.search(r"(?i)S\s*(\d{1,2})\s*E\s*(\d{1,3})", name)
+    # Priority 1: "S1 EP1" or "Season 1 Ep 05" (Season + Episode)
+    # This handles: S01E01, S1EP1, Season 1 Episode 1
+    match1 = re.search(r"(?i)(?:Season|S)\s*(\d{1,2}).*?(?:Episode|Ep|E)\s*(\d{1,3})", name)
     if match1: return match1.group(1), match1.group(2)
     
-    # Pattern B: Season 1 Episode 5, Season 01 Ep 05
-    match2 = re.search(r"(?i)(?:Season|S)\s*(\d{1,2})\s*(?:Episode|Ep|E)\s*(\d{1,3})", name)
+    # Priority 2: "1x05" format
+    match2 = re.search(r"(\d{1,2})x(\d{1,3})", name)
     if match2: return match2.group(1), match2.group(2)
     
-    # Pattern C: 1x05 (Old Style)
-    match3 = re.search(r"(\d{1,2})x(\d{1,3})", name)
-    if match3: return match3.group(1), match3.group(2)
-    
-    # Pattern D: "Ep 05" (Only Episode)
-    match4 = re.search(r"(?i)(?:Episode|Ep|E)\s*(\d{1,3})", name)
-    if match4: return None, match4.group(1) # Season None, Ep Found
+    # Priority 3: "EP 1" or "Episode 05" (Only Episode, No Season)
+    match3 = re.search(r"(?i)(?:Episode|Ep|E)\s*(\d{1,3})", name)
+    if match3: return None, match3.group(1)
     
     return None, None
 
@@ -116,19 +113,24 @@ def get_fancy_caption(filename, filesize, duration=0):
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME}</b></blockquote>"
     return caption
 
-# 🔥 WATERMARK LOGIC
+# 🔥 WATERMARK LOGIC (70%)
 def apply_watermark(base_path, wm_path):
     try:
         base = Image.open(base_path).convert("RGBA")
         wm = Image.open(wm_path).convert("RGBA")
+        
         base_w, base_h = base.size
         wm_w, wm_h = wm.size
+        
+        # Size 70%
         new_wm_w = int(base_w * 0.70) 
         ratio = new_wm_w / wm_w
         new_wm_h = int(wm_h * ratio)
+        
         wm = wm.resize((new_wm_w, new_wm_h), Image.Resampling.LANCZOS)
         x = (base_w - new_wm_w) // 2
         y = base_h - new_wm_h - 20
+        
         base.paste(wm, (x, y), wm)
         base = base.convert("RGB")
         base.save(base_path, "JPEG")
@@ -302,7 +304,7 @@ async def save_img_callback(client, callback):
         await callback.message.edit(f"✅ <b>Set Successfully!</b>")
     except Exception as e: await callback.message.edit(f"❌ Error: {e}")
 
-# --- URL HANDLER ---
+# --- URL HANDLER (STRICT MODE) ---
 @app.on_message(filters.private & filters.regex(r"^https?://"))
 async def url_handler(client, message):
     uid = message.from_user.id
@@ -336,7 +338,7 @@ async def dl_process(client, callback):
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
                 
-                # 1. Real Filename
+                # 1. Get Real Filename
                 original_fname = ""
                 if "Content-Disposition" in resp.headers:
                     cd = resp.headers["Content-Disposition"]

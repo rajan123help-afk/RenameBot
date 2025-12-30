@@ -9,7 +9,6 @@ import shutil
 import html
 import aiofiles
 import aiohttp
-from urllib.parse import unquote
 from PIL import Image
 from hachoir.metadata import extractMetadata
 from hachoir.parser import createParser
@@ -27,7 +26,7 @@ BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_ultra_max_v2", 
+    "filmy_pro_url_name_fix", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -77,11 +76,8 @@ def get_duration_str(duration):
     return f"{h}h {m}m {s}s" if h > 0 else f"{m}m {s}s"
 
 def get_media_info(name):
-    # Decode URL junk first (e.g. %20 -> Space)
-    name = unquote(name)
-    # Regex to find S01E01, 1x01, etc.
-    s = re.search(r"(?i)[S](\d{1,2})", name)
-    e = re.search(r"(?i)[E](\d{1,3})", name)
+    s = re.search(r"[Ss](\d{1,2})", name)
+    e = re.search(r"[Ee](\d{1,3})", name)
     return (s.group(1) if s else None), (e.group(1) if e else None)
 
 def clean_filename(name):
@@ -101,7 +97,7 @@ def get_fancy_caption(filename, filesize, duration=0):
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME}</b></blockquote>"
     return caption
 
-# 🔥 WATERMARK LOGIC
+# 🔥 WATERMARK LOGIC (SIZE 70%)
 def apply_watermark(base_path, wm_path):
     try:
         base = Image.open(base_path).convert("RGBA")
@@ -110,7 +106,7 @@ def apply_watermark(base_path, wm_path):
         base_w, base_h = base.size
         wm_w, wm_h = wm.size
         
-        # Size 70%
+        # ✅ Size fixed to 70%
         new_wm_w = int(base_w * 0.70) 
         ratio = new_wm_w / wm_w
         new_wm_h = int(wm_h * ratio)
@@ -189,7 +185,7 @@ async def del_clean(client, message):
     if len(message.command) < 2: return
     if message.command[1] in cleaner_dict: del cleaner_dict[message.command[1]]
     await message.reply_text(f"🗑 Removed: {message.command[1]}")
-   # --- SEARCH ---
+# --- SEARCH ---
 @app.on_message(filters.command(["search", "series"]))
 async def search_handler(client, message):
     if len(message.command) < 2: return await message.reply_text("Usage: /search Name or /series Name S1")
@@ -292,7 +288,7 @@ async def save_img_callback(client, callback):
         await callback.message.edit(f"✅ <b>Set Successfully!</b>")
     except Exception as e: await callback.message.edit(f"❌ Error: {e}")
 
-# --- URL HANDLER (FIXED S/E & THUMBNAIL) ---
+# --- URL HANDLER (ASK NAME LOGIC) ---
 @app.on_message(filters.private & filters.regex(r"^https?://"))
 async def url_handler(client, message):
     uid = message.from_user.id
@@ -305,6 +301,7 @@ async def url_handler(client, message):
         await message.reply_text(f"🔗 <code>{BLOGGER_URL}?data={enc}</code>")
         return
     
+    # 🔥 STEP 1: Store URL & Ask for Name
     download_queue[uid] = {'url': text}
     await message.reply_text("📝 <b>File ka Name bhejein:</b>", reply_markup=ForceReply(True))
 
@@ -314,70 +311,38 @@ async def dl_process(client, callback):
     data = download_queue.get(uid)
     if not data: return await callback.answer("Expired!")
     
+    # 🔥 STEP 3: Retrieve Name & URL
     url = data['url']
     custom_name = data['name'] 
     mode = "video" if "vid" in callback.data else "doc"
     
     await callback.message.delete()
-    status = await callback.message.reply_text("📥 <b>Connecting...</b>")
+    status = await callback.message.reply_text("📥 <b>Starting...</b>")
+    
+    fname = f"{custom_name}.mkv"
+    path = f"downloads/{uid}_{custom_name}.mkv"
+    os.makedirs("downloads", exist_ok=True)
     
     try:
         start = time.time()
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
-                
-                # 1. Try Content-Disposition
-                original_fname = ""
-                if "Content-Disposition" in resp.headers:
-                    cd = resp.headers["Content-Disposition"]
-                    fname_match = re.search(r'filename="?([^"]+)"?', cd)
-                    if fname_match: original_fname = unquote(fname_match.group(1))
-                
-                # 2. Fallback to URL
-                if not original_fname:
-                    original_fname = unquote(url.split("/")[-1].split("?")[0])
-                
-                # 3. Detect S/E
-                s, e = get_media_info(original_fname)
-                ext = os.path.splitext(original_fname)[1] or ".mkv"
-                
-                if s and e:
-                    final_fname = f"{custom_name} - S{s}E{e}{ext}"
-                else:
-                    final_fname = f"{custom_name}{ext}"
-                
-                path = f"downloads/{uid}_{final_fname}"
-                os.makedirs("downloads", exist_ok=True)
-                
                 total = int(resp.headers.get("Content-Length", 0))
                 with open(path, "wb") as f:
                     dl = 0
                     async for chunk in resp.content.iter_chunked(1024*1024):
                         if uid not in download_queue: await status.edit("❌ Cancelled"); return
                         f.write(chunk); dl += len(chunk)
-                        if time.time() - start > 5: await progress(dl, total, status, start, f"📥 Downloading: {final_fname}")
-        
+                        if time.time() - start > 5: await progress(dl, total, status, start, f"📥 Downloading: {fname}")
         await status.edit("📤 <b>Uploading...</b>")
         duration = get_duration(path)
-        cap = get_fancy_caption(final_fname, humanbytes(os.path.getsize(path)), duration)
-        
-        # 🔥 SMART THUMBNAIL LOGIC
-        thumb_path = None
-        if os.path.exists(f"thumbnails/{uid}.jpg"):
-            thumb_path = f"thumbnails/{uid}.jpg"
-        elif os.path.exists(f"watermarks/{uid}.png"):
-            # If no thumb but watermark exists, use watermark AS thumb
-            thumb_path = f"watermarks/{uid}.png"
-            
+        cap = get_fancy_caption(fname, humanbytes(os.path.getsize(path)), duration)
+        thumb_path = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
         wm_path = f"watermarks/{uid}.png"
-        
-        # Apply Watermark only if we have a base thumbnail (jpg)
-        if thumb_path and thumb_path.endswith(".jpg") and os.path.exists(wm_path):
-             thumb_path = apply_watermark(thumb_path, wm_path)
-        
+        if thumb_path and os.path.exists(wm_path): thumb_path = apply_watermark(thumb_path, wm_path)
         start = time.time()
-        if mode == "video": await client.send_video(uid, path, caption=cap, duration=duration, thumb=thumb_path, progress=progress, progress_args=(status, start, f"📤 Uploading: {final_fname}"))
-        else: await client.send_document(uid, path, caption=cap, thumb=thumb_path, progress=progress, progress_args=(status, start, f"📤 Uploading: {final_fname}"))
+        if mode == "video": await client.send_video(uid, path, caption=cap, duration=duration, thumb=thumb_path, progress=progress, progress_args=(status, start, f"📤 Uploading: {fname}"))
+        else: await client.send_document(uid, path, caption=cap, thumb=thumb_path, progress=progress, progress_args=(status, start, f"📤 Uploading: {fname}"))
         os.remove(path); del download_queue[uid]
         await status.delete()
     except Exception as e: await status.edit(f"❌ Error: {e}")
@@ -401,18 +366,21 @@ async def text_handler(client, message):
     uid = message.from_user.id
     text = message.text.strip()
     
+    # 🔥 STEP 2: Capture Name & Show Buttons
     if uid in download_queue and isinstance(download_queue[uid], dict) and 'name' not in download_queue[uid]:
         download_queue[uid]['name'] = text
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="dl_vid"), InlineKeyboardButton("📁 File", callback_data="dl_doc")]])
         await message.reply_text(f"✅ Name: <b>{text}</b>\nDownload as:", reply_markup=btn)
         return
 
+    # Batch Naming
     if uid in batch_data and batch_data[uid].get('step') == 'naming':
         batch_data[uid]['name'] = text
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="batch_run_vid"), InlineKeyboardButton("📁 File", callback_data="batch_run_doc")]])
         await message.reply_text(f"✅ Name: {text}\nStart?", reply_markup=btn)
         return
     
+    # Link Convert
     if user_modes.get(uid) == "link":
         code = text
         if "t.me/" in text: code = text.split("/")[-1] 
@@ -482,16 +450,21 @@ async def media_handler(client, message):
         if message.video: await client.send_video(uid, media.file_id, caption=cap)
         else: await client.send_audio(uid, media.file_id, caption=cap)
 
-# --- START ---
+# --- START (CORRECTED) ---
 async def start_services():
+    # 1. Start Web Server (For Render Port Binding)
     web_app = web.Application(client_max_size=30000000)
     web_app.add_routes(routes)
     runner = web.AppRunner(web_app)
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 8080))).start()
+    
+    # 2. Start Bot
     await app.start()
+    
+    # 3. Keep Alive
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
- 
+        

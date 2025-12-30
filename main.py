@@ -9,6 +9,7 @@ import shutil
 import html
 import aiofiles
 import aiohttp
+from urllib.parse import unquote
 from PIL import Image
 from hachoir.metadata import extractMetadata
 from hachoir.parser import createParser
@@ -24,9 +25,9 @@ TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "02a832d91755c2f5e8a2d1a6740a8674"
 CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
-# --- BOT SETUP (STABLE & OPTIMIZED) ---
+# --- BOT SETUP ---
 app = Client(
-    "filmy_pro_smart_final", 
+    "filmy_pro_ultra_max_v2", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -76,8 +77,11 @@ def get_duration_str(duration):
     return f"{h}h {m}m {s}s" if h > 0 else f"{m}m {s}s"
 
 def get_media_info(name):
-    s = re.search(r"[Ss](\d{1,2})", name)
-    e = re.search(r"[Ee](\d{1,3})", name)
+    # Decode URL junk first (e.g. %20 -> Space)
+    name = unquote(name)
+    # Regex to find S01E01, 1x01, etc.
+    s = re.search(r"(?i)[S](\d{1,2})", name)
+    e = re.search(r"(?i)[E](\d{1,3})", name)
     return (s.group(1) if s else None), (e.group(1) if e else None)
 
 def clean_filename(name):
@@ -87,20 +91,17 @@ def clean_filename(name):
 def get_fancy_caption(filename, filesize, duration=0):
     safe_name = html.escape(filename)
     caption = f"<b>{safe_name}</b>\n\n"
-    
-    # 🔥 SMART CAPTION LOGIC
     s, e = get_media_info(filename)
     if s: caption += f"💿 <b>Season ➥ {s}</b>\n"
     if e: caption += f"📺 <b>Episode ➥ {e}</b>\n"
     if s or e: caption += "\n"
-    
     caption += f"<blockquote><b>File Size ♻️ ➥ {filesize}</b></blockquote>\n"
     dur_str = get_duration_str(duration)
     caption += f"<blockquote><b>Duration ⏰ ➥ {dur_str}</b></blockquote>\n"
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME}</b></blockquote>"
     return caption
 
-# 🔥 WATERMARK LOGIC (SIZE 70%)
+# 🔥 WATERMARK LOGIC
 def apply_watermark(base_path, wm_path):
     try:
         base = Image.open(base_path).convert("RGBA")
@@ -109,7 +110,7 @@ def apply_watermark(base_path, wm_path):
         base_w, base_h = base.size
         wm_w, wm_h = wm.size
         
-        # ✅ Size 70%
+        # Size 70%
         new_wm_w = int(base_w * 0.70) 
         ratio = new_wm_w / wm_w
         new_wm_h = int(wm_h * ratio)
@@ -188,7 +189,7 @@ async def del_clean(client, message):
     if len(message.command) < 2: return
     if message.command[1] in cleaner_dict: del cleaner_dict[message.command[1]]
     await message.reply_text(f"🗑 Removed: {message.command[1]}")
-    # --- SEARCH ---
+   # --- SEARCH ---
 @app.on_message(filters.command(["search", "series"]))
 async def search_handler(client, message):
     if len(message.command) < 2: return await message.reply_text("Usage: /search Name or /series Name S1")
@@ -291,7 +292,7 @@ async def save_img_callback(client, callback):
         await callback.message.edit(f"✅ <b>Set Successfully!</b>")
     except Exception as e: await callback.message.edit(f"❌ Error: {e}")
 
-# --- URL HANDLER (SMART REAL-TIME FILENAME) ---
+# --- URL HANDLER (FIXED S/E & THUMBNAIL) ---
 @app.on_message(filters.private & filters.regex(r"^https?://"))
 async def url_handler(client, message):
     uid = message.from_user.id
@@ -325,17 +326,18 @@ async def dl_process(client, callback):
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
                 
-                # 🔥 SMART LOGIC: Get Real Filename from Server Headers
+                # 1. Try Content-Disposition
                 original_fname = ""
                 if "Content-Disposition" in resp.headers:
                     cd = resp.headers["Content-Disposition"]
                     fname_match = re.search(r'filename="?([^"]+)"?', cd)
-                    if fname_match: original_fname = fname_match.group(1)
+                    if fname_match: original_fname = unquote(fname_match.group(1))
                 
+                # 2. Fallback to URL
                 if not original_fname:
-                    original_fname = url.split("/")[-1].split("?")[0]
+                    original_fname = unquote(url.split("/")[-1].split("?")[0])
                 
-                # Detect Season/Episode from Real Filename
+                # 3. Detect S/E
                 s, e = get_media_info(original_fname)
                 ext = os.path.splitext(original_fname)[1] or ".mkv"
                 
@@ -347,7 +349,6 @@ async def dl_process(client, callback):
                 path = f"downloads/{uid}_{final_fname}"
                 os.makedirs("downloads", exist_ok=True)
                 
-                # Download
                 total = int(resp.headers.get("Content-Length", 0))
                 with open(path, "wb") as f:
                     dl = 0
@@ -360,9 +361,19 @@ async def dl_process(client, callback):
         duration = get_duration(path)
         cap = get_fancy_caption(final_fname, humanbytes(os.path.getsize(path)), duration)
         
-        thumb_path = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
+        # 🔥 SMART THUMBNAIL LOGIC
+        thumb_path = None
+        if os.path.exists(f"thumbnails/{uid}.jpg"):
+            thumb_path = f"thumbnails/{uid}.jpg"
+        elif os.path.exists(f"watermarks/{uid}.png"):
+            # If no thumb but watermark exists, use watermark AS thumb
+            thumb_path = f"watermarks/{uid}.png"
+            
         wm_path = f"watermarks/{uid}.png"
-        if thumb_path and os.path.exists(wm_path): thumb_path = apply_watermark(thumb_path, wm_path)
+        
+        # Apply Watermark only if we have a base thumbnail (jpg)
+        if thumb_path and thumb_path.endswith(".jpg") and os.path.exists(wm_path):
+             thumb_path = apply_watermark(thumb_path, wm_path)
         
         start = time.time()
         if mode == "video": await client.send_video(uid, path, caption=cap, duration=duration, thumb=thumb_path, progress=progress, progress_args=(status, start, f"📤 Uploading: {final_fname}"))
@@ -483,3 +494,4 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
+ 

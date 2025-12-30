@@ -27,7 +27,7 @@ BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_dot_fix_v4", 
+    "filmy_pro_ganyu_style", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -76,12 +76,12 @@ def get_duration_str(duration):
     h, m = divmod(m, 60)
     return f"{h}h {m}m {s}s" if h > 0 else f"{m}m {s}s"
 
-# 🔥 NEW REGEX LOGIC FOR S01.EP03
+# 🔥 SUPER ADVANCED REGEX (S01.EP03 FIX)
 def get_media_info(name):
     name = unquote(name) # Decode first
     
-    # Pattern 1: Handles "S01.EP03", "S01 EP03", "S1.E3" (With Dots/Spaces)
-    # This is the specific fix for your issue
+    # Pattern 1: Handles "S01.EP03", "S01.E03", "S1 E3" (With Dots/Spaces)
+    # The [\.]? allows for optional dots between parts
     match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", name)
     if match1: return match1.group(1), match1.group(2)
     
@@ -89,7 +89,7 @@ def get_media_info(name):
     match2 = re.search(r"(\d{1,2})x(\d{1,3})", name)
     if match2: return match2.group(1), match2.group(2)
     
-    # Pattern 3: "EP 03" (Only Episode)
+    # Pattern 3: "EP 03" or "EP.03" (Only Episode)
     match3 = re.search(r"(?i)(?:ep|episode|e)\s*[\.]?\s*(\d{1,3})", name)
     if match3: return None, match3.group(1)
     
@@ -112,7 +112,7 @@ def get_fancy_caption(filename, filesize, duration=0):
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME}</b></blockquote>"
     return caption
 
-# 🔥 WATERMARK LOGIC
+# 🔥 WATERMARK LOGIC (70%)
 def apply_watermark(base_path, wm_path):
     try:
         base = Image.open(base_path).convert("RGBA")
@@ -268,7 +268,7 @@ async def num_callback(client, callback):
             time.sleep(0.5)
     except Exception as e: await client.send_message(callback.from_user.id, f"Error: {e}")
 
-# --- PHOTO HANDLER ---
+# --- PHOTO HANDLER (FIXED) ---
 @app.on_message(filters.private & filters.photo)
 async def photo_handler(client, message):
     btn = InlineKeyboardMarkup([[InlineKeyboardButton("🖼 Save Thumbnail", callback_data="save_thumb"), InlineKeyboardButton("💧 Save Watermark", callback_data="save_wm")]])
@@ -298,7 +298,7 @@ async def save_img_callback(client, callback):
         await callback.message.edit(f"✅ <b>Set Successfully!</b>")
     except Exception as e: await callback.message.edit(f"❌ Error: {e}")
 
-# --- URL HANDLER ---
+# --- URL HANDLER (SHOW ORIGINAL NAME) ---
 @app.on_message(filters.private & filters.regex(r"^https?://"))
 async def url_handler(client, message):
     uid = message.from_user.id
@@ -311,8 +311,18 @@ async def url_handler(client, message):
         await message.reply_text(f"🔗 <code>{BLOGGER_URL}?data={enc}</code>")
         return
     
+    # 🔥 EXTRACT ORIGINAL NAME FROM URL
+    try:
+        original_fname = unquote(text.split("/")[-1].split("?")[0])
+    except:
+        original_fname = "Unknown_File"
+
     download_queue[uid] = {'url': text}
-    await message.reply_text("📝 <b>File ka Name bhejein:</b>", reply_markup=ForceReply(True))
+    
+    # 🔥 SHOW OLD NAME IN REPLY
+    reply_txt = f"📂 <b>Original File Name:</b>\n<code>{original_fname}</code>\n\n📝 <b>New Name bhejein:</b>"
+    
+    await message.reply_text(reply_txt, reply_markup=ForceReply(True))
 
 @app.on_callback_query(filters.regex("^dl_"))
 async def dl_process(client, callback):
@@ -332,7 +342,7 @@ async def dl_process(client, callback):
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
                 
-                # 1. Real Filename
+                # 1. Real Filename from Server (More Accurate)
                 original_fname = ""
                 if "Content-Disposition" in resp.headers:
                     cd = resp.headers["Content-Disposition"]
@@ -342,11 +352,11 @@ async def dl_process(client, callback):
                 if not original_fname:
                     original_fname = unquote(url.split("/")[-1].split("?")[0])
                 
-                # 2. Detect S/E
+                # 2. Detect S/E (Advanced Logic)
                 s, e = get_media_info(original_fname)
                 ext = os.path.splitext(original_fname)[1] or ".mkv"
                 
-                # 3. Final Name
+                # 3. Final Name Construction
                 if s and e:
                     final_fname = f"{custom_name} - S{s}E{e}{ext}"
                 elif e and not s:
@@ -370,31 +380,26 @@ async def dl_process(client, callback):
         duration = get_duration(path)
         cap = get_fancy_caption(final_fname, humanbytes(os.path.getsize(path)), duration)
         
-        # 🔥 SIMPLE & SOLID THUMBNAIL LOGIC
+        # 🔥 THUMBNAIL LOGIC
         thumb_path = None
-        
-        # Case A: User set a standard JPG Thumbnail
         if os.path.exists(f"thumbnails/{uid}.jpg"):
             thumb_path = f"thumbnails/{uid}.jpg"
-            # If watermark exists, put it on top of the thumbnail
-            if os.path.exists(f"watermarks/{uid}.png"):
-                thumb_path = apply_watermark(thumb_path, f"watermarks/{uid}.png")
-        
-        # Case B: User ONLY set a Watermark (PNG) - Use it AS thumbnail
         elif os.path.exists(f"watermarks/{uid}.png"):
-             # Convert PNG watermark to JPG thumb
-             temp_thumb = f"thumbnails/{uid}_gen.jpg"
+             temp_thumb = f"thumbnails/{uid}_wm_thumb.jpg"
              img = Image.open(f"watermarks/{uid}.png").convert("RGB")
              img.save(temp_thumb, "JPEG")
              thumb_path = temp_thumb
+        
+        wm_path = f"watermarks/{uid}.png"
+        if thumb_path and os.path.exists(wm_path):
+             thumb_path = apply_watermark(thumb_path, wm_path)
         
         start = time.time()
         if mode == "video": await client.send_video(uid, path, caption=cap, duration=duration, thumb=thumb_path, progress=progress, progress_args=(status, start, f"📤 Uploading: {final_fname}"))
         else: await client.send_document(uid, path, caption=cap, thumb=thumb_path, progress=progress, progress_args=(status, start, f"📤 Uploading: {final_fname}"))
         
-        # Cleanup
         os.remove(path)
-        if thumb_path and "_gen" in thumb_path: os.remove(thumb_path)
+        if thumb_path and "_wm_thumb" in thumb_path: os.remove(thumb_path)
         del download_queue[uid]
         await status.delete()
         

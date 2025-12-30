@@ -24,9 +24,9 @@ TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "02a832d91755c2f5e8a2d1a6740a8674"
 CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
-# --- BOT SETUP ---
+# --- BOT SETUP (STABLE & OPTIMIZED) ---
 app = Client(
-    "filmy_pro_url_name_fix", 
+    "filmy_pro_smart_final", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -87,10 +87,13 @@ def clean_filename(name):
 def get_fancy_caption(filename, filesize, duration=0):
     safe_name = html.escape(filename)
     caption = f"<b>{safe_name}</b>\n\n"
+    
+    # 🔥 SMART CAPTION LOGIC
     s, e = get_media_info(filename)
     if s: caption += f"💿 <b>Season ➥ {s}</b>\n"
     if e: caption += f"📺 <b>Episode ➥ {e}</b>\n"
     if s or e: caption += "\n"
+    
     caption += f"<blockquote><b>File Size ♻️ ➥ {filesize}</b></blockquote>\n"
     dur_str = get_duration_str(duration)
     caption += f"<blockquote><b>Duration ⏰ ➥ {dur_str}</b></blockquote>\n"
@@ -106,7 +109,7 @@ def apply_watermark(base_path, wm_path):
         base_w, base_h = base.size
         wm_w, wm_h = wm.size
         
-        # ✅ Size fixed to 70%
+        # ✅ Size 70%
         new_wm_w = int(base_w * 0.70) 
         ratio = new_wm_w / wm_w
         new_wm_h = int(wm_h * ratio)
@@ -288,7 +291,7 @@ async def save_img_callback(client, callback):
         await callback.message.edit(f"✅ <b>Set Successfully!</b>")
     except Exception as e: await callback.message.edit(f"❌ Error: {e}")
 
-# --- URL HANDLER (ASK NAME LOGIC) ---
+# --- URL HANDLER (SMART S/E DETECTION) ---
 @app.on_message(filters.private & filters.regex(r"^https?://"))
 async def url_handler(client, message):
     uid = message.from_user.id
@@ -301,7 +304,7 @@ async def url_handler(client, message):
         await message.reply_text(f"🔗 <code>{BLOGGER_URL}?data={enc}</code>")
         return
     
-    # 🔥 STEP 1: Store URL & Ask for Name
+    # Ask for Name
     download_queue[uid] = {'url': text}
     await message.reply_text("📝 <b>File ka Name bhejein:</b>", reply_markup=ForceReply(True))
 
@@ -311,7 +314,6 @@ async def dl_process(client, callback):
     data = download_queue.get(uid)
     if not data: return await callback.answer("Expired!")
     
-    # 🔥 STEP 3: Retrieve Name & URL
     url = data['url']
     custom_name = data['name'] 
     mode = "video" if "vid" in callback.data else "doc"
@@ -319,8 +321,21 @@ async def dl_process(client, callback):
     await callback.message.delete()
     status = await callback.message.reply_text("📥 <b>Starting...</b>")
     
-    fname = f"{custom_name}.mkv"
-    path = f"downloads/{uid}_{custom_name}.mkv"
+    # 🔥 AUTO DETECT FROM URL & COMBINE WITH NAME
+    original_fname = url.split("/")[-1]
+    if "?" in original_fname: original_fname = original_fname.split("?")[0]
+    
+    s, e = get_media_info(original_fname) # Check S01E02 in URL
+    
+    # If S/E found in URL, add it to your custom name
+    ext = os.path.splitext(original_fname)[1] or ".mkv"
+    
+    if s and e:
+        final_fname = f"{custom_name} - S{s}E{e}{ext}"
+    else:
+        final_fname = f"{custom_name}{ext}" # Fallback if no S/E found
+    
+    path = f"downloads/{uid}_{final_fname}"
     os.makedirs("downloads", exist_ok=True)
     
     try:
@@ -333,16 +348,16 @@ async def dl_process(client, callback):
                     async for chunk in resp.content.iter_chunked(1024*1024):
                         if uid not in download_queue: await status.edit("❌ Cancelled"); return
                         f.write(chunk); dl += len(chunk)
-                        if time.time() - start > 5: await progress(dl, total, status, start, f"📥 Downloading: {fname}")
+                        if time.time() - start > 5: await progress(dl, total, status, start, f"📥 Downloading: {final_fname}")
         await status.edit("📤 <b>Uploading...</b>")
         duration = get_duration(path)
-        cap = get_fancy_caption(fname, humanbytes(os.path.getsize(path)), duration)
+        cap = get_fancy_caption(final_fname, humanbytes(os.path.getsize(path)), duration)
         thumb_path = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
         wm_path = f"watermarks/{uid}.png"
         if thumb_path and os.path.exists(wm_path): thumb_path = apply_watermark(thumb_path, wm_path)
         start = time.time()
-        if mode == "video": await client.send_video(uid, path, caption=cap, duration=duration, thumb=thumb_path, progress=progress, progress_args=(status, start, f"📤 Uploading: {fname}"))
-        else: await client.send_document(uid, path, caption=cap, thumb=thumb_path, progress=progress, progress_args=(status, start, f"📤 Uploading: {fname}"))
+        if mode == "video": await client.send_video(uid, path, caption=cap, duration=duration, thumb=thumb_path, progress=progress, progress_args=(status, start, f"📤 Uploading: {final_fname}"))
+        else: await client.send_document(uid, path, caption=cap, thumb=thumb_path, progress=progress, progress_args=(status, start, f"📤 Uploading: {final_fname}"))
         os.remove(path); del download_queue[uid]
         await status.delete()
     except Exception as e: await status.edit(f"❌ Error: {e}")
@@ -366,7 +381,7 @@ async def text_handler(client, message):
     uid = message.from_user.id
     text = message.text.strip()
     
-    # 🔥 STEP 2: Capture Name & Show Buttons
+    # 🔥 STEP 2: Capture Name for URL
     if uid in download_queue and isinstance(download_queue[uid], dict) and 'name' not in download_queue[uid]:
         download_queue[uid]['name'] = text
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="dl_vid"), InlineKeyboardButton("📁 File", callback_data="dl_doc")]])
@@ -452,17 +467,12 @@ async def media_handler(client, message):
 
 # --- START (CORRECTED) ---
 async def start_services():
-    # 1. Start Web Server (For Render Port Binding)
     web_app = web.Application(client_max_size=30000000)
     web_app.add_routes(routes)
     runner = web.AppRunner(web_app)
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 8080))).start()
-    
-    # 2. Start Bot
     await app.start()
-    
-    # 3. Keep Alive
     await asyncio.Event().wait()
 
 if __name__ == "__main__":

@@ -27,7 +27,7 @@ BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_final_v5", 
+    "filmy_pro_name_fix_v6", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -76,35 +76,46 @@ def get_duration_str(duration):
     h, m = divmod(m, 60)
     return f"{h}h {m}m {s}s" if h > 0 else f"{m}m {s}s"
 
-# 🔥 NEW FUNCTION: ASK SERVER FOR REAL NAME (Missing in previous code)
+# 🔥 NEW: POWERFUL NAME EXTRACTOR (Server Bypass)
 async def get_real_filename(url):
     try:
+        # Browser jaisa behavior dikhane ke liye Headers
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
         async with aiohttp.ClientSession() as session:
-            # We use GET with allow_redirects=True to follow shortened links
-            async with session.get(url, allow_redirects=True) as resp:
+            # allow_redirects=True is vital for shortened links
+            async with session.get(url, headers=headers, allow_redirects=True, timeout=10) as resp:
                 if "Content-Disposition" in resp.headers:
                     cd = resp.headers["Content-Disposition"]
+                    # Try to find filename="..."
                     fname_match = re.search(r'filename="?([^"]+)"?', cd)
                     if fname_match:
                         return unquote(fname_match.group(1))
-    except:
+                    # Try to find filename*=UTF-8''...
+                    utf_match = re.search(r"filename\*=UTF-8''(.+)", cd)
+                    if utf_match:
+                        return unquote(utf_match.group(1))
+    except Exception as e:
+        print(f"Name Fetch Error: {e}")
         pass
-    # Fallback to URL if server doesn't reply
+    
+    # Fallback: Agar server fail ho jaye toh URL ka last part lo
     return unquote(url.split("/")[-1].split("?")[0])
 
 # 🔥 UNIVERSAL S/E PARSER (Ganyu Logic)
 def get_media_info(name):
     name = unquote(name).replace(".", " ").replace("_", " ").replace("-", " ")
     
-    # S01.EP03 / S1 E3
+    # Pattern: S01.EP03 / S1 E3
     match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", name)
     if match1: return match1.group(1), match1.group(2)
     
-    # 1x03
+    # Pattern: 1x03
     match2 = re.search(r"(\d{1,2})x(\d{1,3})", name)
     if match2: return match2.group(1), match2.group(2)
     
-    # EP 03
+    # Pattern: EP 03
     match3 = re.search(r"(?i)(?:ep|episode|e)\s*[\.]?\s*(\d{1,3})", name)
     if match3: return None, match3.group(1)
     
@@ -167,8 +178,7 @@ async def progress(current, total, message, start_time, task_name):
 <b>⚡ Speed:</b> {humanbytes(speed)}/s
 <b>⏳ ETA:</b> {eta}"""
         try:
-            await message.edit(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_task")]])
-            )
+            await message.edit(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_task")]]))
         except: pass
 
 # --- COMMANDS ---
@@ -211,7 +221,7 @@ async def del_clean(client, message):
     if len(message.command) < 2: return
     if message.command[1] in cleaner_dict: del cleaner_dict[message.command[1]]
     await message.reply_text(f"🗑 Removed: {message.command[1]}")
-    # --- SEARCH ---
+# --- SEARCH ---
 @app.on_message(filters.command(["search", "series"]))
 async def search_handler(client, message):
     if len(message.command) < 2: return await message.reply_text("Usage: /search Name or /series Name S1")

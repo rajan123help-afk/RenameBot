@@ -24,13 +24,15 @@ TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "02a832d91755c2f5e8a2d1a6740a8674"
 CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
-# --- BOT SETUP ---
+# --- BOT SETUP (SPEED BOOSTER ACTIVATED 🚀) ---
 app = Client(
-    "filmy_pro_ultra_final", 
+    "filmy_pro_turbo_max", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
-    parse_mode=enums.ParseMode.HTML
+    parse_mode=enums.ParseMode.HTML,
+    workers=4,  # ✅ 4 Workers ek sath kaam karenge
+    max_concurrent_transmissions=4 # ✅ High Speed Upload/Download
 )
 
 # --- GLOBAL VARS ---
@@ -101,7 +103,7 @@ def apply_watermark(base_path, wm_path):
         base = Image.open(base_path).convert("RGBA")
         wm = Image.open(wm_path).convert("RGBA")
         
-        # Resize Watermark to 40% of image width (Perfect size)
+        # Resize Watermark to 40%
         base_w, base_h = base.size
         wm_w, wm_h = wm.size
         new_wm_w = int(base_w * 0.40) 
@@ -114,7 +116,6 @@ def apply_watermark(base_path, wm_path):
         x = (base_w - new_wm_w) // 2
         y = base_h - new_wm_h - 20
         
-        # Paste with mask (Transparency)
         base.paste(wm, (x, y), wm)
         base = base.convert("RGB")
         base.save(base_path, "JPEG")
@@ -123,24 +124,18 @@ def apply_watermark(base_path, wm_path):
         print(f"WM Error: {e}")
         return base_path
 
-# 🔥 NEW STYLISH PROGRESS BAR (As requested)
+# 🔥 STYLISH PROGRESS BAR
 async def progress(current, total, message, start_time, task_name):
     now = time.time()
     diff = now - start_time
     if round(diff % 5.00) == 0 or current == total:
-        # Percentage
         percentage = current * 100 / total
-        
-        # Visual Bar [■■■□□□□□□□]
         completed = int(percentage // 10)
         bar = "■" * completed + "□" * (10 - completed)
-        
-        # Speed & ETA
         speed = current / diff if diff > 0 else 0
         time_to_completion = round((total - current) / speed) if speed > 0 else 0
         eta = get_duration_str(time_to_completion)
         
-        # Exact Format Requested
         text = f"""<b>{task_name}</b>
 
 <b>Progress:</b> [{bar}] {round(percentage, 1)}%
@@ -195,7 +190,7 @@ async def del_clean(client, message):
     if len(message.command) < 2: return
     if message.command[1] in cleaner_dict: del cleaner_dict[message.command[1]]
     await message.reply_text(f"🗑 Removed: {message.command[1]}")
-    # --- SEARCH ---
+  # --- SEARCH ---
 @app.on_message(filters.command(["search", "series"]))
 async def search_handler(client, message):
     if len(message.command) < 2: return await message.reply_text("Usage: /search Name or /series Name S1")
@@ -249,26 +244,20 @@ async def num_callback(client, callback):
             pool = data.get('posters' if img_type == 'poster' else 'backdrops', [])
         if not pool: return await client.send_message(uid, "❌ No images found!")
         images_to_send = pool[:count]
-        
-        # 🔥 FIX: Look for PNG watermark (Transparency)
         wm_path = f"watermarks/{uid}.png"
         os.makedirs("downloads", exist_ok=True)
-        
         for i, img_data in enumerate(images_to_send):
             img_path = img_data['file_path']
             full_url = f"https://image.tmdb.org/t/p/original{img_path}"
             temp_path = f"downloads/temp_{uid}_{i}.jpg"
-            
             async with aiohttp.ClientSession() as session:
                 async with session.get(full_url) as resp:
                     if resp.status == 200:
                         f = await aiofiles.open(temp_path, mode='wb')
                         await f.write(await resp.read())
                         await f.close()
-            
             final_path = temp_path
             if os.path.exists(wm_path): final_path = apply_watermark(temp_path, wm_path)
-            
             await client.send_photo(uid, photo=final_path, caption=f"🖼 <b>{img_type.capitalize()} {i+1}</b>")
             os.remove(temp_path)
             time.sleep(0.5)
@@ -285,32 +274,26 @@ async def save_img_callback(client, callback):
     uid = callback.from_user.id
     mode = "thumbnails" if "thumb" in callback.data else "watermarks"
     os.makedirs(mode, exist_ok=True)
-    
-    # Save as PNG for Watermark (To keep transparency), JPG for Thumbnail
     ext = ".png" if mode == "watermarks" else ".jpg"
     path = f"{mode}/{uid}{ext}"
-    
     await callback.message.edit("⏳ <b>Processing...</b>")
     try:
         reply = callback.message.reply_to_message
         if not reply: return await callback.message.edit("❌ Error.")
-        
         temp_path = f"downloads/{uid}_temp.png"
         os.makedirs("downloads", exist_ok=True)
         await client.download_media(message=reply, file_name=temp_path)
-        
         if mode == "watermarks":
             img = Image.open(temp_path).convert("RGBA")
             img.save(path, "PNG")
         else:
             img = Image.open(temp_path).convert("RGB")
             img.save(path, "JPEG")
-            
         os.remove(temp_path)
         await callback.message.edit(f"✅ <b>Set Successfully!</b>")
     except Exception as e: await callback.message.edit(f"❌ Error: {e}")
 
-# --- URL HANDLER (Fixed Progress) ---
+# --- URL HANDLER ---
 @app.on_message(filters.private & filters.regex(r"^https?://"))
 async def url_handler(client, message):
     uid = message.from_user.id
@@ -347,17 +330,13 @@ async def dl_process(client, callback):
                     async for chunk in resp.content.iter_chunked(1024*1024):
                         if uid not in download_queue: await status.edit("❌ Cancelled"); return
                         f.write(chunk); dl += len(chunk)
-                        # 🔥 NEW PROGRESS CALL
                         if time.time() - start > 5: await progress(dl, total, status, start, f"📥 Downloading: {fname}")
-        
         await status.edit("📤 <b>Uploading...</b>")
         duration = get_duration(path)
         cap = get_fancy_caption(fname, humanbytes(os.path.getsize(path)), duration)
-        
         thumb_path = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
         wm_path = f"watermarks/{uid}.png"
         if thumb_path and os.path.exists(wm_path): thumb_path = apply_watermark(thumb_path, wm_path)
-        
         start = time.time()
         if mode == "video": await client.send_video(uid, path, caption=cap, duration=duration, thumb=thumb_path, progress=progress, progress_args=(status, start, f"📤 Uploading: {fname}"))
         else: await client.send_document(uid, path, caption=cap, thumb=thumb_path, progress=progress, progress_args=(status, start, f"📤 Uploading: {fname}"))
@@ -365,7 +344,7 @@ async def dl_process(client, callback):
         await status.delete()
     except Exception as e: await status.edit(f"❌ Error: {e}")
 
-# --- BATCH HANDLER (Fixed Progress) ---
+# --- BATCH HANDLER ---
 @app.on_message(filters.command("batch") & filters.private)
 async def batch_start(client, message):
     batch_data[message.from_user.id] = {'files': []}
@@ -402,7 +381,6 @@ async def batch_run(client, callback):
     files = batch_data[uid]['files']
     base = batch_data[uid]['name']
     status = await callback.message.edit("🚀 <b>Starting Batch...</b>")
-    
     for i, msg in enumerate(files):
         if uid not in batch_data: break
         try:
@@ -411,24 +389,17 @@ async def batch_run(client, callback):
             ext = os.path.splitext(media.file_name or "")[1] or ".mkv"
             new_name = f"{base} - S{s}E{e}{ext}" if s and e else f"{base} - {i+1}{ext}"
             new_name = clean_filename(new_name)
-            
-            # 🔥 PROGRESS CALL FOR DOWNLOAD
             path = await client.download_media(media, file_name=f"downloads/{new_name}", progress=progress, progress_args=(status, time.time(), f"📥 Downloading ({i+1}/{len(files)})"))
-            
             duration = get_duration(path)
             cap = get_fancy_caption(new_name, humanbytes(os.path.getsize(path)), duration)
-            
             thumb_path = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
             wm_path = f"watermarks/{uid}.png"
             if thumb_path and os.path.exists(wm_path): thumb_path = apply_watermark(thumb_path, wm_path)
-            
-            # 🔥 PROGRESS CALL FOR UPLOAD
             start = time.time()
             if mode == "video": await client.send_video(uid, path, caption=cap, duration=duration, thumb=thumb_path, progress=progress, progress_args=(status, start, f"📤 Uploading ({i+1}/{len(files)})"))
             else: await client.send_document(uid, path, caption=cap, thumb=thumb_path, progress=progress, progress_args=(status, start, f"📤 Uploading ({i+1}/{len(files)})"))
             os.remove(path)
         except: pass
-    
     await status.edit("🎉 <b>Batch Done!</b>")
     if uid in batch_data: del batch_data[uid]
 
@@ -476,3 +447,4 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
+  

@@ -27,7 +27,7 @@ BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_caption_fix_v7", 
+    "filmy_pro_full_names_v8", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -94,32 +94,43 @@ async def get_real_filename(url):
 # 🔥 UNIVERSAL S/E REGEX
 def get_media_info(name):
     name = unquote(name).replace(".", " ").replace("_", " ").replace("-", " ")
+    
     match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", name)
     if match1: return match1.group(1), match1.group(2)
+    
     match2 = re.search(r"(\d{1,2})x(\d{1,3})", name)
     if match2: return match2.group(1), match2.group(2)
+    
     match3 = re.search(r"(?i)(?:ep|episode|e)\s*[\.]?\s*(\d{1,3})", name)
     if match3: return None, match3.group(1)
+    
     return None, None
 
 def clean_filename(name):
     for k, v in cleaner_dict.items(): name = name.replace(k, v)
     return re.sub(r'[<>:"/\\|?*]', '', name).strip()
 
+# 🔥 CAPTION GENERATOR (FULL NAMES)
 def get_fancy_caption(filename, filesize, duration=0):
     safe_name = html.escape(filename)
     caption = f"<b>{safe_name}</b>\n\n"
     s, e = get_media_info(filename)
-    if s: caption += f"💿 <b>Season ➥ {s}</b>\n"
-    if e: caption += f"📺 <b>Episode ➥ {e}</b>\n"
+    
+    # Ensure 2 digits (e.g., 1 -> 01)
+    if s: s = s.zfill(2)
+    if e: e = e.zfill(2)
+    
+    if s: caption += f"💿 <b>Season ➥ {s}</b>\n"   # Full 'Season' word
+    if e: caption += f"📺 <b>Episode ➥ {e}</b>\n" # Full 'Episode' word
     if s or e: caption += "\n"
+    
     caption += f"<blockquote><b>File Size ♻️ ➥ {filesize}</b></blockquote>\n"
     dur_str = get_duration_str(duration)
     caption += f"<blockquote><b>Duration ⏰ ➥ {dur_str}</b></blockquote>\n"
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME}</b></blockquote>"
     return caption
 
-# 🔥 WATERMARK LOGIC (Improved for Posters)
+# 🔥 WATERMARK LOGIC
 def apply_watermark(base_path, wm_path):
     try:
         base = Image.open(base_path).convert("RGBA")
@@ -128,18 +139,14 @@ def apply_watermark(base_path, wm_path):
         base_w, base_h = base.size
         wm_w, wm_h = wm.size
         
-        # Determine strict 70% width
         new_wm_w = int(base_w * 0.70)
         ratio = new_wm_w / wm_w
         new_wm_h = int(wm_h * ratio)
         
         wm = wm.resize((new_wm_w, new_wm_h), Image.Resampling.LANCZOS)
         
-        # Position: Center Bottom
         x = (base_w - new_wm_w) // 2
         y = base_h - new_wm_h - 20 
-        
-        # Safety check: If Y is negative (watermark taller than image), force to bottom 0
         if y < 0: y = base_h - new_wm_h
         
         base.paste(wm, (x, y), wm)
@@ -212,7 +219,7 @@ async def del_clean(client, message):
     if len(message.command) < 2: return
     if message.command[1] in cleaner_dict: del cleaner_dict[message.command[1]]
     await message.reply_text(f"🗑 Removed: {message.command[1]}")
-# --- SEARCH ---
+    # --- SEARCH ---
 @app.on_message(filters.command(["search", "series"]))
 async def search_handler(client, message):
     if len(message.command) < 2: return await message.reply_text("Usage: /search Name or /series Name S1")

@@ -1,9 +1,7 @@
-pyrogram==2.0.106
-tgcrypto
+pyrofork
 aiohttp
-aiofiles
-hachoir
-Pillow
-motor
-dnspython
 requests
+aiofiles
+Pillow
+TgCrypto
+hachoir

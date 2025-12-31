@@ -23,13 +23,13 @@ API_ID = int(os.environ.get("API_ID", "12345"))
 API_HASH = os.environ.get("API_HASH", "hash")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "token")
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "02a832d91755c2f5e8a2d1a6740a8674")
-MONGO_URI = os.environ.get("MONGO_URI", "") # Agar Mongo nahi hai to khali chhod dein
+MONGO_URI = os.environ.get("MONGO_URI", "") 
 CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_final_fix_v10", 
+    "filmy_pro_final_v11", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -97,22 +97,16 @@ def get_duration_str(duration):
     h, m = divmod(m, 60)
     return f"{h}h {m}m {s}s" if h > 0 else f"{m}m {s}s"
 
-# 🔥 SERVER-SIDE NAME FETCHING (Improved Headers)
 async def get_real_filename(url):
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36",
-            "Accept": "*/*"
-        }
+        headers = {"User-Agent": "Mozilla/5.0"}
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers, allow_redirects=True, timeout=15) as resp:
-                # 1. Content-Disposition Check
                 if "Content-Disposition" in resp.headers:
                     cd = resp.headers["Content-Disposition"]
                     fname_match = re.search(r'filename="?([^"]+)"?', cd)
                     if fname_match: return unquote(fname_match.group(1))
-                    
-                # 2. Redirect URL Check
+                
                 final_url = str(resp.url)
                 if final_url != url:
                      name = unquote(final_url.split("/")[-1].split("?")[0])
@@ -120,20 +114,20 @@ async def get_real_filename(url):
     except: pass
     return unquote(url.split("/")[-1].split("?")[0])
 
-# 🔥 SMART S/E REGEX (Ignores 2024, 1999, etc.)
+# 🔥 FIXED REGEX (Ignores Years like 2024)
 def get_media_info(name):
     name = unquote(name).replace(".", " ").replace("_", " ").replace("-", " ")
     
-    # Season/Episode (S01 E02)
+    # 1. Check Season + Episode
     match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", name)
     if match1: return match1.group(1), match1.group(2)
     
-    # Episode Only (Episode 05)
+    # 2. Check Episode Only
     match3 = re.search(r"(?i)(?:ep|episode|e)\s*[\.]?\s*(\d{1,3})", name)
     if match3: 
         ep = match3.group(1)
-        # ⚠️ Safety: Ignore if it looks like a Year (1900-2100)
-        if 1900 < int(ep) < 2100: return None, None
+        # ⚠️ CRITICAL FIX: If number is year (1990-2030), ignore it!
+        if 1990 < int(ep) < 2030: return None, None
         return None, ep
     
     return None, None
@@ -142,6 +136,7 @@ def clean_filename(name):
     for k, v in cleaner_dict.items(): name = name.replace(k, v)
     return re.sub(r'[<>:"/\\|?*]', '', name).strip()
 
+# 🔥 CAPTION RESTORED (Green Line Fixed)
 def get_fancy_caption(filename, filesize, duration=0):
     safe_name = html.escape(filename)
     caption = f"<b>{safe_name}</b>\n\n"
@@ -154,6 +149,7 @@ def get_fancy_caption(filename, filesize, duration=0):
     if e: caption += f"📺 <b>Episode ➥ {e}</b>\n"
     if s or e: caption += "\n"
     
+    # Green Line Block
     caption += f"<blockquote><b>File Size ♻️ ➥ {filesize}</b></blockquote>\n"
     dur_str = get_duration_str(duration)
     caption += f"<blockquote><b>Duration ⏰ ➥ {dur_str}</b></blockquote>\n"
@@ -441,11 +437,11 @@ async def dl_process(client, callback):
     try:
         start = time.time()
         
-        # 🔥 FIX: NO DOUBLE .mkv
+        # 🔥 FIX: DOUBLE EXTENSION CHECK
         ext = os.path.splitext(original_fname)[1]
         if not ext: ext = ".mkv"
         
-        # Agar user ne pehle se extension likha hai, to wahi rehne do
+        # Agar naam me pehle se .mkv hai, to mat jodo
         if custom_name.endswith(ext):
              final_fname = custom_name
         else:
@@ -473,23 +469,19 @@ async def dl_process(client, callback):
         thumb_path = f"thumbnails/{uid}.jpg"
         wm_path = f"watermarks/{uid}.png"
         
-        # Check DB if local files missing
+        # Force re-download from DB to be safe
         db_thumb = await get_db(uid, "thumbnail_id")
         db_wm = await get_db(uid, "watermark_id")
         
-        if not os.path.exists(thumb_path) and db_thumb:
-             await client.download_media(db_thumb, file_name=thumb_path)
-        if not os.path.exists(wm_path) and db_wm:
-             await client.download_media(db_wm, file_name=wm_path)
+        if db_thumb: await client.download_media(db_thumb, file_name=thumb_path)
+        if db_wm: await client.download_media(db_wm, file_name=wm_path)
              
         final_thumb = None
         if os.path.exists(thumb_path):
              final_thumb = thumb_path
-             # Apply WM if exists
              if os.path.exists(wm_path):
                   final_thumb = apply_watermark(thumb_path, wm_path)
         elif os.path.exists(wm_path):
-             # Only WM exists -> Use as Thumb
              temp_thumb = f"thumbnails/{uid}_wm_thumb.jpg"
              img = Image.open(wm_path).convert("RGB")
              img.save(temp_thumb, "JPEG")
@@ -500,7 +492,6 @@ async def dl_process(client, callback):
         else: await client.send_document(uid, path, caption=cap, thumb=final_thumb, progress=progress, progress_args=(status, start, f"📤 Uploading: {final_fname}"))
         
         os.remove(path)
-        # Cleanup temp thumbs but keep originals in thumbnails/ folder for next time
         if final_thumb and "wm_thumb" in final_thumb: os.remove(final_thumb)
         del download_queue[uid]
         await status.delete()

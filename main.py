@@ -28,7 +28,7 @@ BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_rename_fix_v15", 
+    "filmy_pro_smart_caption_v18", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -58,8 +58,9 @@ async def get_db(uid, key):
 
 # --- GLOBAL VARS ---
 user_modes = {}
-download_queue = {} 
 batch_data = {}
+download_queue = {} 
+cleaner_dict = {}
 
 # --- WEB SERVER ---
 routes = web.RouteTableDef()
@@ -112,18 +113,54 @@ async def get_real_filename(url):
     return unquote(url.split("/")[-1].split("?")[0])
 
 def clean_filename(name):
-    # Remove invalid chars
-    name = re.sub(r'[<>:"/\\|?*]', '', name)
-    return name.strip()
+    for k, v in cleaner_dict.items(): name = name.replace(k, v)
+    return re.sub(r'[<>:"/\\|?*]', '', name).strip()
 
-# 🔥 FIXED GREEN LINE CAPTION 🔥
+# 🔥 SMART DETECTOR (Detects S01/E01 but ignores 2024)
+def get_media_info(name):
+    name = unquote(name).replace(".", " ").replace("_", " ").replace("-", " ")
+    
+    # Season & Episode (e.g. S01 E02)
+    match1 = re.search(r"(?i)(?:s|season)\s*(\d{1,2})\s*(?:e|ep|episode)\s*(\d{1,3})", name)
+    if match1: return match1.group(1), match1.group(2)
+    
+    # Season Only (e.g. Season 1)
+    match2 = re.search(r"(?i)(?:s|season)\s*(\d{1,2})", name)
+    s = match2.group(1) if match2 else None
+
+    # Episode Only (e.g. Episode 05, E05)
+    match3 = re.search(r"(?i)(?:ep|episode|e)\s*(\d{1,3})", name)
+    e = match3.group(1) if match3 else None
+    
+    # SAFETY: Check if 'e' looks like a year (e.g. 2024)
+    if e and (1990 < int(e) < 2030):
+        # Agar number 1990 se 2030 ke beech hai, to shayad wo Year hai, Episode nahi.
+        # Unless 's' (Season) bhi मौजूद ho.
+        if not s: 
+            e = None 
+            
+    return s, e
+
+# 🔥 FINAL CAPTION FORMAT
 def get_fancy_caption(filename, filesize, duration=0):
     safe_name = html.escape(filename)
     dur_str = get_duration_str(duration)
     
+    # 1. Filename (Bold)
     caption = f"<b>{safe_name}</b>\n\n"
     
-    # <blockquote> Tag se Green Line aati hai
+    # 2. Season/Episode Logic
+    s, e = get_media_info(filename)
+    if s: 
+        s = s.zfill(2) # 1 -> 01
+        caption += f"💿 <b>Season ➥ {s}</b>\n"
+    if e: 
+        e = e.zfill(2) # 1 -> 01
+        caption += f"📺 <b>Episode ➥ {e}</b>\n"
+        
+    if s or e: caption += "\n" # Add gap if S/E displayed
+    
+    # 3. Green Line Stats
     caption += f"""<blockquote><b>File Size ♻️ ➥ {filesize}</b>
 <b>Duration ⏰ ➥ {dur_str}</b>
 <b>Powered By ➥ {CREDIT_NAME}</b></blockquote>"""
@@ -180,8 +217,10 @@ async def start(client, message):
     await message.reply_text(
         f"👋 <b>Hello {message.from_user.first_name}!</b>\n\n"
         "🎬 <b>Filmy Flip Commands:</b>\n"
-        "🔹 <code>/caption</code> (Rename Mode)\n"
-        "🔹 <code>/batch</code> (Bulk Rename)\n"
+        "🔹 <code>/search Name</code> (Movie)\n"
+        "🔹 <code>/series Name S1</code> (Series + Season)\n"
+        "🔹 <code>/caption</code> (Green Line)\n"
+        "🔹 <code>/batch</code> (Rename)\n"
         "🔹 <code>/url</code> (Link Upload)\n"
         "🔹 Send Photo -> Save Thumb/Watermark"
     )
@@ -212,12 +251,94 @@ async def del_clean(client, message):
     if len(message.command) < 2: return
     if message.command[1] in cleaner_dict: del cleaner_dict[message.command[1]]
     await message.reply_text(f"🗑 Removed: {message.command[1]}")
-    # --- PHOTO/FILE HANDLER (SETTINGS + RENAME TRIGGER) ---
+    # --- SEARCH ---
+@app.on_message(filters.command(["search", "series"]))
+async def search_handler(client, message):
+    if len(message.command) < 2: return await message.reply_text("Usage: /search Name or /series Name S1")
+    raw_query = " ".join(message.command[1:])
+    stype = "tv" if "series" in message.command[0] else "movie"
+    season_num = 0
+    if stype == "tv":
+        match = re.search(r"(?i)\s*(?:s|season)\s*(\d+)$", raw_query)
+        if match:
+            season_num = int(match.group(1))
+            raw_query = re.sub(r"(?i)\s*(?:s|season)\s*(\d+)$", "", raw_query).strip()
+    status = await message.reply_text(f"🔎 <b>Searching:</b> {raw_query}...")
+    try:
+        url = f"https://api.themoviedb.org/3/search/{stype}?api_key={TMDB_API_KEY}&query={raw_query}"
+        res = requests.get(url).json().get('results')
+        if not res: return await status.edit("❌ Not Found")
+        mid = res[0]['id']
+        title = res[0].get('name') if stype == 'tv' else res[0].get('title')
+        btn = InlineKeyboardMarkup([[InlineKeyboardButton("🖼 Poster", callback_data=f"type_poster_{stype}_{mid}_{season_num}"), InlineKeyboardButton("🎞 Thumbnail", callback_data=f"type_backdrop_{stype}_{mid}_{season_num}")]])
+        txt = f"🎬 <b>{title}</b>"
+        if season_num > 0: txt += f"\n💿 <b>Season: {season_num}</b>"
+        txt += "\n👇 Kya chahiye?"
+        await status.edit(txt, reply_markup=btn)
+    except Exception as e: await status.edit(f"Error: {e}")
+
+@app.on_callback_query(filters.regex("^type_"))
+async def type_callback(client, callback):
+    try:
+        _, img_type, stype, mid, s_num = callback.data.split("_")
+        btn = InlineKeyboardMarkup([[InlineKeyboardButton("1", callback_data=f"num_1_{img_type}_{stype}_{mid}_{s_num}"), InlineKeyboardButton("2", callback_data=f"num_2_{img_type}_{stype}_{mid}_{s_num}")], [InlineKeyboardButton("3", callback_data=f"num_3_{img_type}_{stype}_{mid}_{s_num}"), InlineKeyboardButton("4", callback_data=f"num_4_{img_type}_{stype}_{mid}_{s_num}")]])
+        await callback.message.edit(f"✅ <b>{img_type.capitalize()} Selected!</b>\nKitni images chahiye?", reply_markup=btn)
+    except: pass
+
+@app.on_callback_query(filters.regex("^num_"))
+async def num_callback(client, callback):
+    try:
+        uid = callback.from_user.id
+        _, count, img_type, stype, mid, s_num = callback.data.split("_")
+        count = int(count)
+        s_num = int(s_num)
+        await callback.answer(f"Sending top {count} images...")
+        await callback.message.delete()
+        pool = []
+        if stype == "tv" and s_num > 0:
+            url = f"https://api.themoviedb.org/3/tv/{mid}/season/{s_num}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi,null"
+            data = requests.get(url).json()
+            pool = data.get('posters' if img_type == 'poster' else 'backdrops', [])
+        if not pool:
+            url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi"
+            data = requests.get(url).json()
+            pool = data.get('posters' if img_type == 'poster' else 'backdrops', [])
+        if not pool: return await client.send_message(uid, "❌ No images found!")
+        images_to_send = pool[:count]
+        
+        wm_id = await get_db(uid, "watermark_id")
+        wm_path = f"watermarks/{uid}.png"
+        os.makedirs("watermarks", exist_ok=True)
+        if wm_id and not os.path.exists(wm_path):
+             await client.download_media(wm_id, file_name=wm_path)
+             
+        os.makedirs("downloads", exist_ok=True)
+        for i, img_data in enumerate(images_to_send):
+            img_path = img_data['file_path']
+            full_url = f"https://image.tmdb.org/t/p/original{img_path}"
+            temp_path = f"downloads/temp_{uid}_{i}.jpg"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(full_url) as resp:
+                    if resp.status == 200:
+                        f = await aiofiles.open(temp_path, mode='wb')
+                        await f.write(await resp.read())
+                        await f.close()
+            final_path = temp_path
+            if os.path.exists(wm_path): final_path = apply_watermark(temp_path, wm_path)
+            await client.send_photo(uid, photo=final_path, caption=f"🖼 <b>{img_type.capitalize()} {i+1}</b>")
+            os.remove(temp_path)
+            time.sleep(0.5)
+        
+        if os.path.exists(wm_path): os.remove(wm_path)
+            
+    except Exception as e: await client.send_message(callback.from_user.id, f"Error: {e}")
+
+# 🔥 PHOTO/FILE HANDLER (SETTINGS + RENAME TRIGGER)
 @app.on_message(filters.private & (filters.photo | filters.document | filters.video | filters.audio))
 async def media_handler(client, message):
     uid = message.from_user.id
     
-    # 1. Check Image for Settings (Thumb/Watermark)
+    # 1. Check Image for Settings
     is_image = False
     if message.photo:
         is_image = True
@@ -232,20 +353,17 @@ async def media_handler(client, message):
         await message.reply_text("📸 <b>Image Detected!</b>\nThumbnail ya Watermark save karein?", reply_markup=btn, quote=True)
         return 
 
-    # 2. RENAME MODE (Ab Copy nahi karega, Name puchega)
+    # 2. RENAME MODE (Triggers Rename Process)
     if user_modes.get(uid) == "caption":
         media = message.document or message.video or message.audio
         if media:
             original_fname = getattr(media, "file_name", "video.mkv")
-            
-            # Store Message ID to download later
             download_queue[uid] = {
                 'msg_id': message.id,
                 'chat_id': message.chat.id,
                 'original_name': original_fname,
                 'type': 'telegram_file'
             }
-            
             # Ask for New Name
             reply_txt = f"📂 <b>Original Name:</b>\n<code>{original_fname}</code>\n\n📝 <b>New Name bhejein:</b>"
             await message.reply_text(reply_txt, reply_markup=ForceReply(True))
@@ -307,8 +425,8 @@ async def text_handler(client, message):
     uid = message.from_user.id
     text = message.text.strip()
     
-    # Check if waiting for name (URL or File)
-    if uid in download_queue and 'name' not in download_queue[uid]:
+    # URL or File Rename Name Input
+    if uid in download_queue and isinstance(download_queue[uid], dict) and 'name' not in download_queue[uid]:
         download_queue[uid]['name'] = text
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="dl_vid"), InlineKeyboardButton("📁 File", callback_data="dl_doc")]])
         await message.reply_text(f"✅ Name: <b>{text}</b>\nFormat select karein:", reply_markup=btn)
@@ -339,7 +457,7 @@ async def dl_process(client, callback):
     try:
         start = time.time()
         
-        # --- RENAME LOGIC ---
+        # EXTENSION CHECK
         ext = os.path.splitext(original_fname)[1]
         if not ext: ext = ".mkv"
         if custom_name.endswith(ext): final_fname = custom_name
@@ -349,7 +467,7 @@ async def dl_process(client, callback):
         path = f"downloads/{uid}_{final_fname}"
         os.makedirs("downloads", exist_ok=True)
         
-        # --- DOWNLOAD ---
+        # DOWNLOAD
         if source_type == 'url':
             async with aiohttp.ClientSession() as session:
                 async with session.get(data['url']) as resp:
@@ -362,7 +480,6 @@ async def dl_process(client, callback):
                             if time.time() - start > 5: await progress(dl, total, status, start, f"📥 Downloading: {final_fname}")
         
         elif source_type == 'telegram_file':
-            # Get Message Object
             msg = await client.get_messages(data['chat_id'], data['msg_id'])
             path = await client.download_media(msg, file_name=path, progress=progress, progress_args=(status, start, f"📥 Downloading: {final_fname}"))
         
@@ -370,7 +487,7 @@ async def dl_process(client, callback):
         duration = get_duration(path)
         cap = get_fancy_caption(final_fname, humanbytes(os.path.getsize(path)), duration)
         
-        # --- THUMBNAIL LOGIC ---
+        # THUMBNAIL
         thumb_path = f"thumbnails/{uid}.jpg"
         wm_path = f"watermarks/{uid}.png"
         
@@ -380,7 +497,6 @@ async def dl_process(client, callback):
         os.makedirs("thumbnails", exist_ok=True)
         os.makedirs("watermarks", exist_ok=True)
         
-        # Download Assets
         if db_thumb: await client.download_media(db_thumb, file_name=thumb_path)
         if db_wm: await client.download_media(db_wm, file_name=wm_path)
              
@@ -399,7 +515,6 @@ async def dl_process(client, callback):
         if mode == "video": await client.send_video(uid, path, caption=cap, duration=duration, thumb=final_thumb, progress=progress, progress_args=(status, start, f"📤 Uploading: {final_fname}"))
         else: await client.send_document(uid, path, caption=cap, thumb=final_thumb, progress=progress, progress_args=(status, start, f"📤 Uploading: {final_fname}"))
         
-        # Cleanup
         if os.path.exists(path): os.remove(path)
         if final_thumb and "wm_thumb" in final_thumb: os.remove(final_thumb)
         del download_queue[uid]
@@ -407,7 +522,7 @@ async def dl_process(client, callback):
         
     except Exception as e: await status.edit(f"❌ Error: {e}")
 
-# --- BATCH START/DONE ---
+# --- BATCH ---
 @app.on_message(filters.command("batch") & filters.private)
 async def batch_start(client, message):
     batch_data[message.from_user.id] = {'files': []}
@@ -434,12 +549,10 @@ async def batch_run(client, callback):
             ext = os.path.splitext(media.file_name or "")[1] or ".mkv"
             new_name = f"{base} - {i+1}{ext}"
             new_name = clean_filename(new_name)
-            
             path = await client.download_media(media, file_name=f"downloads/{new_name}", progress=progress, progress_args=(status, time.time(), f"📥 Downloading ({i+1}/{len(files)})"))
             duration = get_duration(path)
             cap = get_fancy_caption(new_name, humanbytes(os.path.getsize(path)), duration)
             
-            # DB Logic
             thumb_path = f"thumbnails/{uid}.jpg"
             wm_path = f"watermarks/{uid}.png"
             db_thumb = await get_db(uid, "thumbnail_id")
@@ -487,3 +600,4 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
+    

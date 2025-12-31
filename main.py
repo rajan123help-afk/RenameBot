@@ -27,7 +27,7 @@ BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_caption_fix_v7", 
+    "filmy_pro_full_names_v8", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -94,32 +94,43 @@ async def get_real_filename(url):
 # 🔥 UNIVERSAL S/E REGEX
 def get_media_info(name):
     name = unquote(name).replace(".", " ").replace("_", " ").replace("-", " ")
+    
     match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", name)
     if match1: return match1.group(1), match1.group(2)
+    
     match2 = re.search(r"(\d{1,2})x(\d{1,3})", name)
     if match2: return match2.group(1), match2.group(2)
+    
     match3 = re.search(r"(?i)(?:ep|episode|e)\s*[\.]?\s*(\d{1,3})", name)
     if match3: return None, match3.group(1)
+    
     return None, None
 
 def clean_filename(name):
     for k, v in cleaner_dict.items(): name = name.replace(k, v)
     return re.sub(r'[<>:"/\\|?*]', '', name).strip()
 
+# 🔥 CAPTION GENERATOR (FULL NAMES)
 def get_fancy_caption(filename, filesize, duration=0):
     safe_name = html.escape(filename)
     caption = f"<b>{safe_name}</b>\n\n"
     s, e = get_media_info(filename)
-    if s: caption += f"💿 <b>Season ➥ {s}</b>\n"
-    if e: caption += f"📺 <b>Episode ➥ {e}</b>\n"
+    
+    # Ensure 2 digits (e.g., 1 -> 01)
+    if s: s = s.zfill(2)
+    if e: e = e.zfill(2)
+    
+    if s: caption += f"💿 <b>Season ➥ {s}</b>\n"   # Full 'Season' word
+    if e: caption += f"📺 <b>Episode ➥ {e}</b>\n" # Full 'Episode' word
     if s or e: caption += "\n"
+    
     caption += f"<blockquote><b>File Size ♻️ ➥ {filesize}</b></blockquote>\n"
     dur_str = get_duration_str(duration)
     caption += f"<blockquote><b>Duration ⏰ ➥ {dur_str}</b></blockquote>\n"
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME}</b></blockquote>"
     return caption
 
-# 🔥 WATERMARK LOGIC (Improved for Posters)
+# 🔥 WATERMARK LOGIC
 def apply_watermark(base_path, wm_path):
     try:
         base = Image.open(base_path).convert("RGBA")
@@ -128,18 +139,14 @@ def apply_watermark(base_path, wm_path):
         base_w, base_h = base.size
         wm_w, wm_h = wm.size
         
-        # Determine strict 70% width
         new_wm_w = int(base_w * 0.70)
         ratio = new_wm_w / wm_w
         new_wm_h = int(wm_h * ratio)
         
         wm = wm.resize((new_wm_w, new_wm_h), Image.Resampling.LANCZOS)
         
-        # Position: Center Bottom
         x = (base_w - new_wm_w) // 2
         y = base_h - new_wm_h - 20 
-        
-        # Safety check: If Y is negative (watermark taller than image), force to bottom 0
         if y < 0: y = base_h - new_wm_h
         
         base.paste(wm, (x, y), wm)
@@ -212,7 +219,7 @@ async def del_clean(client, message):
     if len(message.command) < 2: return
     if message.command[1] in cleaner_dict: del cleaner_dict[message.command[1]]
     await message.reply_text(f"🗑 Removed: {message.command[1]}")
-    # --- SEARCH ---
+      # --- SEARCH ---
 @app.on_message(filters.command(["search", "series"]))
 async def search_handler(client, message):
     if len(message.command) < 2: return await message.reply_text("Usage: /search Name or /series Name S1")
@@ -285,13 +292,12 @@ async def num_callback(client, callback):
             time.sleep(0.5)
     except Exception as e: await client.send_message(callback.from_user.id, f"Error: {e}")
 
-# 🔥 UNIVERSAL MEDIA HANDLER (Video/Audio/Doc/Photo) 🔥
-@app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo))
+# 🔥 PHOTO/FILE HANDLER (Fixed)
+@app.on_message(filters.private & (filters.photo | filters.document))
 async def media_handler(client, message):
     uid = message.from_user.id
-    
-    # 1. Check if it's an Image (For settings)
     is_image = False
+    
     if message.photo:
         is_image = True
     elif message.document:
@@ -305,19 +311,16 @@ async def media_handler(client, message):
         await message.reply_text("📸 <b>Image Detected!</b>\nThumbnail ya Watermark save karein?", reply_markup=btn, quote=True)
         return 
 
-    # 2. CAPTION MODE (Fixed)
     if user_modes.get(uid) == "caption":
         media = message.document or message.video or message.audio
         if media:
             file_name = getattr(media, "file_name", "Unknown File")
             file_size = getattr(media, "file_size", 0)
             duration = getattr(media, "duration", 0)
-            
             cap = get_fancy_caption(file_name, humanbytes(file_size), duration)
             await message.copy(uid, caption=cap)
         return
 
-    # 3. BATCH MODE
     if uid in batch_data and 'step' not in batch_data[uid]:
         batch_data[uid]['files'].append(message)
 
@@ -333,11 +336,9 @@ async def save_img_callback(client, callback):
     try:
         reply = callback.message.reply_to_message
         if not reply: return await callback.message.edit("❌ Error: Purana msg delete ho gaya.")
-        
         temp_path = f"downloads/{uid}_temp_img"
         os.makedirs("downloads", exist_ok=True)
         await client.download_media(message=reply, file_name=temp_path)
-        
         img = Image.open(temp_path)
         if mode == "watermarks":
              img = img.convert("RGBA")
@@ -347,7 +348,6 @@ async def save_img_callback(client, callback):
              img = img.convert("RGB")
              img.save(path, "JPEG")
              msg = "✅ <b>Thumbnail Set!</b> (JPG)"
-             
         os.remove(temp_path)
         await callback.message.edit(msg)
     except Exception as e: 
@@ -390,13 +390,17 @@ async def dl_process(client, callback):
     
     try:
         start = time.time()
-        s, e = get_media_info(original_fname)
-        ext = os.path.splitext(original_fname)[1] or ".mkv"
         
-        if s and e: final_fname = f"{custom_name} - S{s}E{e}{ext}"
-        elif e and not s: final_fname = f"{custom_name} - Episode {e}{ext}"
-        else: final_fname = f"{custom_name}{ext}"
+        # 🔥 PURE MANUAL NAME LOGIC 🔥
+        # Ab hum S/E detect nahi kar rahe. Jo aapne likha wahi naam hoga.
         
+        ext = os.path.splitext(original_fname)[1]
+        if not ext: ext = ".mkv" # Safety fallback
+        
+        # Sidha naam chipka do
+        final_fname = f"{custom_name}{ext}"
+        
+        # Safai
         final_fname = clean_filename(final_fname)
         path = f"downloads/{uid}_{final_fname}"
         os.makedirs("downloads", exist_ok=True)
@@ -413,8 +417,11 @@ async def dl_process(client, callback):
         
         await status.edit("📤 <b>Uploading...</b>")
         duration = get_duration(path)
+        
+        # Caption Logic (Part 1 wala smart caption abhi bhi S/E detect karega agar aapne naam me likha hai)
         cap = get_fancy_caption(final_fname, humanbytes(os.path.getsize(path)), duration)
         
+        # Thumbnail Logic
         thumb_path = None
         if os.path.exists(f"thumbnails/{uid}.jpg"): thumb_path = f"thumbnails/{uid}.jpg"
         elif os.path.exists(f"watermarks/{uid}.png"):
@@ -524,3 +531,4 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
+                                                                 

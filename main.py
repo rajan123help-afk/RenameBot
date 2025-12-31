@@ -29,7 +29,7 @@ BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_final_v11", 
+    "filmy_pro_final_clean_v12", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -106,7 +106,6 @@ async def get_real_filename(url):
                     cd = resp.headers["Content-Disposition"]
                     fname_match = re.search(r'filename="?([^"]+)"?', cd)
                     if fname_match: return unquote(fname_match.group(1))
-                
                 final_url = str(resp.url)
                 if final_url != url:
                      name = unquote(final_url.split("/")[-1].split("?")[0])
@@ -114,46 +113,25 @@ async def get_real_filename(url):
     except: pass
     return unquote(url.split("/")[-1].split("?")[0])
 
-# 🔥 FIXED REGEX (Ignores Years like 2024)
-def get_media_info(name):
-    name = unquote(name).replace(".", " ").replace("_", " ").replace("-", " ")
-    
-    # 1. Check Season + Episode
-    match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", name)
-    if match1: return match1.group(1), match1.group(2)
-    
-    # 2. Check Episode Only
-    match3 = re.search(r"(?i)(?:ep|episode|e)\s*[\.]?\s*(\d{1,3})", name)
-    if match3: 
-        ep = match3.group(1)
-        # ⚠️ CRITICAL FIX: If number is year (1990-2030), ignore it!
-        if 1990 < int(ep) < 2030: return None, None
-        return None, ep
-    
-    return None, None
-
 def clean_filename(name):
     for k, v in cleaner_dict.items(): name = name.replace(k, v)
     return re.sub(r'[<>:"/\\|?*]', '', name).strip()
 
-# 🔥 CAPTION RESTORED (Green Line Fixed)
+# 🔥 NEW CLEAN CAPTION (NO AUTO S/E)
 def get_fancy_caption(filename, filesize, duration=0):
     safe_name = html.escape(filename)
+    
+    # 1. Filename (Bold)
     caption = f"<b>{safe_name}</b>\n\n"
-    s, e = get_media_info(filename)
     
-    if s: s = s.zfill(2)
-    if e: e = e.zfill(2)
-    
-    if s: caption += f"💿 <b>Season ➥ {s}</b>\n"
-    if e: caption += f"📺 <b>Episode ➥ {e}</b>\n"
-    if s or e: caption += "\n"
-    
-    # Green Line Block
+    # 2. Green Line Stats (using blockquote)
     caption += f"<blockquote><b>File Size ♻️ ➥ {filesize}</b></blockquote>\n"
+    
     dur_str = get_duration_str(duration)
     caption += f"<blockquote><b>Duration ⏰ ➥ {dur_str}</b></blockquote>\n"
+    
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME}</b></blockquote>"
+    
     return caption
 
 # 🔥 WATERMARK LOGIC
@@ -161,20 +139,15 @@ def apply_watermark(base_path, wm_path):
     try:
         base = Image.open(base_path).convert("RGBA")
         wm = Image.open(wm_path).convert("RGBA")
-        
         base_w, base_h = base.size
         wm_w, wm_h = wm.size
-        
         new_wm_w = int(base_w * 0.70)
         ratio = new_wm_w / wm_w
         new_wm_h = int(wm_h * ratio)
-        
         wm = wm.resize((new_wm_w, new_wm_h), Image.Resampling.LANCZOS)
-        
         x = (base_w - new_wm_w) // 2
         y = base_h - new_wm_h - 20 
         if y < 0: y = base_h - new_wm_h
-        
         base.paste(wm, (x, y), wm)
         base = base.convert("RGB")
         base.save(base_path, "JPEG")
@@ -328,12 +301,13 @@ async def num_callback(client, callback):
             
     except Exception as e: await client.send_message(callback.from_user.id, f"Error: {e}")
 
-# 🔥 PHOTO/FILE HANDLER
-@app.on_message(filters.private & (filters.photo | filters.document))
+# 🔥 PHOTO/FILE/MEDIA HANDLER (Fixed Caption Mode)
+@app.on_message(filters.private & (filters.photo | filters.document | filters.video | filters.audio))
 async def media_handler(client, message):
     uid = message.from_user.id
-    is_image = False
     
+    # 1. Check Image for Settings (Priority)
+    is_image = False
     if message.photo:
         is_image = True
     elif message.document:
@@ -342,11 +316,12 @@ async def media_handler(client, message):
         if mime.startswith("image/") or fname.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
             is_image = True
 
-    if is_image:
+    if is_image and user_modes.get(uid) != "caption":
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🖼 Save Thumbnail", callback_data="save_thumb"), InlineKeyboardButton("💧 Save Watermark", callback_data="save_wm")]])
         await message.reply_text("📸 <b>Image Detected!</b>\nThumbnail ya Watermark save karein?", reply_markup=btn, quote=True)
         return 
 
+    # 2. CAPTION MODE (Fixed Logic)
     if user_modes.get(uid) == "caption":
         media = message.document or message.video or message.audio
         if media:
@@ -357,6 +332,7 @@ async def media_handler(client, message):
             await message.copy(uid, caption=cap)
         return
 
+    # 3. BATCH MODE
     if uid in batch_data and 'step' not in batch_data[uid]:
         batch_data[uid]['files'].append(message)
 
@@ -374,12 +350,12 @@ async def save_img_callback(client, callback):
         file_id = reply.photo.file_id if reply.photo else reply.document.file_id
         await set_db(uid, mode, file_id)
         
-        # Also save locally for immediate use
+        # Local Cache
         os.makedirs("thumbnails", exist_ok=True)
         os.makedirs("watermarks", exist_ok=True)
         local_path = f"thumbnails/{uid}.jpg" if mode == "thumbnail_id" else f"watermarks/{uid}.png"
         
-        # Download temp to convert
+        # Download
         temp_path = f"downloads/{uid}_temp_save"
         os.makedirs("downloads", exist_ok=True)
         await client.download_media(reply, file_name=temp_path)
@@ -437,11 +413,10 @@ async def dl_process(client, callback):
     try:
         start = time.time()
         
-        # 🔥 FIX: DOUBLE EXTENSION CHECK
+        # EXTENSION CHECK
         ext = os.path.splitext(original_fname)[1]
         if not ext: ext = ".mkv"
         
-        # Agar naam me pehle se .mkv hai, to mat jodo
         if custom_name.endswith(ext):
              final_fname = custom_name
         else:
@@ -465,11 +440,10 @@ async def dl_process(client, callback):
         duration = get_duration(path)
         cap = get_fancy_caption(final_fname, humanbytes(os.path.getsize(path)), duration)
         
-        # 🔥 THUMBNAIL LOGIC (Using Local + DB)
+        # THUMBNAIL LOGIC
         thumb_path = f"thumbnails/{uid}.jpg"
         wm_path = f"watermarks/{uid}.png"
         
-        # Force re-download from DB to be safe
         db_thumb = await get_db(uid, "thumbnail_id")
         db_wm = await get_db(uid, "watermark_id")
         
@@ -547,15 +521,8 @@ async def batch_run(client, callback):
         if uid not in batch_data: break
         try:
             media = msg.document or msg.video or msg.audio
-            s, e = get_media_info(media.file_name or "")
             ext = os.path.splitext(media.file_name or "")[1] or ".mkv"
-            
-            # BATCH NAMING LOGIC
-            if s and e:
-                new_name = f"{base} - S{s}E{e}{ext}"
-            else:
-                new_name = f"{base} - {i+1}{ext}"
-                
+            new_name = f"{base} - {i+1}{ext}"
             new_name = clean_filename(new_name)
             path = await client.download_media(media, file_name=f"downloads/{new_name}", progress=progress, progress_args=(status, time.time(), f"📥 Downloading ({i+1}/{len(files)})"))
             duration = get_duration(path)
@@ -567,8 +534,8 @@ async def batch_run(client, callback):
             db_thumb = await get_db(uid, "thumbnail_id")
             db_wm = await get_db(uid, "watermark_id")
             
-            if not os.path.exists(thumb_path) and db_thumb: await client.download_media(db_thumb, file_name=thumb_path)
-            if not os.path.exists(wm_path) and db_wm: await client.download_media(db_wm, file_name=wm_path)
+            if db_thumb: await client.download_media(db_thumb, file_name=thumb_path)
+            if db_wm: await client.download_media(db_wm, file_name=wm_path)
             
             final_thumb = None
             if os.path.exists(thumb_path):
@@ -584,7 +551,8 @@ async def batch_run(client, callback):
             if mode == "video": await client.send_video(uid, path, caption=cap, duration=duration, thumb=final_thumb, progress=progress, progress_args=(status, start, f"📤 Uploading ({i+1}/{len(files)})"))
             else: await client.send_document(uid, path, caption=cap, thumb=final_thumb, progress=progress, progress_args=(status, start, f"📤 Uploading ({i+1}/{len(files)})"))
             os.remove(path)
-            if final_thumb and "wm_thumb" in final_thumb: os.remove(final_thumb)
+            if os.path.exists(thumb_path): os.remove(thumb_path)
+            if os.path.exists(wm_path): os.remove(wm_path)
         except: pass
     await status.edit("🎉 <b>Batch Done!</b>")
     if uid in batch_data: del batch_data[uid]

@@ -29,7 +29,7 @@ BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_greenline_fix_v14", 
+    "filmy_pro_caption_green_fix", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -124,7 +124,7 @@ def get_fancy_caption(filename, filesize, duration=0):
     
     caption = f"<b>{safe_name}</b>\n\n"
     
-    # <blockquote> Tag Works with Pyrogram v2.0.106+
+    # <blockquote> Tag se Green Line aati hai
     caption += f"""<blockquote><b>File Size ♻️ ➥ {filesize}</b>
 <b>Duration ⏰ ➥ {dur_str}</b>
 <b>Powered By ➥ {CREDIT_NAME}</b></blockquote>"""
@@ -215,7 +215,7 @@ async def del_clean(client, message):
     if len(message.command) < 2: return
     if message.command[1] in cleaner_dict: del cleaner_dict[message.command[1]]
     await message.reply_text(f"🗑 Removed: {message.command[1]}")
-    # --- SEARCH ---
+            # --- SEARCH ---
 @app.on_message(filters.command(["search", "series"]))
 async def search_handler(client, message):
     if len(message.command) < 2: return await message.reply_text("Usage: /search Name or /series Name S1")

@@ -14,6 +14,7 @@ from PIL import Image
 from hachoir.metadata import extractMetadata
 from hachoir.parser import createParser
 from aiohttp import web
+from motor.motor_asyncio import AsyncIOMotorClient 
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
 
@@ -22,12 +23,13 @@ API_ID = int(os.environ.get("API_ID", "12345"))
 API_HASH = os.environ.get("API_HASH", "hash")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "token")
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "02a832d91755c2f5e8a2d1a6740a8674")
+MONGO_URI = os.environ.get("MONGO_URI", "") # Agar Mongo nahi hai to khali chhod dein
 CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_full_names_v8", 
+    "filmy_pro_final_fix_v10", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -35,6 +37,25 @@ app = Client(
     workers=2, 
     max_concurrent_transmissions=2
 )
+
+# --- DATABASE SETUP ---
+users_col = None
+if MONGO_URI:
+    try:
+        mongo_client = AsyncIOMotorClient(MONGO_URI)
+        db = mongo_client.filmy_flip
+        users_col = db.users
+    except: pass
+
+async def set_db(uid, key, value):
+    if users_col is not None:
+        await users_col.update_one({'_id': uid}, {'$set': {key: value}}, upsert=True)
+
+async def get_db(uid, key):
+    if users_col is not None:
+        data = await users_col.find_one({'_id': uid})
+        return data.get(key) if data else None
+    return None
 
 # --- GLOBAL VARS ---
 user_modes = {}
@@ -76,33 +97,44 @@ def get_duration_str(duration):
     h, m = divmod(m, 60)
     return f"{h}h {m}m {s}s" if h > 0 else f"{m}m {s}s"
 
-# 🔥 SERVER-SIDE NAME FETCHING
+# 🔥 SERVER-SIDE NAME FETCHING (Improved Headers)
 async def get_real_filename(url):
     try:
-        headers = {"User-Agent": "Mozilla/5.0"}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36",
+            "Accept": "*/*"
+        }
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, allow_redirects=True, timeout=10) as resp:
+            async with session.get(url, headers=headers, allow_redirects=True, timeout=15) as resp:
+                # 1. Content-Disposition Check
                 if "Content-Disposition" in resp.headers:
                     cd = resp.headers["Content-Disposition"]
                     fname_match = re.search(r'filename="?([^"]+)"?', cd)
                     if fname_match: return unquote(fname_match.group(1))
-                    utf_match = re.search(r"filename\*=UTF-8''(.+)", cd)
-                    if utf_match: return unquote(utf_match.group(1))
+                    
+                # 2. Redirect URL Check
+                final_url = str(resp.url)
+                if final_url != url:
+                     name = unquote(final_url.split("/")[-1].split("?")[0])
+                     if "." in name: return name
     except: pass
     return unquote(url.split("/")[-1].split("?")[0])
 
-# 🔥 UNIVERSAL S/E REGEX
+# 🔥 SMART S/E REGEX (Ignores 2024, 1999, etc.)
 def get_media_info(name):
     name = unquote(name).replace(".", " ").replace("_", " ").replace("-", " ")
     
+    # Season/Episode (S01 E02)
     match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", name)
     if match1: return match1.group(1), match1.group(2)
     
-    match2 = re.search(r"(\d{1,2})x(\d{1,3})", name)
-    if match2: return match2.group(1), match2.group(2)
-    
+    # Episode Only (Episode 05)
     match3 = re.search(r"(?i)(?:ep|episode|e)\s*[\.]?\s*(\d{1,3})", name)
-    if match3: return None, match3.group(1)
+    if match3: 
+        ep = match3.group(1)
+        # ⚠️ Safety: Ignore if it looks like a Year (1900-2100)
+        if 1900 < int(ep) < 2100: return None, None
+        return None, ep
     
     return None, None
 
@@ -110,18 +142,16 @@ def clean_filename(name):
     for k, v in cleaner_dict.items(): name = name.replace(k, v)
     return re.sub(r'[<>:"/\\|?*]', '', name).strip()
 
-# 🔥 CAPTION GENERATOR (FULL NAMES)
 def get_fancy_caption(filename, filesize, duration=0):
     safe_name = html.escape(filename)
     caption = f"<b>{safe_name}</b>\n\n"
     s, e = get_media_info(filename)
     
-    # Ensure 2 digits (e.g., 1 -> 01)
     if s: s = s.zfill(2)
     if e: e = e.zfill(2)
     
-    if s: caption += f"💿 <b>Season ➥ {s}</b>\n"   # Full 'Season' word
-    if e: caption += f"📺 <b>Episode ➥ {e}</b>\n" # Full 'Episode' word
+    if s: caption += f"💿 <b>Season ➥ {s}</b>\n"
+    if e: caption += f"📺 <b>Episode ➥ {e}</b>\n"
     if s or e: caption += "\n"
     
     caption += f"<blockquote><b>File Size ♻️ ➥ {filesize}</b></blockquote>\n"
@@ -219,7 +249,7 @@ async def del_clean(client, message):
     if len(message.command) < 2: return
     if message.command[1] in cleaner_dict: del cleaner_dict[message.command[1]]
     await message.reply_text(f"🗑 Removed: {message.command[1]}")
-      # --- SEARCH ---
+    # --- SEARCH ---
 @app.on_message(filters.command(["search", "series"]))
 async def search_handler(client, message):
     if len(message.command) < 2: return await message.reply_text("Usage: /search Name or /series Name S1")
@@ -273,7 +303,14 @@ async def num_callback(client, callback):
             pool = data.get('posters' if img_type == 'poster' else 'backdrops', [])
         if not pool: return await client.send_message(uid, "❌ No images found!")
         images_to_send = pool[:count]
+        
+        # Poster Watermark Logic
+        wm_id = await get_db(uid, "watermark_id")
         wm_path = f"watermarks/{uid}.png"
+        os.makedirs("watermarks", exist_ok=True)
+        if wm_id and not os.path.exists(wm_path):
+             await client.download_media(wm_id, file_name=wm_path)
+             
         os.makedirs("downloads", exist_ok=True)
         for i, img_data in enumerate(images_to_send):
             img_path = img_data['file_path']
@@ -290,9 +327,12 @@ async def num_callback(client, callback):
             await client.send_photo(uid, photo=final_path, caption=f"🖼 <b>{img_type.capitalize()} {i+1}</b>")
             os.remove(temp_path)
             time.sleep(0.5)
+        
+        if os.path.exists(wm_path): os.remove(wm_path)
+            
     except Exception as e: await client.send_message(callback.from_user.id, f"Error: {e}")
 
-# 🔥 PHOTO/FILE HANDLER (Fixed)
+# 🔥 PHOTO/FILE HANDLER
 @app.on_message(filters.private & (filters.photo | filters.document))
 async def media_handler(client, message):
     uid = message.from_user.id
@@ -327,27 +367,37 @@ async def media_handler(client, message):
 @app.on_callback_query(filters.regex("^save_"))
 async def save_img_callback(client, callback):
     uid = callback.from_user.id
-    mode = "thumbnails" if "thumb" in callback.data else "watermarks"
-    os.makedirs(mode, exist_ok=True)
-    ext = ".png" if mode == "watermarks" else ".jpg"
-    path = f"{mode}/{uid}{ext}"
+    mode = "thumbnail_id" if "thumb" in callback.data else "watermark_id"
     
     await callback.message.edit("⏳ <b>Processing...</b>")
     try:
         reply = callback.message.reply_to_message
-        if not reply: return await callback.message.edit("❌ Error: Purana msg delete ho gaya.")
-        temp_path = f"downloads/{uid}_temp_img"
+        if not reply: return await callback.message.edit("❌ Error: Message not found.")
+        
+        # DB Storage
+        file_id = reply.photo.file_id if reply.photo else reply.document.file_id
+        await set_db(uid, mode, file_id)
+        
+        # Also save locally for immediate use
+        os.makedirs("thumbnails", exist_ok=True)
+        os.makedirs("watermarks", exist_ok=True)
+        local_path = f"thumbnails/{uid}.jpg" if mode == "thumbnail_id" else f"watermarks/{uid}.png"
+        
+        # Download temp to convert
+        temp_path = f"downloads/{uid}_temp_save"
         os.makedirs("downloads", exist_ok=True)
-        await client.download_media(message=reply, file_name=temp_path)
+        await client.download_media(reply, file_name=temp_path)
+        
         img = Image.open(temp_path)
-        if mode == "watermarks":
+        if mode == "watermark_id":
              img = img.convert("RGBA")
-             img.save(path, "PNG")
-             msg = "✅ <b>Watermark Set!</b> (PNG)"
+             img.save(local_path, "PNG")
+             msg = "✅ <b>Watermark Set!</b>"
         else:
              img = img.convert("RGB")
-             img.save(path, "JPEG")
-             msg = "✅ <b>Thumbnail Set!</b> (JPG)"
+             img.save(local_path, "JPEG")
+             msg = "✅ <b>Thumbnail Set!</b>"
+             
         os.remove(temp_path)
         await callback.message.edit(msg)
     except Exception as e: 
@@ -391,16 +441,16 @@ async def dl_process(client, callback):
     try:
         start = time.time()
         
-        # 🔥 PURE MANUAL NAME LOGIC 🔥
-        # Ab hum S/E detect nahi kar rahe. Jo aapne likha wahi naam hoga.
-        
+        # 🔥 FIX: NO DOUBLE .mkv
         ext = os.path.splitext(original_fname)[1]
-        if not ext: ext = ".mkv" # Safety fallback
+        if not ext: ext = ".mkv"
         
-        # Sidha naam chipka do
-        final_fname = f"{custom_name}{ext}"
-        
-        # Safai
+        # Agar user ne pehle se extension likha hai, to wahi rehne do
+        if custom_name.endswith(ext):
+             final_fname = custom_name
+        else:
+             final_fname = f"{custom_name}{ext}"
+             
         final_fname = clean_filename(final_fname)
         path = f"downloads/{uid}_{final_fname}"
         os.makedirs("downloads", exist_ok=True)
@@ -417,28 +467,41 @@ async def dl_process(client, callback):
         
         await status.edit("📤 <b>Uploading...</b>")
         duration = get_duration(path)
-        
-        # Caption Logic (Part 1 wala smart caption abhi bhi S/E detect karega agar aapne naam me likha hai)
         cap = get_fancy_caption(final_fname, humanbytes(os.path.getsize(path)), duration)
         
-        # Thumbnail Logic
-        thumb_path = None
-        if os.path.exists(f"thumbnails/{uid}.jpg"): thumb_path = f"thumbnails/{uid}.jpg"
-        elif os.path.exists(f"watermarks/{uid}.png"):
-             temp_thumb = f"thumbnails/{uid}_wm_thumb.jpg"
-             img = Image.open(f"watermarks/{uid}.png").convert("RGB")
-             img.save(temp_thumb, "JPEG")
-             thumb_path = temp_thumb
-        
+        # 🔥 THUMBNAIL LOGIC (Using Local + DB)
+        thumb_path = f"thumbnails/{uid}.jpg"
         wm_path = f"watermarks/{uid}.png"
-        if thumb_path and os.path.exists(wm_path): thumb_path = apply_watermark(thumb_path, wm_path)
+        
+        # Check DB if local files missing
+        db_thumb = await get_db(uid, "thumbnail_id")
+        db_wm = await get_db(uid, "watermark_id")
+        
+        if not os.path.exists(thumb_path) and db_thumb:
+             await client.download_media(db_thumb, file_name=thumb_path)
+        if not os.path.exists(wm_path) and db_wm:
+             await client.download_media(db_wm, file_name=wm_path)
+             
+        final_thumb = None
+        if os.path.exists(thumb_path):
+             final_thumb = thumb_path
+             # Apply WM if exists
+             if os.path.exists(wm_path):
+                  final_thumb = apply_watermark(thumb_path, wm_path)
+        elif os.path.exists(wm_path):
+             # Only WM exists -> Use as Thumb
+             temp_thumb = f"thumbnails/{uid}_wm_thumb.jpg"
+             img = Image.open(wm_path).convert("RGB")
+             img.save(temp_thumb, "JPEG")
+             final_thumb = temp_thumb
         
         start = time.time()
-        if mode == "video": await client.send_video(uid, path, caption=cap, duration=duration, thumb=thumb_path, progress=progress, progress_args=(status, start, f"📤 Uploading: {final_fname}"))
-        else: await client.send_document(uid, path, caption=cap, thumb=thumb_path, progress=progress, progress_args=(status, start, f"📤 Uploading: {final_fname}"))
+        if mode == "video": await client.send_video(uid, path, caption=cap, duration=duration, thumb=final_thumb, progress=progress, progress_args=(status, start, f"📤 Uploading: {final_fname}"))
+        else: await client.send_document(uid, path, caption=cap, thumb=final_thumb, progress=progress, progress_args=(status, start, f"📤 Uploading: {final_fname}"))
         
         os.remove(path)
-        if thumb_path and "_wm_thumb" in thumb_path: os.remove(thumb_path)
+        # Cleanup temp thumbs but keep originals in thumbnails/ folder for next time
+        if final_thumb and "wm_thumb" in final_thumb: os.remove(final_thumb)
         del download_queue[uid]
         await status.delete()
         
@@ -495,18 +558,42 @@ async def batch_run(client, callback):
             media = msg.document or msg.video or msg.audio
             s, e = get_media_info(media.file_name or "")
             ext = os.path.splitext(media.file_name or "")[1] or ".mkv"
-            new_name = f"{base} - S{s}E{e}{ext}" if s and e else f"{base} - {i+1}{ext}"
+            
+            # BATCH NAMING LOGIC
+            if s and e:
+                new_name = f"{base} - S{s}E{e}{ext}"
+            else:
+                new_name = f"{base} - {i+1}{ext}"
+                
             new_name = clean_filename(new_name)
             path = await client.download_media(media, file_name=f"downloads/{new_name}", progress=progress, progress_args=(status, time.time(), f"📥 Downloading ({i+1}/{len(files)})"))
             duration = get_duration(path)
             cap = get_fancy_caption(new_name, humanbytes(os.path.getsize(path)), duration)
-            thumb_path = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
+            
+            # DB LOGIC FOR BATCH
+            thumb_path = f"thumbnails/{uid}.jpg"
             wm_path = f"watermarks/{uid}.png"
-            if thumb_path and os.path.exists(wm_path): thumb_path = apply_watermark(thumb_path, wm_path)
+            db_thumb = await get_db(uid, "thumbnail_id")
+            db_wm = await get_db(uid, "watermark_id")
+            
+            if not os.path.exists(thumb_path) and db_thumb: await client.download_media(db_thumb, file_name=thumb_path)
+            if not os.path.exists(wm_path) and db_wm: await client.download_media(db_wm, file_name=wm_path)
+            
+            final_thumb = None
+            if os.path.exists(thumb_path):
+                 final_thumb = thumb_path
+                 if os.path.exists(wm_path): final_thumb = apply_watermark(thumb_path, wm_path)
+            elif os.path.exists(wm_path):
+                 temp_thumb = f"thumbnails/{uid}_wm_thumb.jpg"
+                 img = Image.open(wm_path).convert("RGB")
+                 img.save(temp_thumb, "JPEG")
+                 final_thumb = temp_thumb
+            
             start = time.time()
-            if mode == "video": await client.send_video(uid, path, caption=cap, duration=duration, thumb=thumb_path, progress=progress, progress_args=(status, start, f"📤 Uploading ({i+1}/{len(files)})"))
-            else: await client.send_document(uid, path, caption=cap, thumb=thumb_path, progress=progress, progress_args=(status, start, f"📤 Uploading ({i+1}/{len(files)})"))
+            if mode == "video": await client.send_video(uid, path, caption=cap, duration=duration, thumb=final_thumb, progress=progress, progress_args=(status, start, f"📤 Uploading ({i+1}/{len(files)})"))
+            else: await client.send_document(uid, path, caption=cap, thumb=final_thumb, progress=progress, progress_args=(status, start, f"📤 Uploading ({i+1}/{len(files)})"))
             os.remove(path)
+            if final_thumb and "wm_thumb" in final_thumb: os.remove(final_thumb)
         except: pass
     await status.edit("🎉 <b>Batch Done!</b>")
     if uid in batch_data: del batch_data[uid]
@@ -531,4 +618,3 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
-                                                                 

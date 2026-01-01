@@ -27,20 +27,20 @@ BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_full_names_v8", 
+    "filmy_pro_replace_hub_v2", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
     parse_mode=enums.ParseMode.HTML,
-    workers=2, 
-    max_concurrent_transmissions=2
+    workers=4, 
+    max_concurrent_transmissions=4
 )
 
 # --- GLOBAL VARS ---
 user_modes = {}
 batch_data = {}
 download_queue = {} 
-cleaner_dict = {}
+cleaner_dict = {} # Yahan words save honge
 
 # --- WEB SERVER ---
 routes = web.RouteTableDef()
@@ -76,7 +76,6 @@ def get_duration_str(duration):
     h, m = divmod(m, 60)
     return f"{h}h {m}m {s}s" if h > 0 else f"{m}m {s}s"
 
-# 🔥 SERVER-SIDE NAME FETCHING
 async def get_real_filename(url):
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
@@ -91,37 +90,39 @@ async def get_real_filename(url):
     except: pass
     return unquote(url.split("/")[-1].split("?")[0])
 
-# 🔥 UNIVERSAL S/E REGEX
 def get_media_info(name):
     name = unquote(name).replace(".", " ").replace("_", " ").replace("-", " ")
-    
     match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", name)
     if match1: return match1.group(1), match1.group(2)
-    
     match2 = re.search(r"(\d{1,2})x(\d{1,3})", name)
     if match2: return match2.group(1), match2.group(2)
-    
     match3 = re.search(r"(?i)(?:ep|episode|e)\s*[\.]?\s*(\d{1,3})", name)
     if match3: return None, match3.group(1)
-    
     return None, None
 
+# 🔥 UPDATED CLEANER (Replace Logic)
 def clean_filename(name):
-    for k, v in cleaner_dict.items(): name = name.replace(k, v)
-    return re.sub(r'[<>:"/\\|?*]', '', name).strip()
+    # Dictionary se loop karke replace karega
+    for old_word, new_word in cleaner_dict.items():
+        if old_word in name:
+            name = name.replace(old_word, new_word)
+    return name.strip()
 
-# 🔥 CAPTION GENERATOR (FULL NAMES)
+# 🔥 CAPTION GENERATOR
 def get_fancy_caption(filename, filesize, duration=0):
-    safe_name = html.escape(filename)
-    caption = f"<b>{safe_name}</b>\n\n"
-    s, e = get_media_info(filename)
     
-    # Ensure 2 digits (e.g., 1 -> 01)
+    # 1. Pehle naam clean/replace karo
+    final_display_name = clean_filename(filename)
+    
+    safe_name = html.escape(final_display_name)
+    caption = f"<b>{safe_name}</b>\n\n"
+    
+    s, e = get_media_info(final_display_name)
     if s: s = s.zfill(2)
     if e: e = e.zfill(2)
     
-    if s: caption += f"💿 <b>Season ➥ {s}</b>\n"   # Full 'Season' word
-    if e: caption += f"📺 <b>Episode ➥ {e}</b>\n" # Full 'Episode' word
+    if s: caption += f"💿 <b>Season ➥ {s}</b>\n"
+    if e: caption += f"📺 <b>Episode ➥ {e}</b>\n"
     if s or e: caption += "\n"
     
     caption += f"<blockquote><b>File Size ♻️ ➥ {filesize}</b></blockquote>\n"
@@ -135,20 +136,15 @@ def apply_watermark(base_path, wm_path):
     try:
         base = Image.open(base_path).convert("RGBA")
         wm = Image.open(wm_path).convert("RGBA")
-        
         base_w, base_h = base.size
         wm_w, wm_h = wm.size
-        
         new_wm_w = int(base_w * 0.70)
         ratio = new_wm_w / wm_w
         new_wm_h = int(wm_h * ratio)
-        
         wm = wm.resize((new_wm_w, new_wm_h), Image.Resampling.LANCZOS)
-        
         x = (base_w - new_wm_w) // 2
         y = base_h - new_wm_h - 20 
         if y < 0: y = base_h - new_wm_h
-        
         base.paste(wm, (x, y), wm)
         base = base.convert("RGB")
         base.save(base_path, "JPEG")
@@ -185,11 +181,10 @@ async def start(client, message):
     await message.reply_text(
         f"👋 <b>Hello {message.from_user.first_name}!</b>\n\n"
         "🎬 <b>Filmy Flip Commands:</b>\n"
-        "🔹 <code>/search Name</code> (Movie)\n"
-        "🔹 <code>/series Name S1</code> (Series + Season)\n"
-        "🔹 <code>/caption</code> (Green Line)\n"
-        "🔹 <code>/batch</code> (Rename)\n"
-        "🔹 <code>/url</code> (Link Upload)\n"
+        "🔹 <code>/add Word</code> (Auto Replace with Filmy Flip Hub)\n"
+        "🔹 <code>/add Old New</code> (Custom Replace)\n"
+        "🔹 <code>/caption</code> (Magic Caption)\n"
+        "🔹 <code>/del Word</code> (Remove from List)\n"
         "🔹 Send Photo -> Save Thumb/Watermark"
     )
 
@@ -208,11 +203,24 @@ async def set_url(client, message):
     user_modes[message.from_user.id] = "url"
     await message.reply_text("🌐 <b>URL Mode ON!</b> Link bhejein.")
 
+# 🔥 UPDATED ADD COMMAND (Default = Filmy Flip Hub)
 @app.on_message(filters.command("add") & filters.private)
 async def add_clean(client, message):
-    if len(message.command) < 2: return
-    cleaner_dict[message.command[1]] = ""
-    await message.reply_text(f"✅ Added: {message.command[1]}")
+    if len(message.command) < 2: 
+        return await message.reply_text("❌ <b>Usage:</b>\n1️⃣ Auto Replace: <code>/add Word</code>\n2️⃣ Custom: <code>/add Old New</code>")
+    
+    word_to_remove = message.command[1]
+    
+    # ✅ DEFAULT: Agar sirf 1 word diya, to "Filmy Flip Hub" se replace hoga
+    replace_with = " Filmy Flip Hub"
+    
+    # Agar user ne khud dusra shabd diya hai
+    if len(message.command) > 2:
+        replace_with = " ".join(message.command[2:])
+    
+    cleaner_dict[word_to_remove] = replace_with
+    
+    await message.reply_text(f"✅ <b>Set:</b> <code>{word_to_remove}</code> ➡️ <code>{replace_with}</code>")
 
 @app.on_message(filters.command("del") & filters.private)
 async def del_clean(client, message):
@@ -292,8 +300,8 @@ async def num_callback(client, callback):
             time.sleep(0.5)
     except Exception as e: await client.send_message(callback.from_user.id, f"Error: {e}")
 
-# 🔥 PHOTO/FILE HANDLER (Fixed)
-@app.on_message(filters.private & (filters.photo | filters.document))
+# 🔥 PHOTO/FILE HANDLER (Videos Included)
+@app.on_message(filters.private & (filters.photo | filters.document | filters.video | filters.audio))
 async def media_handler(client, message):
     uid = message.from_user.id
     is_image = False
@@ -317,6 +325,7 @@ async def media_handler(client, message):
             file_name = getattr(media, "file_name", "Unknown File")
             file_size = getattr(media, "file_size", 0)
             duration = getattr(media, "duration", 0)
+            # Yahan ye Part 1 wale logic ko call karega -> "Filmy Flip Hub" wala replacement apply hoga
             cap = get_fancy_caption(file_name, humanbytes(file_size), duration)
             await message.copy(uid, caption=cap)
         return
@@ -392,15 +401,10 @@ async def dl_process(client, callback):
         start = time.time()
         
         # 🔥 PURE MANUAL NAME LOGIC 🔥
-        # Ab hum S/E detect nahi kar rahe. Jo aapne likha wahi naam hoga.
-        
         ext = os.path.splitext(original_fname)[1]
-        if not ext: ext = ".mkv" # Safety fallback
+        if not ext: ext = ".mkv" 
         
-        # Sidha naam chipka do
         final_fname = f"{custom_name}{ext}"
-        
-        # Safai
         final_fname = clean_filename(final_fname)
         path = f"downloads/{uid}_{final_fname}"
         os.makedirs("downloads", exist_ok=True)
@@ -418,7 +422,7 @@ async def dl_process(client, callback):
         await status.edit("📤 <b>Uploading...</b>")
         duration = get_duration(path)
         
-        # Caption Logic (Part 1 wala smart caption abhi bhi S/E detect karega agar aapne naam me likha hai)
+        # Caption Logic
         cap = get_fancy_caption(final_fname, humanbytes(os.path.getsize(path)), duration)
         
         # Thumbnail Logic

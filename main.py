@@ -48,7 +48,10 @@ routes = web.RouteTableDef()
 @routes.get("/", allow_head=True)
 async def root_route_handler(request):
     return web.json_response({"status": "running"})
-    def humanbytes(size):
+
+# --- HELPER FUNCTIONS ---
+def humanbytes(size):
+    # Dhyan dein: Ye niche wali line thodi aage honi chahiye
     if not size: return "0 B"
     power = 2**10; n = 0
     dic_power = {0: ' ', 1: 'K', 2: 'M', 3: 'G', 4: 'T'}
@@ -80,6 +83,7 @@ async def get_real_filename(url):
     return unquote(url.split("/")[-1].split("?")[0])
 
 def clean_filename(name):
+    # Dhyan dein: Ye for loop thoda aage hona chahiye
     for old_word, new_word in cleaner_dict.items():
         if old_word in name: 
             name = name.replace(old_word, new_word)
@@ -151,6 +155,7 @@ async def send_to_channel_logic(client, path, clean_name, uid):
         try: await client.send_media_group(LOG_CHANNEL, [enums.InputMediaPhoto(p) for p in ss_files])
         except: pass
         for f in ss_files: os.remove(f)
+
 # --- COMMANDS ---
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
@@ -224,7 +229,7 @@ async def num_callback(client, callback):
             await client.send_photo(uid, photo=temp_path)
             os.remove(temp_path)
     except: pass
-# 🔥 MAIN MEDIA HANDLER
+        # 🔥 MAIN MEDIA HANDLER
 @app.on_message(filters.private & (filters.photo | filters.document | filters.video | filters.audio))
 async def media_handler(client, message):
     uid = message.from_user.id
@@ -381,4 +386,4 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
-        
+

@@ -28,7 +28,7 @@ LOG_CHANNEL = "@filmyflip_screenshots"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_final_v3", 
+    "filmy_pro_final_v5", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -43,14 +43,12 @@ batch_data = {}
 download_queue = {} 
 cleaner_dict = {} 
 
-# --- WEB SERVER (KEEP ALIVE) ---
+# --- WEB SERVER ---
 routes = web.RouteTableDef()
 @routes.get("/", allow_head=True)
 async def root_route_handler(request):
     return web.json_response({"status": "running"})
-
-# --- HELPER FUNCTIONS ---
-def humanbytes(size):
+    def humanbytes(size):
     if not size: return "0 B"
     power = 2**10; n = 0
     dic_power = {0: ' ', 1: 'K', 2: 'M', 3: 'G', 4: 'T'}
@@ -80,12 +78,13 @@ async def get_real_filename(url):
                     if fname_match: return unquote(fname_match.group(1))
     except: pass
     return unquote(url.split("/")[-1].split("?")[0])
-    def clean_filename(name):
-    for old_word, new_word in cleaner_dict.items():
-        if old_word in name: name = name.replace(old_word, new_word)
-    return name.strip()
 
-# 🔥 STRICT LOGIC
+def clean_filename(name):
+    for old_word, new_word in cleaner_dict.items():
+        if old_word in name: 
+            name = name.replace(old_word, new_word)
+    return name.strip()
+    # 🔥 STRICT LOGIC
 def get_strict_se_info(name):
     se = re.search(r'\b[Ss](\d+)\b', name)
     ep = re.search(r'\b(?:[Ee]|[Ee][Pp]|[Ee][Pp][Ii])(\d+)\b', name)
@@ -152,7 +151,6 @@ async def send_to_channel_logic(client, path, clean_name, uid):
         try: await client.send_media_group(LOG_CHANNEL, [enums.InputMediaPhoto(p) for p in ss_files])
         except: pass
         for f in ss_files: os.remove(f)
-
 # --- COMMANDS ---
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
@@ -177,7 +175,56 @@ async def manual_ss(client, message):
     await send_to_channel_logic(client, path, "Manual SS", message.from_user.id)
     await status.edit("✅ <b>Channel Sent!</b>")
     os.remove(path)
-    # 🔥 MAIN MEDIA HANDLER (For Caption Mode & Batch)
+
+# 🔥 SEARCH HANDLER
+@app.on_message(filters.command(["search", "series"]))
+async def search_handler(client, message):
+    if len(message.command) < 2: return await message.reply_text("Usage: /search Name")
+    query = " ".join(message.command[1:])
+    stype = "tv" if "series" in message.command[0] else "movie"
+    status = await message.reply_text(f"🔎 <b>Searching:</b> {query}...")
+    try:
+        url = f"https://api.themoviedb.org/3/search/{stype}?api_key={TMDB_API_KEY}&query={query}"
+        res = requests.get(url).json().get('results')
+        if not res: return await status.edit("❌ No images found!")
+        mid = res[0]['id']
+        title = res[0].get('name') if stype == 'tv' else res[0].get('title')
+        btn = InlineKeyboardMarkup([[InlineKeyboardButton("🖼 Poster", callback_data=f"type_poster_{stype}_{mid}_0"), InlineKeyboardButton("🎞 Thumbnail", callback_data=f"type_backdrop_{stype}_{mid}_0")]])
+        await status.edit(f"🎬 <b>{title}</b>", reply_markup=btn)
+    except Exception as e: await status.edit(f"Error: {e}")
+
+@app.on_callback_query(filters.regex("^type_"))
+async def type_callback(client, callback):
+    try:
+        _, img_type, stype, mid, s_num = callback.data.split("_")
+        btn = InlineKeyboardMarkup([[InlineKeyboardButton("1", callback_data=f"num_1_{img_type}_{stype}_{mid}_{s_num}"), InlineKeyboardButton("2", callback_data=f"num_2_{img_type}_{stype}_{mid}_{s_num}")], [InlineKeyboardButton("3", callback_data=f"num_3_{img_type}_{stype}_{mid}_{s_num}"), InlineKeyboardButton("4", callback_data=f"num_4_{img_type}_{stype}_{mid}_{s_num}")]])
+        await callback.message.edit(f"✅ <b>Select Count:</b>", reply_markup=btn)
+    except: pass
+
+@app.on_callback_query(filters.regex("^num_"))
+async def num_callback(client, callback):
+    try:
+        uid = callback.from_user.id
+        _, count, img_type, stype, mid, s_num = callback.data.split("_")
+        count = int(count)
+        await callback.answer("Sending...")
+        await callback.message.delete()
+        url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}"
+        data = requests.get(url).json()
+        pool = data.get('posters' if img_type == 'poster' else 'backdrops', [])
+        if not pool: return await client.send_message(uid, "❌ No images!")
+        wm_path = f"watermarks/{uid}.png"
+        for i, img_data in enumerate(pool[:count]):
+            full_url = f"https://image.tmdb.org/t/p/original{img_data['file_path']}"
+            temp_path = f"downloads/temp_{uid}_{i}.jpg"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(full_url) as resp:
+                    with open(temp_path, 'wb') as f: f.write(await resp.read())
+            if os.path.exists(wm_path): apply_watermark(temp_path, wm_path)
+            await client.send_photo(uid, photo=temp_path)
+            os.remove(temp_path)
+    except: pass
+# 🔥 MAIN MEDIA HANDLER
 @app.on_message(filters.private & (filters.photo | filters.document | filters.video | filters.audio))
 async def media_handler(client, message):
     uid = message.from_user.id
@@ -221,7 +268,7 @@ async def save_img_callback(client, callback):
         await callback.message.edit(f"✅ <b>Saved as {mode[:-1]}!</b>")
     except Exception as e: await callback.message.edit(f"❌ Error: {e}")
 
-# --- URL HANDLER (Fixed Copy Name) ---
+# --- URL HANDLER ---
 @app.on_message(filters.private & filters.regex(r"^https?://"))
 async def url_handler(client, message):
     uid = message.from_user.id
@@ -229,8 +276,6 @@ async def url_handler(client, message):
     real_name = await get_real_filename(message.text)
     download_queue[uid] = {'url': message.text, 'original_name': real_name}
     await status.delete()
-    
-    # ✅ FIX 1: Name ab <code> tag mein hai, click karte hi copy hoga
     await message.reply_text(f"📂 <b>File:</b> <code>{real_name}</code>\n📝 <b>New Name bhejein:</b>", reply_markup=ForceReply(True))
 
 @app.on_callback_query(filters.regex("^dl_"))
@@ -238,13 +283,10 @@ async def dl_process(client, callback):
     uid = callback.from_user.id
     data = download_queue.get(uid)
     if not data: return await callback.answer("Expired!")
-    
     url = data['url']; custom_name = data['name']
     mode = "video" if "vid" in callback.data else "doc"
-    
     await callback.message.delete()
     status = await callback.message.reply_text("📥 <b>Connecting...</b>")
-    
     path = ""
     try:
         start = time.time()
@@ -252,7 +294,6 @@ async def dl_process(client, callback):
         final_fname = clean_filename(f"{custom_name}{ext}")
         path = f"downloads/{uid}_{final_fname}"
         os.makedirs("downloads", exist_ok=True)
-        
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
                 total = int(resp.headers.get("Content-Length", 0))
@@ -264,21 +305,15 @@ async def dl_process(client, callback):
                         if time.time() - start > 5: await progress(dl, total, status, start, f"📥 Downloading")
         
         await send_to_channel_logic(client, path, custom_name, uid)
-
         await status.edit("📤 <b>Uploading...</b>")
         duration = get_duration(path)
         cap = get_fancy_caption(final_fname, humanbytes(os.path.getsize(path)), duration)
-        
         thumb_path = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
         if not thumb_path and os.path.exists(f"watermarks/{uid}.png"): thumb_path = f"watermarks/{uid}.png"
-        
         if mode == "video": await client.send_video(uid, path, caption=cap, duration=duration, thumb=thumb_path, progress=progress, progress_args=(status, time.time(), "📤 Uploading"))
         else: await client.send_document(uid, path, caption=cap, thumb=thumb_path, progress=progress, progress_args=(status, time.time(), "📤 Uploading"))
-        
-    except Exception as e: 
-        await status.edit(f"❌ Error: {e}")
+    except Exception as e: await status.edit(f"❌ Error: {e}")
     finally:
-        # ✅ FIX 2: Ye ab hamesha chalega, chahe error aaye ya nahi
         if path and os.path.exists(path): os.remove(path)
         if uid in download_queue: del download_queue[uid]
         try: await status.delete()
@@ -316,7 +351,6 @@ async def batch_run(client, callback):
     files = batch_data[uid]['files']; base = batch_data[uid]['name']
     mode = "video" if "vid" in callback.data else "doc"
     status = await callback.message.edit("🚀 <b>Processing...</b>")
-    
     for i, msg in enumerate(files):
         path = ""
         try:
@@ -325,17 +359,14 @@ async def batch_run(client, callback):
             ext = os.path.splitext(media.file_name or "")[1] or ".mkv"
             s, e = get_strict_se_info(media.file_name or "")
             new_name = f"{base} S{s}E{e}{ext}" if s and e else f"{base} - {i+1}{ext}"
-            
             cap = get_fancy_caption(new_name, humanbytes(os.path.getsize(path)), get_duration(path))
             if mode == "video": await client.send_video(uid, path, caption=cap)
             else: await client.send_document(uid, path, caption=cap)
         except: pass
         finally:
-            # ✅ FIX 3: Batch mode mein bhi auto-delete fix
             if path and os.path.exists(path): os.remove(path)
-            
     await status.edit("✅ Batch Complete!")
-    if uid in batch_data: del batch_data[uid]
+    del batch_data[uid]
 
 # --- START ---
 async def start_services():

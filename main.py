@@ -15,7 +15,7 @@ from hachoir.metadata import extractMetadata
 from hachoir.parser import createParser
 from aiohttp import web
 from pyrogram import Client, filters, enums
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply, InputMediaPhoto
 
 # --- CONFIGURATION ---
 API_ID = int(os.environ.get("API_ID", "23421127"))
@@ -28,7 +28,7 @@ LOG_CHANNEL = "@filmyflip_screenshots"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_v9_full", 
+    "filmy_pro_final_v10", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -130,12 +130,13 @@ async def progress(current, total, message, start_time, task_name):
     if round(diff % 5.00) == 0 or current == total:
         percentage = current * 100 / total
         completed = int(percentage // 10)
+        # ✅ Old Style Blocks
         bar = "■" * completed + "□" * (10 - completed)
         speed = current / diff if diff > 0 else 0
         eta = get_duration_str(round((total - current) / speed)) if speed > 0 else "0s"
         await message.edit(f"<b>{task_name}</b>\n\n<b>Progress:</b> [{bar}] {round(percentage, 1)}%\n<b>📂 Done:</b> {humanbytes(current)} / {humanbytes(total)}\n<b>⚡ Speed:</b> {humanbytes(speed)}/s\n<b>⏳ ETA:</b> {eta}")
 
-# ✅ FIX: Channel Logic - Ab ek-ek karke photo bhejega (No Topics Error)
+# ✅ FIX: Channel Logic - Sends photos one by one (No Topics Error)
 async def send_to_channel_logic(client, path, clean_name, uid):
     s, e = get_strict_se_info(clean_name)
     se_text = f" | 📺 Season: {s}" if s else ""
@@ -159,13 +160,10 @@ async def send_to_channel_logic(client, path, clean_name, uid):
             ss_files.append(out)
             
     if ss_files:
-        # Loop se bhejo taaki koi error na aaye
         for photo_path in ss_files:
             try:
                 await client.send_photo(LOG_CHANNEL, photo=photo_path)
             except: pass
-            
-        # Delete Screenshots
         for f in ss_files:
             if os.path.exists(f): os.remove(f)
 
@@ -197,7 +195,17 @@ async def manual_ss(client, message):
     await status.edit("✅ <b>Process Complete!</b>")
     if os.path.exists(path): os.remove(path)
 
-# --- HANDLERS ---
+# --- URL HANDLER (Must be above Text Handler) ---
+@app.on_message(filters.private & filters.regex(r"^https?://"))
+async def url_handler(client, message):
+    uid = message.from_user.id
+    status = await message.reply_text("🔗 <b>Checking...</b>")
+    real_name = await get_real_filename(message.text)
+    download_queue[uid] = {'url': message.text, 'original_name': real_name}
+    await status.delete()
+    await message.reply_text(f"📂 <b>File:</b> <code>{real_name}</code>\n📝 <b>New Name bhejein:</b>")
+
+# --- MEDIA HANDLER ---
 @app.on_message(filters.private & (filters.photo | filters.document | filters.video | filters.audio))
 async def media_handler(client, message):
     uid = message.from_user.id
@@ -240,7 +248,7 @@ async def save_img_callback(client, callback):
         await callback.message.edit(f"✅ <b>Saved as {mode[:-1]}!</b>")
     except Exception as e: await callback.message.edit(f"❌ Error: {e}")
 
-# 🔥 TEXT HANDLER (URL aur Batch ke liye zaroori)
+# 🔥 TEXT HANDLER (Must be last)
 @app.on_message(filters.private & filters.text)
 async def text_handler(client, message):
     if message.text.startswith("/"): return
@@ -259,16 +267,7 @@ async def text_handler(client, message):
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Start Video", callback_data="batch_run_vid"), InlineKeyboardButton("📁 Start File", callback_data="batch_run_doc")]])
         await message.reply_text(f"✅ Batch Name: {message.text}\nStart?", reply_markup=btn)
 
-# --- URL HANDLER ---
-@app.on_message(filters.private & filters.regex(r"^https?://"))
-async def url_handler(client, message):
-    uid = message.from_user.id
-    status = await message.reply_text("🔗 <b>Checking...</b>")
-    real_name = await get_real_filename(message.text)
-    download_queue[uid] = {'url': message.text, 'original_name': real_name}
-    await status.delete()
-    await message.reply_text(f"📂 <b>File:</b> <code>{real_name}</code>\n📝 <b>New Name bhejein:</b>")
-
+# --- PROCESS HANDLERS ---
 @app.on_callback_query(filters.regex("^dl_"))
 async def dl_process(client, callback):
     uid = callback.from_user.id
@@ -295,7 +294,6 @@ async def dl_process(client, callback):
                         f.write(chunk); dl += len(chunk)
                         if time.time() - start > 5: await progress(dl, total, status, start, f"📥 Downloading")
         
-        # Channel Forwarding (One by one photo)
         await send_to_channel_logic(client, path, custom_name, uid)
         
         await status.edit("📤 <b>Uploading...</b>")
@@ -329,10 +327,7 @@ async def batch_run(client, callback):
             s, e = get_strict_se_info(media.file_name or "")
             new_name = f"{base} S{s}E{e}{ext}" if s and e else f"{base} - {i+1}{ext}"
             cap = get_fancy_caption(new_name, humanbytes(os.path.getsize(path)), get_duration(path))
-            
-            # Channel Forwarding
             await send_to_channel_logic(client, path, new_name, uid)
-            
             if mode == "video": await client.send_video(uid, path, caption=cap)
             else: await client.send_document(uid, path, caption=cap)
         except: pass
@@ -354,3 +349,4 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
+

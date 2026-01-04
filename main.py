@@ -15,8 +15,7 @@ from hachoir.metadata import extractMetadata
 from hachoir.parser import createParser
 from aiohttp import web
 from pyrogram import Client, filters, enums
-# ✅ FIX: InputMediaPhoto ab sahi jagah se import ho raha hai
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply, InputMediaPhoto
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
 
 # --- CONFIGURATION ---
 API_ID = int(os.environ.get("API_ID", "23421127"))
@@ -29,7 +28,7 @@ LOG_CHANNEL = "@filmyflip_screenshots"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_fixed_v7", 
+    "filmy_pro_v9_bulletproof", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -55,7 +54,9 @@ def humanbytes(size):
     if not size: return "0 B"
     power = 2**10; n = 0
     dic_power = {0: ' ', 1: 'K', 2: 'M', 3: 'G', 4: 'T'}
-    while size > power: size /= power; n += 1
+    while size > power: 
+        size /= power
+        n += 1
     return str(round(size, 2)) + " " + dic_power[n] + 'B'
 
 def get_duration(filepath):
@@ -84,9 +85,11 @@ async def get_real_filename(url):
 
 def clean_filename(name):
     for old_word, new_word in cleaner_dict.items():
-        if old_word in name: name = name.replace(old_word, new_word)
+        if old_word in name: 
+            name = name.replace(old_word, new_word)
     return name.strip()
-    # 🔥 STRICT LOGIC
+
+# --- LOGIC ---
 def get_strict_se_info(name):
     se = re.search(r'\b[Ss](\d+)\b', name)
     ep = re.search(r'\b(?:[Ee]|[Ee][Pp]|[Ee][Pp][Ii])(\d+)\b', name)
@@ -94,7 +97,6 @@ def get_strict_se_info(name):
     e = ep.group(1) if ep else None
     return s, e
 
-# 🔥 CAPTION GENERATOR
 def get_fancy_caption(filename, filesize, duration=0):
     final_display_name = clean_filename(filename)
     safe_name = html.escape(final_display_name)
@@ -108,7 +110,6 @@ def get_fancy_caption(filename, filesize, duration=0):
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME}</b></blockquote>"
     return caption
 
-# 🔥 WATERMARK LOGIC
 def apply_watermark(base_path, wm_path):
     try:
         base = Image.open(base_path).convert("RGBA")
@@ -123,19 +124,18 @@ def apply_watermark(base_path, wm_path):
         return base_path
     except: return base_path
 
-# ✅ PROGRESS BAR FIXED (Old Style)
 async def progress(current, total, message, start_time, task_name):
     now = time.time()
     diff = now - start_time
     if round(diff % 5.00) == 0 or current == total:
         percentage = current * 100 / total
         completed = int(percentage // 10)
-        bar = "▰" * completed + "▱" * (10 - completed)
+        bar = "■" * completed + "□" * (10 - completed)
         speed = current / diff if diff > 0 else 0
         eta = get_duration_str(round((total - current) / speed)) if speed > 0 else "0s"
-        await message.edit(f"<b>{task_name}</b>\n[{bar}] {round(percentage, 1)}%\n⚡ {humanbytes(speed)}/s | ⏳ {eta}")
+        await message.edit(f"<b>{task_name}</b>\n\n<b>Progress:</b> [{bar}] {round(percentage, 1)}%\n<b>📂 Done:</b> {humanbytes(current)} / {humanbytes(total)}\n<b>⚡ Speed:</b> {humanbytes(speed)}/s\n<b>⏳ ETA:</b> {eta}")
 
-# ✅ CHANNEL LOGIC FIXED (InputMediaPhoto Use)
+# ✅ FIX: Channel Logic - Ab ek-ek karke photo bhejega (No Topics Error)
 async def send_to_channel_logic(client, path, clean_name, uid):
     s, e = get_strict_se_info(clean_name)
     se_text = f" | 📺 Season: {s}" if s else ""
@@ -159,16 +159,17 @@ async def send_to_channel_logic(client, path, clean_name, uid):
             ss_files.append(out)
             
     if ss_files:
-        try:
-            # ✅ Yahan Fix kiya gaya hai
-            await client.send_media_group(LOG_CHANNEL, [InputMediaPhoto(p) for p in ss_files])
-        except Exception as e:
-            try: await client.send_message(uid, f"⚠️ <b>Channel Media Error:</b> {e}")
+        # Loop se bhejo taaki koi error na aaye
+        for photo_path in ss_files:
+            try:
+                await client.send_photo(LOG_CHANNEL, photo=photo_path)
             except: pass
             
+        # Delete Screenshots
         for f in ss_files:
             if os.path.exists(f): os.remove(f)
-                # --- COMMANDS ---
+
+# --- COMMANDS ---
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
     await message.reply_text(f"👋 <b>Hello {message.from_user.first_name}!</b>\nCommands: /add, /caption, /ss, /batch")
@@ -196,7 +197,7 @@ async def manual_ss(client, message):
     await status.edit("✅ <b>Process Complete!</b>")
     if os.path.exists(path): os.remove(path)
 
-# 🔥 MAIN MEDIA HANDLER
+# --- HANDLERS ---
 @app.on_message(filters.private & (filters.photo | filters.document | filters.video | filters.audio))
 async def media_handler(client, message):
     uid = message.from_user.id
@@ -239,6 +240,25 @@ async def save_img_callback(client, callback):
         await callback.message.edit(f"✅ <b>Saved as {mode[:-1]}!</b>")
     except Exception as e: await callback.message.edit(f"❌ Error: {e}")
 
+# 🔥 TEXT HANDLER (URL aur Batch ke liye zaroori)
+@app.on_message(filters.private & filters.text)
+async def text_handler(client, message):
+    if message.text.startswith("/"): return
+    uid = message.from_user.id
+    
+    # URL Uploader Logic
+    if uid in download_queue and 'name' not in download_queue[uid]:
+        download_queue[uid]['name'] = message.text
+        btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="dl_vid"), InlineKeyboardButton("📁 File", callback_data="dl_doc")]])
+        await message.reply_text(f"✅ Name: <b>{message.text}</b>\nFormat select karein:", reply_markup=btn)
+        return
+
+    # Batch Logic
+    if uid in batch_data and batch_data[uid].get('step') == 'naming':
+        batch_data[uid]['name'] = message.text
+        btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Start Video", callback_data="batch_run_vid"), InlineKeyboardButton("📁 Start File", callback_data="batch_run_doc")]])
+        await message.reply_text(f"✅ Batch Name: {message.text}\nStart?", reply_markup=btn)
+
 # --- URL HANDLER ---
 @app.on_message(filters.private & filters.regex(r"^https?://"))
 async def url_handler(client, message):
@@ -247,7 +267,7 @@ async def url_handler(client, message):
     real_name = await get_real_filename(message.text)
     download_queue[uid] = {'url': message.text, 'original_name': real_name}
     await status.delete()
-    await message.reply_text(f"📂 <b>File:</b> <code>{real_name}</code>\n📝 <b>New Name bhejein:</b>", reply_markup=ForceReply(True))
+    await message.reply_text(f"📂 <b>File:</b> <code>{real_name}</code>\n📝 <b>New Name bhejein:</b>")
 
 @app.on_callback_query(filters.regex("^dl_"))
 async def dl_process(client, callback):
@@ -275,7 +295,7 @@ async def dl_process(client, callback):
                         f.write(chunk); dl += len(chunk)
                         if time.time() - start > 5: await progress(dl, total, status, start, f"📥 Downloading")
         
-        # Channel Forwarding (Ab ye crash nahi karega)
+        # Channel Forwarding (One by one photo)
         await send_to_channel_logic(client, path, custom_name, uid)
         
         await status.edit("📤 <b>Uploading...</b>")
@@ -293,6 +313,33 @@ async def dl_process(client, callback):
         if uid in download_queue: del download_queue[uid]
         try: await status.delete()
         except: pass
+
+@app.on_callback_query(filters.regex("^batch_run_"))
+async def batch_run(client, callback):
+    uid = callback.from_user.id
+    files = batch_data[uid]['files']; base = batch_data[uid]['name']
+    mode = "video" if "vid" in callback.data else "doc"
+    status = await callback.message.edit("🚀 <b>Processing...</b>")
+    for i, msg in enumerate(files):
+        path = ""
+        try:
+            media = msg.video or msg.document
+            path = await client.download_media(media)
+            ext = os.path.splitext(media.file_name or "")[1] or ".mkv"
+            s, e = get_strict_se_info(media.file_name or "")
+            new_name = f"{base} S{s}E{e}{ext}" if s and e else f"{base} - {i+1}{ext}"
+            cap = get_fancy_caption(new_name, humanbytes(os.path.getsize(path)), get_duration(path))
+            
+            # Channel Forwarding
+            await send_to_channel_logic(client, path, new_name, uid)
+            
+            if mode == "video": await client.send_video(uid, path, caption=cap)
+            else: await client.send_document(uid, path, caption=cap)
+        except: pass
+        finally:
+            if path and os.path.exists(path): os.remove(path)
+    await status.edit("✅ Batch Complete!")
+    del batch_data[uid]
 
 # --- START ---
 async def start_services():

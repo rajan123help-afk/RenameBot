@@ -28,7 +28,7 @@ LOG_CHANNEL = "@filmyflip_screenshots"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_v9_bulletproof", 
+    "filmy_pro_v9_full", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -354,4 +354,3 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
-    

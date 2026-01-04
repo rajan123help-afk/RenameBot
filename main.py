@@ -28,7 +28,7 @@ LOG_CHANNEL = "@filmyflip_screenshots"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_v12_final", 
+    "filmy_pro_v15_final", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -139,7 +139,6 @@ async def send_to_channel_logic(client, path, clean_name, uid):
     s, e = get_strict_se_info(clean_name)
     se_text = f" | 📺 Season: {s}" if s else ""
     se_text += f" | 🧩 Episode: {e}" if e else ""
-    
     try:
         await client.send_message(LOG_CHANNEL, f"✨ <b>New Upload</b>\n🎬 <b>Title:</b> {clean_name}{se_text}")
     except Exception as e:
@@ -156,11 +155,9 @@ async def send_to_channel_logic(client, path, clean_name, uid):
             if os.path.exists(f"watermarks/{uid}.png"):
                 apply_watermark(out, f"watermarks/{uid}.png")
             ss_files.append(out)
-            
     if ss_files:
         for photo_path in ss_files:
-            try:
-                await client.send_photo(LOG_CHANNEL, photo=photo_path)
+            try: await client.send_photo(LOG_CHANNEL, photo=photo_path)
             except: pass
         for f in ss_files:
             if os.path.exists(f): os.remove(f)
@@ -193,42 +190,26 @@ async def manual_ss(client, message):
     await status.edit("✅ <b>Process Complete!</b>")
     if os.path.exists(path): os.remove(path)
 
-# 🔥 NEW: BLOGGER LINK CONVERTER (/link)
+# --- LINK CONVERTER MODE ---
 @app.on_message(filters.command("link") & filters.private)
-async def link_generator(client, message):
-    if not message.reply_to_message:
-        return await message.reply_text("⚠️ <b>Kisi File par Reply karke /link commands dein.</b>")
-    
-    media = message.reply_to_message.video or message.reply_to_message.document
-    if not media:
-        return await message.reply_text("⚠️ <b>Sirf Video ya Document par reply karein.</b>")
-    
-    # Simple logic: File ka original Telegram Link generate karna
-    # Note: Private bots public link nahi bana sakte bina 'Stream Bot' ke.
-    # Lekin aapke 'Blogger' setup ke liye main ek dummy logic de raha hu
-    # Jo aapke 'Blogger_URL' me file name ya ID jod dega.
-    
-    try:
-        file_name = media.file_name or "video.mkv"
-        # Blogger URL format: https://yoursite.com/p/download.html?file=NAME
-        # Encoding name to make it URL safe
-        encoded_name = base64.urlsafe_b64encode(file_name.encode()).decode()
-        
-        final_link = f"{BLOGGER_URL}?file={encoded_name}"
-        
-        await message.reply_text(f"🔗 <b>Blogger Link:</b>\n\n<code>{final_link}</code>\n\n⚠️ <i>Note: Ye link tabhi chalega agar aapke Blogger theme me decoding script lagi ho.</i>")
-    except Exception as e:
-        await message.reply_text(f"❌ Error: {e}")
+async def link_mode_toggle(client, message):
+    user_modes[message.from_user.id] = "link"
+    await message.reply_text("🔗 <b>Link Convert Mode ON!</b>\n\nAb aap File Store Bot ke links bhejein, main unhe Blogger Links me badal dunga.\n\n(Mode hatane ke liye /caption dabayein)")
 
-# --- URL HANDLER (Text Handler se Upar) ---
+# --- URL HANDLER (Direct Downloads) ---
 @app.on_message(filters.private & filters.regex(r"^https?://"))
 async def url_handler(client, message):
     uid = message.from_user.id
+    
+    # Agar Link Mode ON hai, to download mat karo, convert karo
+    if user_modes.get(uid) == "link":
+        # Let text_handler handle it
+        await text_handler(client, message)
+        return
+
     status = await message.reply_text("🔗 <b>Checking...</b>")
     real_name = await get_real_filename(message.text)
-    
     prompt = await message.reply_text(f"📂 <b>File:</b> <code>{real_name}</code>\n📝 <b>New Name bhejein:</b>")
-    
     download_queue[uid] = {
         'url': message.text, 
         'original_name': real_name,
@@ -258,7 +239,6 @@ async def media_handler(client, message):
             await message.copy(uid, caption=cap)
         return
 
-    # Batch Logic Update
     if uid in batch_data and 'step' not in batch_data[uid]:
         batch_data[uid]['files'].append(message)
         await message.reply_text(f"✅ Added to Batch (Total: {len(batch_data[uid]['files'])})")
@@ -279,7 +259,7 @@ async def save_img_callback(client, callback):
         await callback.message.edit(f"✅ <b>Saved as {mode[:-1]}!</b>")
     except Exception as e: await callback.message.edit(f"❌ Error: {e}")
 
-# --- BATCH START ---
+# --- BATCH ---
 @app.on_message(filters.command("batch") & filters.private)
 async def batch_start(client, message):
     batch_data[message.from_user.id] = {'files': []}
@@ -290,20 +270,42 @@ async def batch_done(client, message):
     uid = message.from_user.id
     if uid in batch_data:
         batch_data[uid]['step'] = 'naming'
-        await message.reply_text("📝 <b>Batch ke liye Name bhejein:</b>", reply_markup=ForceReply(True))
+        await message.reply_text("📝 <b>Batch Name bhejein:</b>\n(e.g., 'Mirzapur')")
     else:
         await message.reply_text("⚠️ Pehle /batch start karein.")
 
-# 🔥 TEXT HANDLER (Fixed for Batch & URL)
+# 🔥 MAIN TEXT HANDLER (URL Name, Batch Name, Link Convert)
 @app.on_message(filters.private & filters.text)
 async def text_handler(client, message):
     if message.text.startswith("/"): return
     uid = message.from_user.id
     
-    # 1. URL Uploader Logic
+    # 1. LINK CONVERT MODE
+    if user_modes.get(uid) == "link":
+        user_link = message.text
+        # Logic: Extract 'start' param from Telegram link if possible
+        code = ""
+        if "start=" in user_link:
+            try: code = user_link.split("start=")[1].split()[0]
+            except: pass
+        elif "file=" in user_link:
+             try: code = user_link.split("file=")[1].split()[0]
+             except: pass
+        
+        # Agar code nahi mila, to pure link ko encode kar do (Fallback)
+        if not code:
+             # Simple logic: assume user sent ID or clean link
+             # Or just use the whole text if it looks like an ID
+             code = user_link.strip()
+
+        # Final Blogger Link
+        final_link = f"{BLOGGER_URL}?file={code}"
+        await message.reply_text(f"🔗 <b>Blogger Link:</b>\n<code>{final_link}</code>")
+        return
+
+    # 2. URL Uploader Name Input
     if uid in download_queue and 'name' not in download_queue[uid]:
         download_queue[uid]['name'] = message.text
-        
         # Auto Delete Logic
         try: await message.delete()
         except: pass
@@ -315,7 +317,7 @@ async def text_handler(client, message):
         await message.reply_text(f"✅ Name: <b>{message.text}</b>\nFormat select karein:", reply_markup=btn)
         return
 
-    # 2. Batch Logic (FIXED)
+    # 3. Batch Naming
     if uid in batch_data and batch_data[uid].get('step') == 'naming':
         batch_data[uid]['name'] = message.text
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Start Video", callback_data="batch_run_vid"), InlineKeyboardButton("📁 Start File", callback_data="batch_run_doc")]])
@@ -381,16 +383,13 @@ async def batch_run(client, callback):
             path = await client.download_media(media)
             ext = os.path.splitext(media.file_name or "")[1] or ".mkv"
             s, e = get_strict_se_info(media.file_name or "")
-            # Smart Naming Logic for Batch
             if s and e:
                 new_name = f"{base} S{s}E{e}{ext}"
             else:
                 new_name = f"{base} - {i+1}{ext}"
             
             cap = get_fancy_caption(new_name, humanbytes(os.path.getsize(path)), get_duration(path))
-            
             await send_to_channel_logic(client, path, new_name, uid)
-            
             if mode == "video": await client.send_video(uid, path, caption=cap)
             else: await client.send_document(uid, path, caption=cap)
         except: pass
@@ -412,4 +411,4 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
-                
+        

@@ -28,7 +28,7 @@ LOG_CHANNEL = "@filmyflip_screenshots"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_final_v10", 
+    "filmy_pro_v12_final", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -130,13 +130,11 @@ async def progress(current, total, message, start_time, task_name):
     if round(diff % 5.00) == 0 or current == total:
         percentage = current * 100 / total
         completed = int(percentage // 10)
-        # ✅ Old Style Blocks
         bar = "■" * completed + "□" * (10 - completed)
         speed = current / diff if diff > 0 else 0
         eta = get_duration_str(round((total - current) / speed)) if speed > 0 else "0s"
         await message.edit(f"<b>{task_name}</b>\n\n<b>Progress:</b> [{bar}] {round(percentage, 1)}%\n<b>📂 Done:</b> {humanbytes(current)} / {humanbytes(total)}\n<b>⚡ Speed:</b> {humanbytes(speed)}/s\n<b>⏳ ETA:</b> {eta}")
 
-# ✅ FIX: Channel Logic - Sends photos one by one (No Topics Error)
 async def send_to_channel_logic(client, path, clean_name, uid):
     s, e = get_strict_se_info(clean_name)
     se_text = f" | 📺 Season: {s}" if s else ""
@@ -170,7 +168,7 @@ async def send_to_channel_logic(client, path, clean_name, uid):
 # --- COMMANDS ---
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
-    await message.reply_text(f"👋 <b>Hello {message.from_user.first_name}!</b>\nCommands: /add, /caption, /ss, /batch")
+    await message.reply_text(f"👋 <b>Hello {message.from_user.first_name}!</b>\nCommands: /add, /caption, /ss, /batch, /link")
 
 @app.on_message(filters.command("caption") & filters.private)
 async def set_caption_mode(client, message):
@@ -195,15 +193,47 @@ async def manual_ss(client, message):
     await status.edit("✅ <b>Process Complete!</b>")
     if os.path.exists(path): os.remove(path)
 
-# --- URL HANDLER (Must be above Text Handler) ---
+# 🔥 NEW: BLOGGER LINK CONVERTER (/link)
+@app.on_message(filters.command("link") & filters.private)
+async def link_generator(client, message):
+    if not message.reply_to_message:
+        return await message.reply_text("⚠️ <b>Kisi File par Reply karke /link commands dein.</b>")
+    
+    media = message.reply_to_message.video or message.reply_to_message.document
+    if not media:
+        return await message.reply_text("⚠️ <b>Sirf Video ya Document par reply karein.</b>")
+    
+    # Simple logic: File ka original Telegram Link generate karna
+    # Note: Private bots public link nahi bana sakte bina 'Stream Bot' ke.
+    # Lekin aapke 'Blogger' setup ke liye main ek dummy logic de raha hu
+    # Jo aapke 'Blogger_URL' me file name ya ID jod dega.
+    
+    try:
+        file_name = media.file_name or "video.mkv"
+        # Blogger URL format: https://yoursite.com/p/download.html?file=NAME
+        # Encoding name to make it URL safe
+        encoded_name = base64.urlsafe_b64encode(file_name.encode()).decode()
+        
+        final_link = f"{BLOGGER_URL}?file={encoded_name}"
+        
+        await message.reply_text(f"🔗 <b>Blogger Link:</b>\n\n<code>{final_link}</code>\n\n⚠️ <i>Note: Ye link tabhi chalega agar aapke Blogger theme me decoding script lagi ho.</i>")
+    except Exception as e:
+        await message.reply_text(f"❌ Error: {e}")
+
+# --- URL HANDLER (Text Handler se Upar) ---
 @app.on_message(filters.private & filters.regex(r"^https?://"))
 async def url_handler(client, message):
     uid = message.from_user.id
     status = await message.reply_text("🔗 <b>Checking...</b>")
     real_name = await get_real_filename(message.text)
-    download_queue[uid] = {'url': message.text, 'original_name': real_name}
-    await status.delete()
-    await message.reply_text(f"📂 <b>File:</b> <code>{real_name}</code>\n📝 <b>New Name bhejein:</b>")
+    
+    prompt = await message.reply_text(f"📂 <b>File:</b> <code>{real_name}</code>\n📝 <b>New Name bhejein:</b>")
+    
+    download_queue[uid] = {
+        'url': message.text, 
+        'original_name': real_name,
+        'msg_ids_to_delete': [message.id, status.id, prompt.id]
+    }
 
 # --- MEDIA HANDLER ---
 @app.on_message(filters.private & (filters.photo | filters.document | filters.video | filters.audio))
@@ -228,6 +258,7 @@ async def media_handler(client, message):
             await message.copy(uid, caption=cap)
         return
 
+    # Batch Logic Update
     if uid in batch_data and 'step' not in batch_data[uid]:
         batch_data[uid]['files'].append(message)
         await message.reply_text(f"✅ Added to Batch (Total: {len(batch_data[uid]['files'])})")
@@ -248,24 +279,48 @@ async def save_img_callback(client, callback):
         await callback.message.edit(f"✅ <b>Saved as {mode[:-1]}!</b>")
     except Exception as e: await callback.message.edit(f"❌ Error: {e}")
 
-# 🔥 TEXT HANDLER (Must be last)
+# --- BATCH START ---
+@app.on_message(filters.command("batch") & filters.private)
+async def batch_start(client, message):
+    batch_data[message.from_user.id] = {'files': []}
+    await message.reply_text("📦 <b>Batch Mode ON!</b>\nFiles forward karein, fir /done dabayein.")
+
+@app.on_message(filters.command("done") & filters.private)
+async def batch_done(client, message):
+    uid = message.from_user.id
+    if uid in batch_data:
+        batch_data[uid]['step'] = 'naming'
+        await message.reply_text("📝 <b>Batch ke liye Name bhejein:</b>", reply_markup=ForceReply(True))
+    else:
+        await message.reply_text("⚠️ Pehle /batch start karein.")
+
+# 🔥 TEXT HANDLER (Fixed for Batch & URL)
 @app.on_message(filters.private & filters.text)
 async def text_handler(client, message):
     if message.text.startswith("/"): return
     uid = message.from_user.id
     
-    # URL Uploader Logic
+    # 1. URL Uploader Logic
     if uid in download_queue and 'name' not in download_queue[uid]:
         download_queue[uid]['name'] = message.text
+        
+        # Auto Delete Logic
+        try: await message.delete()
+        except: pass
+        if 'msg_ids_to_delete' in download_queue[uid]:
+            try: await client.delete_messages(message.chat.id, download_queue[uid]['msg_ids_to_delete'])
+            except: pass
+
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="dl_vid"), InlineKeyboardButton("📁 File", callback_data="dl_doc")]])
         await message.reply_text(f"✅ Name: <b>{message.text}</b>\nFormat select karein:", reply_markup=btn)
         return
 
-    # Batch Logic
+    # 2. Batch Logic (FIXED)
     if uid in batch_data and batch_data[uid].get('step') == 'naming':
         batch_data[uid]['name'] = message.text
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Start Video", callback_data="batch_run_vid"), InlineKeyboardButton("📁 Start File", callback_data="batch_run_doc")]])
-        await message.reply_text(f"✅ Batch Name: {message.text}\nStart?", reply_markup=btn)
+        await message.reply_text(f"✅ Batch Name: {message.text}\nStart Processing?", reply_markup=btn)
+        return
 
 # --- PROCESS HANDLERS ---
 @app.on_callback_query(filters.regex("^dl_"))
@@ -275,6 +330,7 @@ async def dl_process(client, callback):
     if not data: return await callback.answer("Expired!")
     url = data['url']; custom_name = data['name']
     mode = "video" if "vid" in callback.data else "doc"
+    
     await callback.message.delete()
     status = await callback.message.reply_text("📥 <b>Connecting...</b>")
     path = ""
@@ -317,7 +373,7 @@ async def batch_run(client, callback):
     uid = callback.from_user.id
     files = batch_data[uid]['files']; base = batch_data[uid]['name']
     mode = "video" if "vid" in callback.data else "doc"
-    status = await callback.message.edit("🚀 <b>Processing...</b>")
+    status = await callback.message.edit("🚀 <b>Processing Batch...</b>")
     for i, msg in enumerate(files):
         path = ""
         try:
@@ -325,9 +381,16 @@ async def batch_run(client, callback):
             path = await client.download_media(media)
             ext = os.path.splitext(media.file_name or "")[1] or ".mkv"
             s, e = get_strict_se_info(media.file_name or "")
-            new_name = f"{base} S{s}E{e}{ext}" if s and e else f"{base} - {i+1}{ext}"
+            # Smart Naming Logic for Batch
+            if s and e:
+                new_name = f"{base} S{s}E{e}{ext}"
+            else:
+                new_name = f"{base} - {i+1}{ext}"
+            
             cap = get_fancy_caption(new_name, humanbytes(os.path.getsize(path)), get_duration(path))
+            
             await send_to_channel_logic(client, path, new_name, uid)
+            
             if mode == "video": await client.send_video(uid, path, caption=cap)
             else: await client.send_document(uid, path, caption=cap)
         except: pass
@@ -349,4 +412,4 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
-
+                

@@ -15,7 +15,8 @@ from hachoir.metadata import extractMetadata
 from hachoir.parser import createParser
 from aiohttp import web
 from pyrogram import Client, filters, enums
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
+# ✅ FIX: InputMediaPhoto ab sahi jagah se import ho raha hai
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply, InputMediaPhoto
 
 # --- CONFIGURATION ---
 API_ID = int(os.environ.get("API_ID", "23421127"))
@@ -24,11 +25,11 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "8404232346:AAGiYT6p7mssrLQ8DtoYk8i36dju
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "d13cc5e0d0e2ec0d878bbf6276325040")
 CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
-LOG_CHANNEL = "@filmyflip_screenshots" # Make sure bot is Admin here
+LOG_CHANNEL = "@filmyflip_screenshots"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_debug_v1", 
+    "filmy_pro_fixed_v7", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -37,7 +38,7 @@ app = Client(
     max_concurrent_transmissions=4
 )
 
-# --- GLOBAL VARS ---
+# --- GLOBAL VARIABLES ---
 user_modes = {}
 batch_data = {}
 download_queue = {} 
@@ -122,58 +123,47 @@ def apply_watermark(base_path, wm_path):
         return base_path
     except: return base_path
 
+# ✅ PROGRESS BAR FIXED (Old Style)
 async def progress(current, total, message, start_time, task_name):
     now = time.time()
     diff = now - start_time
     if round(diff % 5.00) == 0 or current == total:
         percentage = current * 100 / total
-        bar = "■" * int(percentage // 10) + "□" * (10 - int(percentage // 10))
+        completed = int(percentage // 10)
+        bar = "▰" * completed + "▱" * (10 - completed)
         speed = current / diff if diff > 0 else 0
-        await message.edit(f"<b>{task_name}</b>\n[{bar}] {round(percentage, 1)}%\n⚡ {humanbytes(speed)}/s")
+        eta = get_duration_str(round((total - current) / speed)) if speed > 0 else "0s"
+        await message.edit(f"<b>{task_name}</b>\n[{bar}] {round(percentage, 1)}%\n⚡ {humanbytes(speed)}/s | ⏳ {eta}")
 
-# 🔥 DEBUGGED CHANNEL LOGIC (Ab ye error batayega)
+# ✅ CHANNEL LOGIC FIXED (InputMediaPhoto Use)
 async def send_to_channel_logic(client, path, clean_name, uid):
     s, e = get_strict_se_info(clean_name)
     se_text = f" | 📺 Season: {s}" if s else ""
     se_text += f" | 🧩 Episode: {e}" if e else ""
     
-    # 1. Title Bhejo
     try:
         await client.send_message(LOG_CHANNEL, f"✨ <b>New Upload</b>\n🎬 <b>Title:</b> {clean_name}{se_text}")
-    except Exception as err:
-        try: await client.send_message(uid, f"⚠️ <b>Channel Title Error:</b> {err}")
+    except Exception as e:
+        try: await client.send_message(uid, f"⚠️ <b>Channel Title Error:</b> {e}")
         except: pass
 
-    # 2. Screenshots Generate Karo
     duration = get_duration(path)
-    if duration == 0:
-        try: await client.send_message(uid, "⚠️ <b>Error:</b> Video duration 0 detect hui, SS nahi banenge.")
-        except: pass
-        return
-
     ss_files = []
     for i in range(1, 11):
         ts = (duration // 11) * i
         out = f"ss_{uid}_{i}.jpg"
-        # FFMPEG Check
-        exit_code = os.system(f'ffmpeg -ss {ts} -i "{path}" -frames:v 1 "{out}" -y -loglevel quiet')
-        if exit_code != 0 or not os.path.exists(out):
-            # Agar pehla fail hua to user ko bata do
-            if i == 1: 
-                try: await client.send_message(uid, "⚠️ <b>FFMPEG Error:</b> Screenshots generate nahi ho pa rahe. Shayad server par ffmpeg installed nahi hai.")
-                except: pass
-            continue
-        
-        if os.path.exists(f"watermarks/{uid}.png"):
-            apply_watermark(out, f"watermarks/{uid}.png")
-        ss_files.append(out)
+        os.system(f'ffmpeg -ss {ts} -i "{path}" -frames:v 1 "{out}" -y -loglevel quiet')
+        if os.path.exists(out):
+            if os.path.exists(f"watermarks/{uid}.png"):
+                apply_watermark(out, f"watermarks/{uid}.png")
+            ss_files.append(out)
             
-    # 3. Screenshots Bhejo
     if ss_files:
         try:
-            await client.send_media_group(LOG_CHANNEL, [enums.InputMediaPhoto(p) for p in ss_files])
-        except Exception as err:
-            try: await client.send_message(uid, f"⚠️ <b>Channel Media Error:</b> {err}")
+            # ✅ Yahan Fix kiya gaya hai
+            await client.send_media_group(LOG_CHANNEL, [InputMediaPhoto(p) for p in ss_files])
+        except Exception as e:
+            try: await client.send_message(uid, f"⚠️ <b>Channel Media Error:</b> {e}")
             except: pass
             
         for f in ss_files:
@@ -199,12 +189,9 @@ async def manual_ss(client, message):
     v = await message.chat.ask("🎬 <b>Video bhejein:</b>")
     status = await message.reply("⏳ <b>Processing...</b>")
     path = await client.download_media(v)
-    
-    # 🔥 FIX: Ab ye Real Name nikalega, "Manual SS" nahi
     real_name = "Video"
     if v.video: real_name = v.video.file_name or "Video"
     elif v.document: real_name = v.document.file_name or "File"
-    
     await send_to_channel_logic(client, path, real_name, message.from_user.id)
     await status.edit("✅ <b>Process Complete!</b>")
     if os.path.exists(path): os.remove(path)
@@ -288,21 +275,18 @@ async def dl_process(client, callback):
                         f.write(chunk); dl += len(chunk)
                         if time.time() - start > 5: await progress(dl, total, status, start, f"📥 Downloading")
         
+        # Channel Forwarding (Ab ye crash nahi karega)
         await send_to_channel_logic(client, path, custom_name, uid)
         
-        # 🔥 DEBUGGED UPLOAD LOGIC
         await status.edit("📤 <b>Uploading...</b>")
         duration = get_duration(path)
         cap = get_fancy_caption(final_fname, humanbytes(os.path.getsize(path)), duration)
         thumb_path = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
         if not thumb_path and os.path.exists(f"watermarks/{uid}.png"): thumb_path = f"watermarks/{uid}.png"
         
-        try:
-            if mode == "video": await client.send_video(uid, path, caption=cap, duration=duration, thumb=thumb_path, progress=progress, progress_args=(status, time.time(), "📤 Uploading"))
-            else: await client.send_document(uid, path, caption=cap, thumb=thumb_path, progress=progress, progress_args=(status, time.time(), "📤 Uploading"))
-        except Exception as upload_err:
-            await client.send_message(uid, f"❌ <b>Upload Failed:</b> {upload_err}\n(File shayad 2GB se badi hai ya network issue hai)")
-
+        if mode == "video": await client.send_video(uid, path, caption=cap, duration=duration, thumb=thumb_path, progress=progress, progress_args=(status, time.time(), "📤 Uploading"))
+        else: await client.send_document(uid, path, caption=cap, thumb=thumb_path, progress=progress, progress_args=(status, time.time(), "📤 Uploading"))
+    
     except Exception as e: await status.edit(f"❌ Error: {e}")
     finally:
         if path and os.path.exists(path): os.remove(path)
@@ -323,4 +307,4 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
-        
+    

@@ -1,3 +1,4 @@
+
 import os
 import time
 import math
@@ -29,7 +30,7 @@ LOG_CHANNEL = "@filmyflip_screenshots"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_v21_final_fix", 
+    "filmy_pro_v23_final", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -117,7 +118,6 @@ def apply_watermark(base_path, wm_path):
         base = Image.open(base_path).convert("RGBA")
         wm = Image.open(wm_path).convert("RGBA")
         base_w, base_h = base.size
-        # User Watermark (Small at bottom center)
         new_wm_w = int(base_w * 0.50) # 50% width
         wm_ratio = wm.size[1] / wm.size[0]
         new_wm_h = int(new_wm_w * wm_ratio)
@@ -140,6 +140,7 @@ async def progress(current, total, message, start_time, task_name):
         eta = get_duration_str(round((total - current) / speed)) if speed > 0 else "0s"
         try:
             await message.edit(f"<b>{task_name}</b>\n\n<b>Progress:</b> [{bar}] {round(percentage, 1)}%\n<b>📂 Done:</b> {humanbytes(current)} / {humanbytes(total)}\n<b>⚡ Speed:</b> {humanbytes(speed)}/s\n<b>⏳ ETA:</b> {eta}")
+        except MessageNotModified: pass
         except: pass
 
 async def send_to_channel_logic(client, path, clean_name, uid):
@@ -171,6 +172,9 @@ async def send_to_channel_logic(client, path, clean_name, uid):
                 # --- COMMANDS ---
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
+    os.makedirs("downloads", exist_ok=True)
+    os.makedirs("watermarks", exist_ok=True)
+    os.makedirs("thumbnails", exist_ok=True)
     await message.reply_text(f"👋 <b>Hello {message.from_user.first_name}!</b>\nCommands: /add, /caption, /ss, /batch, /link, /search, /series")
 
 @app.on_message(filters.command("caption") & filters.private)
@@ -186,6 +190,7 @@ async def add_clean(client, message):
 
 @app.on_message(filters.command("ss") & filters.private)
 async def manual_ss(client, message):
+    os.makedirs("downloads", exist_ok=True)
     v = await message.chat.ask("🎬 <b>Video bhejein:</b>")
     status = await message.reply("⏳ <b>Processing...</b>")
     path = await client.download_media(v)
@@ -196,31 +201,37 @@ async def manual_ss(client, message):
     await status.edit("✅ <b>Process Complete!</b>")
     if os.path.exists(path): os.remove(path)
 
-# --- SEARCH & SERIES HANDLER ---
+# --- SEARCH & SERIES HANDLER (NEW LOGIC) ---
 @app.on_message(filters.command(["search", "series"]))
 async def search_handler(client, message):
     if len(message.command) < 2: return await message.reply_text("Usage: /search Name or /series Name S1")
     raw_query = " ".join(message.command[1:])
     stype = "tv" if "series" in message.command[0] else "movie"
     season_num = 0
-    clean_query = raw_query
+    
+    # 🔥 Updated Regex from your code
     if stype == "tv":
-        match = re.search(r'(?:s|season)\s*(\d+)', raw_query, re.IGNORECASE)
+        match = re.search(r"(?i)\s*(?:s|season)\s*(\d+)$", raw_query)
         if match:
             season_num = int(match.group(1))
-            clean_query = re.sub(r'(?:s|season)\s*(\d+)', '', raw_query, flags=re.IGNORECASE).strip()
-    status = await message.reply_text(f"🔎 <b>Searching:</b> {clean_query}...")
+            raw_query = re.sub(r"(?i)\s*(?:s|season)\s*(\d+)$", "", raw_query).strip()
+            
+    status = await message.reply_text(f"🔎 <b>Searching:</b> {raw_query}...")
     try:
-        url = f"https://api.themoviedb.org/3/search/{stype}?api_key={TMDB_API_KEY}&query={clean_query}"
+        url = f"https://api.themoviedb.org/3/search/{stype}?api_key={TMDB_API_KEY}&query={raw_query}"
         res = requests.get(url).json().get('results')
-        if not res: return await status.edit("❌ No content found!")
+        if not res: return await status.edit("❌ Not Found")
+        
         mid = res[0]['id']
         title = res[0].get('name') if stype == 'tv' else res[0].get('title')
         year = res[0].get('release_date', '')[:4] if stype == 'movie' else res[0].get('first_air_date', '')[:4]
-        display_text = f"🎬 <b>{title} ({year})</b>"
-        if season_num > 0: display_text += f"\n💿 <b>Season: {season_num}</b>"
+        
+        txt = f"🎬 <b>{title} ({year})</b>"
+        if season_num > 0: txt += f"\n💿 <b>Season: {season_num}</b>"
+        txt += "\n👇 Kya chahiye?"
+        
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🖼 Poster", callback_data=f"type_poster_{stype}_{mid}_{season_num}"), InlineKeyboardButton("🎞 Thumbnail", callback_data=f"type_backdrop_{stype}_{mid}_{season_num}")]])
-        await status.edit(display_text, reply_markup=btn)
+        await status.edit(txt, reply_markup=btn)
     except MessageNotModified: pass
     except Exception as e: await status.edit(f"Error: {e}")
 
@@ -238,44 +249,38 @@ async def num_callback(client, callback):
         uid = callback.from_user.id
         _, count, img_type, stype, mid, s_num = callback.data.split("_")
         count = int(count); s_num = int(s_num)
-        await callback.answer("Sending...")
+        await callback.answer(f"Sending top {count} images...")
         await callback.message.delete()
         
-        # 🔥 FIX 1: Directory Missing Error
         os.makedirs("downloads", exist_ok=True)
         
-        # 🔥 FIX 2: Smart Image Logic (Prefers Text, Falls back to All)
-        url_text = ""
-        url_all = ""
-        
-        if stype == "tv" and s_num > 0:
-            url_text = f"https://api.themoviedb.org/3/tv/{mid}/season/{s_num}/images?api_key={TMDB_API_KEY}&include_image_language=en"
-            url_all = f"https://api.themoviedb.org/3/tv/{mid}/season/{s_num}/images?api_key={TMDB_API_KEY}"
-        else:
-            url_text = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en"
-            url_all = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}"
-        
-        # Try fetching TEXT based images first
-        data = requests.get(url_text).json()
+        # 🔥 Updated Image Logic (Your Preferred Way)
         pool = []
-        if img_type == 'poster': pool = data.get('posters', [])
-        else: pool = data.get('backdrops', []) or data.get('stills', [])
-        
-        # If no text images found, fetch ALL images (Fallback)
-        if not pool:
-            data = requests.get(url_all).json()
-            if img_type == 'poster': pool = data.get('posters', [])
-            else: pool = data.get('backdrops', []) or data.get('stills', [])
+        if stype == "tv" and s_num > 0:
+            # Try specific season with Hindi/English/Null
+            url = f"https://api.themoviedb.org/3/tv/{mid}/season/{s_num}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi,null"
+            data = requests.get(url).json()
+            pool = data.get('posters' if img_type == 'poster' else 'backdrops', [])
             
-        if not pool: return await client.send_message(uid, f"❌ No images found at all!")
+        if not pool:
+            # Fallback to General with Hindi/English
+            url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi"
+            data = requests.get(url).json()
+            pool = data.get('posters' if img_type == 'poster' else 'backdrops', [])
+            
+        if not pool: return await client.send_message(uid, f"❌ No images found!")
         
         wm_path = f"watermarks/{uid}.png"
         for i, img_data in enumerate(pool[:count]):
             full_url = f"https://image.tmdb.org/t/p/original{img_data['file_path']}"
             temp_path = f"downloads/temp_{uid}_{i}.jpg"
+            
             async with aiohttp.ClientSession() as session:
                 async with session.get(full_url) as resp:
-                    with open(temp_path, 'wb') as f: f.write(await resp.read())
+                    if resp.status == 200:
+                        f = await aiofiles.open(temp_path, mode='wb')
+                        await f.write(await resp.read())
+                        await f.close()
             
             if os.path.exists(wm_path): apply_watermark(temp_path, wm_path)
             
@@ -404,11 +409,12 @@ async def dl_process(client, callback):
     status = await callback.message.reply_text("📥 <b>Connecting...</b>")
     path = ""
     try:
+        os.makedirs("downloads", exist_ok=True)
         start = time.time()
         ext = os.path.splitext(data['original_name'])[1] or ".mkv"
         final_fname = clean_filename(f"{custom_name}{ext}")
         path = f"downloads/{uid}_{final_fname}"
-        os.makedirs("downloads", exist_ok=True)
+        
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
                 total = int(resp.headers.get("Content-Length", 0))
@@ -442,6 +448,7 @@ async def batch_run(client, callback):
     for i, msg in enumerate(files):
         path = ""
         try:
+            os.makedirs("downloads", exist_ok=True)
             media = msg.video or msg.document
             path = await client.download_media(media)
             ext = os.path.splitext(media.file_name or "")[1] or ".mkv"
@@ -470,4 +477,4 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
-
+        

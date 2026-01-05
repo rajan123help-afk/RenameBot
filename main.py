@@ -211,6 +211,7 @@ async def manual_ss(client, message):
     real_name = "Video"
     if v.video: real_name = v.video.file_name or "Video"
     elif v.document: real_name = v.document.file_name or "File"
+    # Manual SS me pehle channel bhejna theek hai
     await send_to_channel_logic(client, path, real_name, message.from_user.id)
     await status.edit("✅ <b>Process Complete!</b>")
     if os.path.exists(path): os.remove(path)
@@ -395,6 +396,7 @@ async def text_handler(client, message):
         await message.reply_text(f"✅ Batch Name: {message.text}\nStart Processing?", reply_markup=btn)
         return
 
+# 🔥 FIXED: UPLOAD TO USER FIRST, THEN CHANNEL LOG
 @app.on_callback_query(filters.regex("^dl_"))
 async def dl_process(client, callback):
     uid = callback.from_user.id
@@ -422,7 +424,7 @@ async def dl_process(client, callback):
                         f.write(chunk); dl += len(chunk)
                         if time.time() - start > 5: await progress(dl, total, status, start, f"📥 Downloading")
         
-        await send_to_channel_logic(client, path, custom_name, uid)
+        # 🔥 Step 1: Upload to User (Priority)
         await status.edit("📤 <b>Uploading...</b>")
         duration = get_duration(path)
         cap = get_fancy_caption(final_fname, humanbytes(os.path.getsize(path)), duration)
@@ -443,6 +445,10 @@ async def dl_process(client, callback):
         else: await client.send_document(uid, path, caption=cap, thumb=final_thumb, progress=progress, progress_args=(status, time.time(), "📤 Uploading"))
         
         if final_thumb and "temp_" in final_thumb and os.path.exists(final_thumb): os.remove(final_thumb)
+        
+        # 🔥 Step 2: Send to Channel (Background)
+        await status.edit("✅ <b>Generating Screenshots...</b>")
+        await send_to_channel_logic(client, path, custom_name, uid)
         
     except Exception as e: await status.edit(f"❌ Error: {e}")
     finally:
@@ -473,8 +479,7 @@ async def batch_run(client, callback):
             else: new_name = f"{base} - {i+1}{ext}"
             cap = get_fancy_caption(new_name, humanbytes(os.path.getsize(path)), get_duration(path))
             
-            await send_to_channel_logic(client, path, new_name, uid)
-            
+            # 🔥 Upload to User FIRST
             final_thumb = master_thumb
             if master_thumb and os.path.exists(wm_path):
                  temp_thumb = f"thumbnails/temp_batch_{uid}_{i}.jpg"
@@ -487,6 +492,9 @@ async def batch_run(client, callback):
             else: await client.send_document(uid, path, caption=cap, thumb=final_thumb)
             
             if final_thumb and "temp_" in final_thumb and os.path.exists(final_thumb): os.remove(final_thumb)
+            
+            # 🔥 Send to Channel LAST
+            await send_to_channel_logic(client, path, new_name, uid)
             
         except: pass
         finally:
@@ -506,4 +514,4 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
-        
+    

@@ -29,14 +29,14 @@ LOG_CHANNEL = "@filmyflip_screenshots"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_v26_album_final", 
+    "filmy_pro_v28_antispam", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
     parse_mode=enums.ParseMode.HTML,
     workers=4, 
     max_concurrent_transmissions=4,
-    ipv6=False # Anti-Freeze Fix
+    ipv6=False 
 )
 
 # --- GLOBAL VARIABLES ---
@@ -145,17 +145,16 @@ async def progress(current, total, message, start_time, task_name):
         except MessageNotModified: pass
         except: pass
 
-# 🔥 CHANNEL LOGIC (Album + Watermark + New Upload Text)
+# 🔥 CHANNEL LOGIC (Fixed: No Double Sending)
 async def send_to_channel_logic(client, path, clean_name, uid):
     s, e = get_strict_se_info(clean_name)
     se_text = f" | 📺 Season: {s}" if s else ""
     se_text += f" | 🧩 Episode: {e}" if e else ""
     
-    # 1. Title Message
     try:
         await client.send_message(LOG_CHANNEL, f"✨ <b>New Upload</b>\n🎬 <b>Title:</b> {clean_name}{se_text}")
     except Exception as e:
-        try: await client.send_message(uid, f"⚠️ <b>Channel Title Error:</b> {e}")
+        try: await client.send_message(uid, f"⚠️ <b>Channel Error:</b> {e}")
         except: pass
 
     duration = get_duration(path)
@@ -163,7 +162,7 @@ async def send_to_channel_logic(client, path, clean_name, uid):
     wm_path = f"watermarks/{uid}.png"
     has_wm = os.path.exists(wm_path)
     
-    # 2. Generate Screenshots
+    # Generate Screenshots
     for i in range(1, 11):
         ts = (duration // 11) * i
         out = f"ss_{uid}_{i}.jpg"
@@ -172,15 +171,16 @@ async def send_to_channel_logic(client, path, clean_name, uid):
             if has_wm: apply_watermark(out, wm_path)
             ss_files.append(out)
             
-    # 3. Send as Album
+    # 🔥 Send as Album ONLY (Removed Fallback Loop)
     if ss_files:
         try:
             media_group = [InputMediaPhoto(img) for img in ss_files]
             await client.send_media_group(LOG_CHANNEL, media=media_group)
         except Exception as e:
-            for photo_path in ss_files:
-                try: await client.send_photo(LOG_CHANNEL, photo=photo_path)
-                except: pass
+            # Agar Album fail hua, to bas error bata dega, lekin alag-alag spam nahi karega
+            print(f"Album Error: {e}")
+            
+        # Cleanup
         for f in ss_files:
             if os.path.exists(f): os.remove(f)
                 # --- COMMANDS ---

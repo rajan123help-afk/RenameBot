@@ -15,6 +15,7 @@ from hachoir.metadata import extractMetadata
 from hachoir.parser import createParser
 from aiohttp import web
 from pyrogram import Client, filters, enums
+from pyrogram.errors import MessageNotModified
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply, InputMediaPhoto
 
 # --- CONFIGURATION ---
@@ -28,7 +29,7 @@ LOG_CHANNEL = "@filmyflip_screenshots"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_v20_text_images", 
+    "filmy_pro_v21_final_fix", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -137,7 +138,9 @@ async def progress(current, total, message, start_time, task_name):
         bar = "■" * completed + "□" * (10 - completed)
         speed = current / diff if diff > 0 else 0
         eta = get_duration_str(round((total - current) / speed)) if speed > 0 else "0s"
-        await message.edit(f"<b>{task_name}</b>\n\n<b>Progress:</b> [{bar}] {round(percentage, 1)}%\n<b>📂 Done:</b> {humanbytes(current)} / {humanbytes(total)}\n<b>⚡ Speed:</b> {humanbytes(speed)}/s\n<b>⏳ ETA:</b> {eta}")
+        try:
+            await message.edit(f"<b>{task_name}</b>\n\n<b>Progress:</b> [{bar}] {round(percentage, 1)}%\n<b>📂 Done:</b> {humanbytes(current)} / {humanbytes(total)}\n<b>⚡ Speed:</b> {humanbytes(speed)}/s\n<b>⏳ ETA:</b> {eta}")
+        except: pass
 
 async def send_to_channel_logic(client, path, clean_name, uid):
     s, e = get_strict_se_info(clean_name)
@@ -218,6 +221,7 @@ async def search_handler(client, message):
         if season_num > 0: display_text += f"\n💿 <b>Season: {season_num}</b>"
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🖼 Poster", callback_data=f"type_poster_{stype}_{mid}_{season_num}"), InlineKeyboardButton("🎞 Thumbnail", callback_data=f"type_backdrop_{stype}_{mid}_{season_num}")]])
         await status.edit(display_text, reply_markup=btn)
+    except MessageNotModified: pass
     except Exception as e: await status.edit(f"Error: {e}")
 
 @app.on_callback_query(filters.regex("^type_"))
@@ -237,18 +241,34 @@ async def num_callback(client, callback):
         await callback.answer("Sending...")
         await callback.message.delete()
         
-        # 🔥 FIX: Added 'include_image_language=en' to force English text images
-        if stype == "tv" and s_num > 0: 
-            url = f"https://api.themoviedb.org/3/tv/{mid}/season/{s_num}/images?api_key={TMDB_API_KEY}&include_image_language=en"
-        else: 
-            url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en"
+        # 🔥 FIX 1: Directory Missing Error
+        os.makedirs("downloads", exist_ok=True)
         
-        data = requests.get(url).json()
+        # 🔥 FIX 2: Smart Image Logic (Prefers Text, Falls back to All)
+        url_text = ""
+        url_all = ""
+        
+        if stype == "tv" and s_num > 0:
+            url_text = f"https://api.themoviedb.org/3/tv/{mid}/season/{s_num}/images?api_key={TMDB_API_KEY}&include_image_language=en"
+            url_all = f"https://api.themoviedb.org/3/tv/{mid}/season/{s_num}/images?api_key={TMDB_API_KEY}"
+        else:
+            url_text = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en"
+            url_all = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}"
+        
+        # Try fetching TEXT based images first
+        data = requests.get(url_text).json()
         pool = []
         if img_type == 'poster': pool = data.get('posters', [])
         else: pool = data.get('backdrops', []) or data.get('stills', [])
+        
+        # If no text images found, fetch ALL images (Fallback)
+        if not pool:
+            data = requests.get(url_all).json()
+            if img_type == 'poster': pool = data.get('posters', [])
+            else: pool = data.get('backdrops', []) or data.get('stills', [])
             
-        if not pool: return await client.send_message(uid, f"❌ No text-based images found! Try manually.")
+        if not pool: return await client.send_message(uid, f"❌ No images found at all!")
+        
         wm_path = f"watermarks/{uid}.png"
         for i, img_data in enumerate(pool[:count]):
             full_url = f"https://image.tmdb.org/t/p/original{img_data['file_path']}"
@@ -257,7 +277,6 @@ async def num_callback(client, callback):
                 async with session.get(full_url) as resp:
                     with open(temp_path, 'wb') as f: f.write(await resp.read())
             
-            # 🔥 Only apply User Watermark (No Title Logo Overlay)
             if os.path.exists(wm_path): apply_watermark(temp_path, wm_path)
             
             await client.send_photo(uid, photo=temp_path)

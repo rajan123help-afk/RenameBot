@@ -1,4 +1,3 @@
-
 import os
 import time
 import math
@@ -30,7 +29,7 @@ LOG_CHANNEL = "@filmyflip_screenshots"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_v23_final", 
+    "filmy_pro_v25_ss_fix", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -91,10 +90,12 @@ def clean_filename(name):
             name = name.replace(old_word, new_word)
     return name.strip()
 
-# --- LOGIC ---
+# 🔥 FIXED REGEX: Detects S01E08 (Combined) & Season 1 Episode 8
 def get_strict_se_info(name):
-    se = re.search(r'\b[Ss](\d+)\b', name)
-    ep = re.search(r'\b(?:[Ee]|[Ee][Pp]|[Ee][Pp][Ii])(\d+)\b', name)
+    match = re.search(r'[Ss](\d+)[\.\-]?[Ee](\d+)', name)
+    if match: return match.group(1), match.group(2)
+    se = re.search(r'\b(?:Season|s)\s*(\d+)\b', name, re.IGNORECASE)
+    ep = re.search(r'\b(?:Episode|Ep|e)\s*(\d+)\b', name, re.IGNORECASE)
     s = se.group(1) if se else None
     e = ep.group(1) if ep else None
     return s, e
@@ -112,22 +113,34 @@ def get_fancy_caption(filename, filesize, duration=0):
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME}</b></blockquote>"
     return caption
 
-# --- WATERMARK LOGIC (ONLY USER WM) ---
+# --- WATERMARK LOGIC ---
 def apply_watermark(base_path, wm_path):
     try:
+        # Check if files exist
+        if not os.path.exists(base_path) or not os.path.exists(wm_path):
+            return base_path
+            
         base = Image.open(base_path).convert("RGBA")
         wm = Image.open(wm_path).convert("RGBA")
+        
         base_w, base_h = base.size
-        new_wm_w = int(base_w * 0.50) # 50% width
+        # Watermark size: 50% of image width
+        new_wm_w = int(base_w * 0.50) 
         wm_ratio = wm.size[1] / wm.size[0]
         new_wm_h = int(new_wm_w * wm_ratio)
+        
         wm = wm.resize((new_wm_w, new_wm_h), Image.Resampling.LANCZOS)
+        
+        # Position: Bottom Center
         x = (base_w - new_wm_w) // 2
         y = base_h - new_wm_h - 20 
+        
         base.paste(wm, (x, y), wm)
         base.convert("RGB").save(base_path, "JPEG")
         return base_path
-    except: return base_path
+    except Exception as e:
+        print(f"WM Error: {e}")
+        return base_path
 
 async def progress(current, total, message, start_time, task_name):
     now = time.time()
@@ -143,10 +156,12 @@ async def progress(current, total, message, start_time, task_name):
         except MessageNotModified: pass
         except: pass
 
+# 🔥 UPDATED CHANNEL LOGIC (Force Watermark on Screenshots)
 async def send_to_channel_logic(client, path, clean_name, uid):
     s, e = get_strict_se_info(clean_name)
     se_text = f" | 📺 Season: {s}" if s else ""
     se_text += f" | 🧩 Episode: {e}" if e else ""
+    
     try:
         await client.send_message(LOG_CHANNEL, f"✨ <b>New Upload</b>\n🎬 <b>Title:</b> {clean_name}{se_text}")
     except Exception as e:
@@ -155,18 +170,33 @@ async def send_to_channel_logic(client, path, clean_name, uid):
 
     duration = get_duration(path)
     ss_files = []
+    
+    # Check for User Watermark
+    wm_path = f"watermarks/{uid}.png"
+    has_wm = os.path.exists(wm_path)
+    
     for i in range(1, 11):
         ts = (duration // 11) * i
         out = f"ss_{uid}_{i}.jpg"
+        
+        # Generate SS
         os.system(f'ffmpeg -ss {ts} -i "{path}" -frames:v 1 "{out}" -y -loglevel quiet')
+        
         if os.path.exists(out):
-            if os.path.exists(f"watermarks/{uid}.png"):
-                apply_watermark(out, f"watermarks/{uid}.png")
+            # Apply Watermark immediately if exists
+            if has_wm:
+                apply_watermark(out, wm_path)
+            
             ss_files.append(out)
+            
     if ss_files:
+        # Send as Album (MediaGroup) for cleaner look, or individual
+        # Using individual as per your original request logic
         for photo_path in ss_files:
             try: await client.send_photo(LOG_CHANNEL, photo=photo_path)
             except: pass
+            
+        # Cleanup
         for f in ss_files:
             if os.path.exists(f): os.remove(f)
                 # --- COMMANDS ---
@@ -201,35 +231,29 @@ async def manual_ss(client, message):
     await status.edit("✅ <b>Process Complete!</b>")
     if os.path.exists(path): os.remove(path)
 
-# --- SEARCH & SERIES HANDLER (NEW LOGIC) ---
+# --- SEARCH & SERIES HANDLER ---
 @app.on_message(filters.command(["search", "series"]))
 async def search_handler(client, message):
     if len(message.command) < 2: return await message.reply_text("Usage: /search Name or /series Name S1")
     raw_query = " ".join(message.command[1:])
     stype = "tv" if "series" in message.command[0] else "movie"
     season_num = 0
-    
-    # 🔥 Updated Regex from your code
     if stype == "tv":
         match = re.search(r"(?i)\s*(?:s|season)\s*(\d+)$", raw_query)
         if match:
             season_num = int(match.group(1))
             raw_query = re.sub(r"(?i)\s*(?:s|season)\s*(\d+)$", "", raw_query).strip()
-            
     status = await message.reply_text(f"🔎 <b>Searching:</b> {raw_query}...")
     try:
         url = f"https://api.themoviedb.org/3/search/{stype}?api_key={TMDB_API_KEY}&query={raw_query}"
         res = requests.get(url).json().get('results')
         if not res: return await status.edit("❌ Not Found")
-        
         mid = res[0]['id']
         title = res[0].get('name') if stype == 'tv' else res[0].get('title')
         year = res[0].get('release_date', '')[:4] if stype == 'movie' else res[0].get('first_air_date', '')[:4]
-        
         txt = f"🎬 <b>{title} ({year})</b>"
         if season_num > 0: txt += f"\n💿 <b>Season: {season_num}</b>"
         txt += "\n👇 Kya chahiye?"
-        
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🖼 Poster", callback_data=f"type_poster_{stype}_{mid}_{season_num}"), InlineKeyboardButton("🎞 Thumbnail", callback_data=f"type_backdrop_{stype}_{mid}_{season_num}")]])
         await status.edit(txt, reply_markup=btn)
     except MessageNotModified: pass
@@ -251,39 +275,28 @@ async def num_callback(client, callback):
         count = int(count); s_num = int(s_num)
         await callback.answer(f"Sending top {count} images...")
         await callback.message.delete()
-        
         os.makedirs("downloads", exist_ok=True)
-        
-        # 🔥 Updated Image Logic (Your Preferred Way)
         pool = []
         if stype == "tv" and s_num > 0:
-            # Try specific season with Hindi/English/Null
             url = f"https://api.themoviedb.org/3/tv/{mid}/season/{s_num}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi,null"
             data = requests.get(url).json()
             pool = data.get('posters' if img_type == 'poster' else 'backdrops', [])
-            
         if not pool:
-            # Fallback to General with Hindi/English
             url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi"
             data = requests.get(url).json()
             pool = data.get('posters' if img_type == 'poster' else 'backdrops', [])
-            
         if not pool: return await client.send_message(uid, f"❌ No images found!")
-        
         wm_path = f"watermarks/{uid}.png"
         for i, img_data in enumerate(pool[:count]):
             full_url = f"https://image.tmdb.org/t/p/original{img_data['file_path']}"
             temp_path = f"downloads/temp_{uid}_{i}.jpg"
-            
             async with aiohttp.ClientSession() as session:
                 async with session.get(full_url) as resp:
                     if resp.status == 200:
                         f = await aiofiles.open(temp_path, mode='wb')
                         await f.write(await resp.read())
                         await f.close()
-            
             if os.path.exists(wm_path): apply_watermark(temp_path, wm_path)
-            
             await client.send_photo(uid, photo=temp_path)
             os.remove(temp_path)
     except Exception as e: await client.send_message(uid, f"Error: {e}")
@@ -424,14 +437,30 @@ async def dl_process(client, callback):
                         if uid not in download_queue: return
                         f.write(chunk); dl += len(chunk)
                         if time.time() - start > 5: await progress(dl, total, status, start, f"📥 Downloading")
+        
         await send_to_channel_logic(client, path, custom_name, uid)
         await status.edit("📤 <b>Uploading...</b>")
         duration = get_duration(path)
         cap = get_fancy_caption(final_fname, humanbytes(os.path.getsize(path)), duration)
-        thumb_path = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
-        if not thumb_path and os.path.exists(f"watermarks/{uid}.png"): thumb_path = f"watermarks/{uid}.png"
-        if mode == "video": await client.send_video(uid, path, caption=cap, duration=duration, thumb=thumb_path, progress=progress, progress_args=(status, time.time(), "📤 Uploading"))
-        else: await client.send_document(uid, path, caption=cap, thumb=thumb_path, progress=progress, progress_args=(status, time.time(), "📤 Uploading"))
+        
+        # 🔥 FIXED URL THUMBNAIL LOGIC
+        final_thumb = None
+        master_thumb = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
+        wm_path = f"watermarks/{uid}.png"
+        
+        if master_thumb:
+            if os.path.exists(wm_path):
+                 temp_thumb = f"thumbnails/temp_dl_{uid}.jpg"
+                 shutil.copy(master_thumb, temp_thumb)
+                 final_thumb = apply_watermark(temp_thumb, wm_path)
+            else:
+                 final_thumb = master_thumb
+             
+        if mode == "video": await client.send_video(uid, path, caption=cap, duration=duration, thumb=final_thumb, progress=progress, progress_args=(status, time.time(), "📤 Uploading"))
+        else: await client.send_document(uid, path, caption=cap, thumb=final_thumb, progress=progress, progress_args=(status, time.time(), "📤 Uploading"))
+        
+        if final_thumb and "temp_" in final_thumb and os.path.exists(final_thumb): os.remove(final_thumb)
+        
     except Exception as e: await status.edit(f"❌ Error: {e}")
     finally:
         if path and os.path.exists(path): os.remove(path)
@@ -445,6 +474,10 @@ async def batch_run(client, callback):
     files = batch_data[uid]['files']; base = batch_data[uid]['name']
     mode = "video" if "vid" in callback.data else "doc"
     status = await callback.message.edit("🚀 <b>Processing Batch...</b>")
+    
+    master_thumb = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
+    wm_path = f"watermarks/{uid}.png"
+    
     for i, msg in enumerate(files):
         path = ""
         try:
@@ -456,9 +489,20 @@ async def batch_run(client, callback):
             if s and e: new_name = f"{base} S{s}E{e}{ext}"
             else: new_name = f"{base} - {i+1}{ext}"
             cap = get_fancy_caption(new_name, humanbytes(os.path.getsize(path)), get_duration(path))
+            
             await send_to_channel_logic(client, path, new_name, uid)
-            if mode == "video": await client.send_video(uid, path, caption=cap)
-            else: await client.send_document(uid, path, caption=cap)
+            
+            final_thumb = master_thumb
+            if master_thumb and os.path.exists(wm_path):
+                 temp_thumb = f"thumbnails/temp_batch_{uid}_{i}.jpg"
+                 shutil.copy(master_thumb, temp_thumb)
+                 final_thumb = apply_watermark(temp_thumb, wm_path)
+            
+            if mode == "video": await client.send_video(uid, path, caption=cap, thumb=final_thumb)
+            else: await client.send_document(uid, path, caption=cap, thumb=final_thumb)
+            
+            if final_thumb and "temp_" in final_thumb and os.path.exists(final_thumb): os.remove(final_thumb)
+            
         except: pass
         finally:
             if path and os.path.exists(path): os.remove(path)
@@ -477,4 +521,4 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
-        
+    

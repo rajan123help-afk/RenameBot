@@ -29,14 +29,14 @@ LOG_CHANNEL = "@filmyflip_screenshots"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_v26_album", 
+    "filmy_pro_v26_album_final", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
     parse_mode=enums.ParseMode.HTML,
     workers=4, 
     max_concurrent_transmissions=4,
-    ipv6=False
+    ipv6=False # Anti-Freeze Fix
 )
 
 # --- GLOBAL VARIABLES ---
@@ -145,13 +145,13 @@ async def progress(current, total, message, start_time, task_name):
         except MessageNotModified: pass
         except: pass
 
-# 🔥 UPDATED: Send as ALBUM (MediaGroup)
+# 🔥 CHANNEL LOGIC (Album + Watermark + New Upload Text)
 async def send_to_channel_logic(client, path, clean_name, uid):
     s, e = get_strict_se_info(clean_name)
     se_text = f" | 📺 Season: {s}" if s else ""
     se_text += f" | 🧩 Episode: {e}" if e else ""
     
-    # 1. Send Title Message First
+    # 1. Title Message
     try:
         await client.send_message(LOG_CHANNEL, f"✨ <b>New Upload</b>\n🎬 <b>Title:</b> {clean_name}{se_text}")
     except Exception as e:
@@ -175,16 +175,12 @@ async def send_to_channel_logic(client, path, clean_name, uid):
     # 3. Send as Album
     if ss_files:
         try:
-            # Create Media Group
             media_group = [InputMediaPhoto(img) for img in ss_files]
             await client.send_media_group(LOG_CHANNEL, media=media_group)
         except Exception as e:
-            # Fallback to individual if album fails
             for photo_path in ss_files:
                 try: await client.send_photo(LOG_CHANNEL, photo=photo_path)
                 except: pass
-            
-        # Cleanup
         for f in ss_files:
             if os.path.exists(f): os.remove(f)
                 # --- COMMANDS ---
@@ -431,7 +427,6 @@ async def dl_process(client, callback):
         duration = get_duration(path)
         cap = get_fancy_caption(final_fname, humanbytes(os.path.getsize(path)), duration)
         
-        # 🔥 ROBUST THUMBNAIL LOGIC FOR URL MODE
         final_thumb = None
         master_thumb = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
         wm_path = f"watermarks/{uid}.png"

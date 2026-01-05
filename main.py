@@ -11,7 +11,6 @@ import aiofiles
 import aiohttp
 from urllib.parse import unquote
 from PIL import Image
-from io import BytesIO
 from hachoir.metadata import extractMetadata
 from hachoir.parser import createParser
 from aiohttp import web
@@ -29,7 +28,7 @@ LOG_CHANNEL = "@filmyflip_screenshots"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_v18_logos", 
+    "filmy_pro_v20_text_images", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
@@ -111,13 +110,14 @@ def get_fancy_caption(filename, filesize, duration=0):
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME}</b></blockquote>"
     return caption
 
-# --- WATERMARK & LOGO OVERLAY LOGIC ---
+# --- WATERMARK LOGIC (ONLY USER WM) ---
 def apply_watermark(base_path, wm_path):
     try:
         base = Image.open(base_path).convert("RGBA")
         wm = Image.open(wm_path).convert("RGBA")
         base_w, base_h = base.size
-        new_wm_w = int(base_w * 0.50)
+        # User Watermark (Small at bottom center)
+        new_wm_w = int(base_w * 0.50) # 50% width
         wm_ratio = wm.size[1] / wm.size[0]
         new_wm_h = int(new_wm_w * wm_ratio)
         wm = wm.resize((new_wm_w, new_wm_h), Image.Resampling.LANCZOS)
@@ -127,23 +127,6 @@ def apply_watermark(base_path, wm_path):
         base.convert("RGB").save(base_path, "JPEG")
         return base_path
     except: return base_path
-
-def apply_tmdb_logo(base_path, logo_url):
-    try:
-        resp = requests.get(logo_url)
-        if resp.status_code != 200: return
-        logo = Image.open(BytesIO(resp.content)).convert("RGBA")
-        base = Image.open(base_path).convert("RGBA")
-        base_w, base_h = base.size
-        target_w = int(base_w * 0.70)
-        ratio = logo.size[1] / logo.size[0]
-        target_h = int(target_w * ratio)
-        logo = logo.resize((target_w, target_h), Image.Resampling.LANCZOS)
-        x = (base_w - target_w) // 2
-        y = base_h - target_h - 50 
-        base.paste(logo, (x, y), logo)
-        base.convert("RGB").save(base_path, "JPEG")
-    except: pass
 
 async def progress(current, total, message, start_time, task_name):
     now = time.time()
@@ -182,7 +165,7 @@ async def send_to_channel_logic(client, path, clean_name, uid):
             except: pass
         for f in ss_files:
             if os.path.exists(f): os.remove(f)
-   # --- COMMANDS ---
+                # --- COMMANDS ---
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
     await message.reply_text(f"👋 <b>Hello {message.from_user.first_name}!</b>\nCommands: /add, /caption, /ss, /batch, /link, /search, /series")
@@ -254,23 +237,18 @@ async def num_callback(client, callback):
         await callback.answer("Sending...")
         await callback.message.delete()
         
-        if stype == "tv" and s_num > 0: url = f"https://api.themoviedb.org/3/tv/{mid}/season/{s_num}/images?api_key={TMDB_API_KEY}"
-        else: url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}"
+        # 🔥 FIX: Added 'include_image_language=en' to force English text images
+        if stype == "tv" and s_num > 0: 
+            url = f"https://api.themoviedb.org/3/tv/{mid}/season/{s_num}/images?api_key={TMDB_API_KEY}&include_image_language=en"
+        else: 
+            url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en"
         
-        logo_url = ""
-        try:
-            logo_api = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en,null"
-            logo_data = requests.get(logo_api).json()
-            logos = logo_data.get('logos', [])
-            if logos: logo_url = f"https://image.tmdb.org/t/p/original{logos[0]['file_path']}"
-        except: pass
-
         data = requests.get(url).json()
         pool = []
         if img_type == 'poster': pool = data.get('posters', [])
         else: pool = data.get('backdrops', []) or data.get('stills', [])
             
-        if not pool: return await client.send_message(uid, f"❌ No images found!")
+        if not pool: return await client.send_message(uid, f"❌ No text-based images found! Try manually.")
         wm_path = f"watermarks/{uid}.png"
         for i, img_data in enumerate(pool[:count]):
             full_url = f"https://image.tmdb.org/t/p/original{img_data['file_path']}"
@@ -278,8 +256,10 @@ async def num_callback(client, callback):
             async with aiohttp.ClientSession() as session:
                 async with session.get(full_url) as resp:
                     with open(temp_path, 'wb') as f: f.write(await resp.read())
-            if logo_url: apply_tmdb_logo(temp_path, logo_url)
+            
+            # 🔥 Only apply User Watermark (No Title Logo Overlay)
             if os.path.exists(wm_path): apply_watermark(temp_path, wm_path)
+            
             await client.send_photo(uid, photo=temp_path)
             os.remove(temp_path)
     except Exception as e: await client.send_message(uid, f"Error: {e}")

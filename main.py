@@ -29,13 +29,14 @@ LOG_CHANNEL = "@filmyflip_screenshots"
 
 # --- BOT SETUP ---
 app = Client(
-    "filmy_pro_v25_ss_fix", 
+    "filmy_pro_v26_album", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN, 
     parse_mode=enums.ParseMode.HTML,
     workers=4, 
-    max_concurrent_transmissions=4
+    max_concurrent_transmissions=4,
+    ipv6=False
 )
 
 # --- GLOBAL VARIABLES ---
@@ -90,7 +91,6 @@ def clean_filename(name):
             name = name.replace(old_word, new_word)
     return name.strip()
 
-# 🔥 FIXED REGEX: Detects S01E08 (Combined) & Season 1 Episode 8
 def get_strict_se_info(name):
     match = re.search(r'[Ss](\d+)[\.\-]?[Ee](\d+)', name)
     if match: return match.group(1), match.group(2)
@@ -116,31 +116,20 @@ def get_fancy_caption(filename, filesize, duration=0):
 # --- WATERMARK LOGIC ---
 def apply_watermark(base_path, wm_path):
     try:
-        # Check if files exist
-        if not os.path.exists(base_path) or not os.path.exists(wm_path):
-            return base_path
-            
+        if not os.path.exists(base_path) or not os.path.exists(wm_path): return base_path
         base = Image.open(base_path).convert("RGBA")
         wm = Image.open(wm_path).convert("RGBA")
-        
         base_w, base_h = base.size
-        # Watermark size: 50% of image width
         new_wm_w = int(base_w * 0.50) 
         wm_ratio = wm.size[1] / wm.size[0]
         new_wm_h = int(new_wm_w * wm_ratio)
-        
         wm = wm.resize((new_wm_w, new_wm_h), Image.Resampling.LANCZOS)
-        
-        # Position: Bottom Center
         x = (base_w - new_wm_w) // 2
         y = base_h - new_wm_h - 20 
-        
         base.paste(wm, (x, y), wm)
         base.convert("RGB").save(base_path, "JPEG")
         return base_path
-    except Exception as e:
-        print(f"WM Error: {e}")
-        return base_path
+    except: return base_path
 
 async def progress(current, total, message, start_time, task_name):
     now = time.time()
@@ -156,12 +145,13 @@ async def progress(current, total, message, start_time, task_name):
         except MessageNotModified: pass
         except: pass
 
-# 🔥 UPDATED CHANNEL LOGIC (Force Watermark on Screenshots)
+# 🔥 UPDATED: Send as ALBUM (MediaGroup)
 async def send_to_channel_logic(client, path, clean_name, uid):
     s, e = get_strict_se_info(clean_name)
     se_text = f" | 📺 Season: {s}" if s else ""
     se_text += f" | 🧩 Episode: {e}" if e else ""
     
+    # 1. Send Title Message First
     try:
         await client.send_message(LOG_CHANNEL, f"✨ <b>New Upload</b>\n🎬 <b>Title:</b> {clean_name}{se_text}")
     except Exception as e:
@@ -170,31 +160,29 @@ async def send_to_channel_logic(client, path, clean_name, uid):
 
     duration = get_duration(path)
     ss_files = []
-    
-    # Check for User Watermark
     wm_path = f"watermarks/{uid}.png"
     has_wm = os.path.exists(wm_path)
     
+    # 2. Generate Screenshots
     for i in range(1, 11):
         ts = (duration // 11) * i
         out = f"ss_{uid}_{i}.jpg"
-        
-        # Generate SS
         os.system(f'ffmpeg -ss {ts} -i "{path}" -frames:v 1 "{out}" -y -loglevel quiet')
-        
         if os.path.exists(out):
-            # Apply Watermark immediately if exists
-            if has_wm:
-                apply_watermark(out, wm_path)
-            
+            if has_wm: apply_watermark(out, wm_path)
             ss_files.append(out)
             
+    # 3. Send as Album
     if ss_files:
-        # Send as Album (MediaGroup) for cleaner look, or individual
-        # Using individual as per your original request logic
-        for photo_path in ss_files:
-            try: await client.send_photo(LOG_CHANNEL, photo=photo_path)
-            except: pass
+        try:
+            # Create Media Group
+            media_group = [InputMediaPhoto(img) for img in ss_files]
+            await client.send_media_group(LOG_CHANNEL, media=media_group)
+        except Exception as e:
+            # Fallback to individual if album fails
+            for photo_path in ss_files:
+                try: await client.send_photo(LOG_CHANNEL, photo=photo_path)
+                except: pass
             
         # Cleanup
         for f in ss_files:
@@ -443,7 +431,7 @@ async def dl_process(client, callback):
         duration = get_duration(path)
         cap = get_fancy_caption(final_fname, humanbytes(os.path.getsize(path)), duration)
         
-        # 🔥 FIXED URL THUMBNAIL LOGIC
+        # 🔥 ROBUST THUMBNAIL LOGIC FOR URL MODE
         final_thumb = None
         master_thumb = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
         wm_path = f"watermarks/{uid}.png"
@@ -497,6 +485,8 @@ async def batch_run(client, callback):
                  temp_thumb = f"thumbnails/temp_batch_{uid}_{i}.jpg"
                  shutil.copy(master_thumb, temp_thumb)
                  final_thumb = apply_watermark(temp_thumb, wm_path)
+            elif master_thumb:
+                 final_thumb = master_thumb
             
             if mode == "video": await client.send_video(uid, path, caption=cap, thumb=final_thumb)
             else: await client.send_document(uid, path, caption=cap, thumb=final_thumb)
@@ -521,4 +511,4 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
-    
+        

@@ -20,13 +20,14 @@ from pyrogram.errors import UserNotParticipant
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-# Apni IDs yahan daalein ya Render Environment variables use karein
 API_ID = int(os.environ.get("API_ID", "23421127"))
-# 👇 YAHAN GALTI THI, AB SAHI HAI (Ek bracket hataya)
-API_HASH = os.environ.get("API_HASH", "0375dd20aba9f2e7c29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "7222455447:AAG3hsn3CLCm16wd8Mcdf7I67Oz2AhaIhA8") 
+API_HASH = os.environ.get("API_HASH", "0375dd20aba9f2e7c29d0c1c06590dfb"))
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468501492:AAGpDSdzdlEzkJs9AqHkA0AHPcmSv1Dwlgk") 
 OWNER_ID = int(os.environ.get("OWNER_ID", "5027914470"))
-MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja2001@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority")
+
+# 🔥 NAYA DATABASE LINK (Password: raja12345) 🔥
+MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
+
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "02a832d91755c2f5e8a2d1a6740a8674")
 CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"

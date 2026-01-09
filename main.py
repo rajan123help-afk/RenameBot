@@ -26,7 +26,7 @@ API_ID = int(os.environ.get("API_ID", "23421127"))
 API_HASH = os.environ.get("API_HASH", "0375dd20aba9f2e7c29d0c1c06590dfb")
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "7222455447:AAG3hsn3CLCm16wd8Mcdf7I67Oz2AhaIhA8") 
-OWNER_ID = int(os.environ.get("OWNER_ID", "5027914470"))
+OWNER_ID = int(os.environ.get("OWNER_ID", "5027914470")
 
 # 👇 NAYA PASSWORD WALA LINK (raja12345)
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")

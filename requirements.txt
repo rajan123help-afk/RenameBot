@@ -1,7 +1,9 @@
-pyrofork
+pyrogram
+tgcrypto
+motor
+dnspython
 aiohttp
-requests
 aiofiles
+requests
 Pillow
-TgCrypto
 hachoir

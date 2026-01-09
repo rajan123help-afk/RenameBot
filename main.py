@@ -334,19 +334,19 @@ async def text_handler(client, message):
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="batch_run_vid"), InlineKeyboardButton("📁 File", callback_data="batch_run_doc")]])
         await message.reply_text(f"✅ Name: {text}\nStart?", reply_markup=btn)
         return
-# --- MEDIA HANDLER (STORE, THUMB, ETC) ---
+        # --- MEDIA HANDLER (STORE, THUMB, ETC) ---
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo))
 async def media_handler(client, message):
     uid = message.from_user.id
     
-    # A. STORE MODE (Sabse Important)
+    # A. STORE MODE
     if user_modes.get(uid) == "store":
         try:
             loading = await message.reply("⚙️ **Processing...**")
             # 1. DB me copy karo
             db_msg = await message.copy(chat_id=DB_CHANNEL_ID)
             
-            # 2. Fancy Caption lagao DB me
+            # 2. Fancy Caption lagao
             media = db_msg.document or db_msg.video or db_msg.audio or db_msg.photo
             if media:
                 new_cap = get_fancy_caption(getattr(media, "file_name", "File"), humanbytes(getattr(media, "file_size", 0)), getattr(media, "duration", 0))
@@ -357,7 +357,7 @@ async def media_handler(client, message):
             await loading.delete()
             await message.reply(f"✅ **Stored!**\n🔗 `{BLOGGER_URL}?data={payload}`")
             
-            # 4. User ki file delete (Safety)
+            # 4. User ki file delete
             await message.delete() 
         except Exception as e: await message.reply(f"❌ Error: {e}")
         return
@@ -491,7 +491,6 @@ async def process_run(client, cb):
             final_name = clean_filename(final_name)
             
             dur = get_duration(path)
-            # 🔥 GREEN LINE CAPTION HERE 🔥
             cap = get_fancy_caption(final_name, humanbytes(os.path.getsize(path)), dur)
             thumb = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
             wm = f"watermarks/{uid}.png"
@@ -513,12 +512,13 @@ async def cancel_handler(client, callback):
     await callback.answer("✅ Cancelled!")
     await callback.message.delete()
 
-@app.on_command("batch")
+# --- 👇👇 SUDHAR DIYA YAHAN (CORRECTED BATCH & DONE) 👇👇 ---
+@app.on_message(filters.command("batch") & filters.private)
 async def batch_cmd(client, message):
     batch_data[message.from_user.id] = {'files': []}
     await message.reply("📦 **Batch Mode!** Files bhejo fir /done likho.")
 
-@app.on_command("done")
+@app.on_message(filters.command("done") & filters.private)
 async def batch_done_cmd(client, message):
     if message.from_user.id in batch_data:
         batch_data[message.from_user.id]['step'] = 'naming'
@@ -537,4 +537,4 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
-        
+    

@@ -22,8 +22,9 @@ from motor.motor_asyncio import AsyncIOMotorClient
 # --- CONFIGURATION ---
 # Apni IDs yahan daalein ya Render Environment variables use karein
 API_ID = int(os.environ.get("API_ID", "23421127"))
-API_HASH = os.environ.get("API_HASH", "0375dd20aba9f2e7c29d0c1c06590dfb"))
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468501492:AAGpDSdzdlEzkJs9AqHkA0AHPcmSv1Dwlgk") 
+# 👇 YAHAN GALTI THI, AB SAHI HAI (Ek bracket hataya)
+API_HASH = os.environ.get("API_HASH", "0375dd20aba9f2e7c29d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "7222455447:AAG3hsn3CLCm16wd8Mcdf7I67Oz2AhaIhA8") 
 OWNER_ID = int(os.environ.get("OWNER_ID", "5027914470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja2001@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))

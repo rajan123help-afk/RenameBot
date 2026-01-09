@@ -18,24 +18,27 @@ from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
 from pyrogram.errors import UserNotParticipant
 from motor.motor_asyncio import AsyncIOMotorClient
+
 # --- CONFIGURATION ---
 API_ID = int(os.environ.get("API_ID", "23421127"))
 
-# 1. Yahan API_HASH me ab 1 bracket hai (Sahi hai)
+# 1 Bracket (Sahi hai)
 API_HASH = os.environ.get("API_HASH", "0375dd20aba9f2e7c29d0c1c06590dfb")
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468501492:AAGpDSdzdlEzkJs9AqHkA0AHPcmSv1Dwlgk") 
+# Aapka Naya Token (Screenshot se liya hai)
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468501492:AAGpD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
 
-# 2. Yahan OWNER_ID me last me 2 brackets )) hain (Ise dhyan se copy karna)
+# 2 Brackets (Sahi hai)
 OWNER_ID = int(os.environ.get("OWNER_ID", "5027914470"))
 
-# 3. Yahan Password 'raja12345' hai (Sahi hai)
+# Aapka Naya Database Link (raja12345 wala)
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "02a832d91755c2f5e8a2d1a6740a8674")
 CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
+
 # 🔥 FORCE SUBSCRIBE CHANNELS (3 Links) 🔥
 FS_CHANNELS = [
     {"id": -1002410972822, "link": "https://t.me/+j4eYjjJLTGY4MTFl"},

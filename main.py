@@ -3,6 +3,7 @@ import asyncio
 import base64
 import html
 import re
+from urllib.parse import quote # 🔥 IMPORT THIS FOR URL SAFETY
 from aiohttp import web
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -10,10 +11,10 @@ from pyrogram.errors import UserNotParticipant, PeerIdInvalid, FloodWait
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "221127"))
-API_HASH = os.environ.get("API_HASH", "0375dd2f2e7c29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "846850D5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
-OWNER_ID = int(os.environ.get("OWNER_ID", "50470"))
+API_ID = int(os.environ.get("API_ID", "234127"))
+API_HASH = os.environ.get("API_HASH", "0375dd20a7c29d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "84685D5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+OWNER_ID = int(os.environ.get("OWNER_ID", "5024470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
@@ -29,18 +30,17 @@ channels_col = db["channels"]
 app = Client("MainBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=10, parse_mode=enums.ParseMode.HTML)
 clone_app = None
 
-# --- HELPERS (RENAMER BOT LOGIC 🧪) ---
+# --- HELPERS (URL SAFE LOGIC 🛡️) ---
 
 def get_link_codes(string_data):
     # Step 1: Standard Base64 Encode
     b64_bytes = base64.b64encode(string_data.encode("utf-8"))
     b64_str = b64_bytes.decode("utf-8")
     
-    # Step 2: REMOVE PADDING (=) -> Ye ban gaya Telegram Code
+    # TELEGRAM LINK: Clean (Remove =)
     tg_code = b64_str.rstrip("=")
     
-    # Step 3: Blogger Link -> Telegram Code ko hi wapas Encode karo
-    # (Original string ko nahi, balki Step 2 wale result ko)
+    # BLOGGER LINK: Encode TG Code again (Standard Base64 + Padding)
     blogger_bytes = base64.b64encode(tg_code.encode("utf-8"))
     blogger_code = blogger_bytes.decode("utf-8")
     
@@ -50,8 +50,6 @@ def decode_payload(s):
     try:
         # Padding Fixer
         def fix_pad(s): return s + "=" * ((4 - len(s) % 4) % 4)
-        
-        # Decoder (Standard Base64)
         s = fix_pad(s.strip())
         decoded = base64.b64decode(s).decode("utf-8")
         return decoded
@@ -104,9 +102,10 @@ def get_fancy_caption(filename, filesize, duration):
 @app.on_message(filters.command("start") & filters.private)
 async def main_start(c, m):
     if m.from_user.id == OWNER_ID:
-        await m.reply("👋 **Boss! v13.0 Ready.**\n\n🔹 `/setclone TOKEN`\n🔹 `/addfs ID Link`\n🔹 `/delfs ID`")
+        # VERSION CHECK: "v15.0"
+        await m.reply("👋 **Boss! v15.0 Ready.**\n\n🔹 `/setclone TOKEN`\n🔹 `/addfs ID Link`\n🔹 `/delfs ID`")
 
-# 1. STORE FILE (Renamer Logic Applied)
+# 1. STORE FILE (URL SAFE FIX ✅)
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo) & filters.user(OWNER_ID))
 async def store_file(c, m):
     status = await m.reply("⚙️ **Processing...**")
@@ -128,9 +127,18 @@ async def store_file(c, m):
             if clone_app and clone_app.is_connected:
                 bot_uname = (await clone_app.get_me()).username
         except: pass
+        
+        # 🔥 URL SAFETY FIX: quote() use kiya hai
+        final_blogger_link = f"{BLOGGER_URL}?data={quote(blogger_code)}"
+        
+        # NO BACKTICKS in Links
+        msg_text = (
+            f"✅ **v15.0 Stored!**\n\n"
+            f"🔗 <b>Blog:</b> {final_blogger_link}\n\n"
+            f"🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}"
+        )
             
-        # v13.0 Tag added for verification
-        await status.edit(f"✅ **v13.0 Stored!**\n\n🔗 **Blog:** `{BLOGGER_URL}?data={blogger_code}`\n\n🤖 **Direct:** `https://t.me/{bot_uname}?start={tg_code}`")
+        await status.edit(msg_text, disable_web_page_preview=True)
     except Exception as e: await status.edit(f"❌ Error: {e}")
 
 # 2. SETTINGS
@@ -178,7 +186,6 @@ async def start_clone_bot():
             btn.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{c.me.username}?start={payload}")])
             return await m.reply("⚠️ **Join Channels First!**", reply_markup=InlineKeyboardMarkup(btn))
 
-        # Decode
         decoded_string = decode_payload(payload)
         if not decoded_string: return await m.reply("❌ **Link Invalid!**")
         
@@ -221,4 +228,4 @@ async def start_services():
     await asyncio.Event().wait()
 
 if __name__ == "__main__": asyncio.get_event_loop().run_until_complete(start_services())
-            
+    

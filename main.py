@@ -5,14 +5,14 @@ import html
 from aiohttp import web
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from pyrogram.errors import UserNotParticipant, MessageNotModified, PeerIdInvalid
+from pyrogram.errors import UserNotParticipant, PeerIdInvalid, FloodWait
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "231127"))
-API_HASH = os.environ.get("API_HASH", "0e7c29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "84501495dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
-OWNER_ID = int(os.environ.get("OWNER_ID", "579470"))
+API_ID = int(os.environ.get("API_ID", "234127"))
+API_HASH = os.environ.get("API_HASH", "03aba9f2e7c29d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "846850GpD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+OWNER_ID = int(os.environ.get("OWNER_ID", "5024470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
@@ -28,29 +28,28 @@ channels_col = db["channels"]
 app = Client("MainBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=10, parse_mode=enums.ParseMode.HTML)
 clone_app = None
 
-# --- HELPERS (DOUBLE ENCODING FIX 🔐) ---
+# --- HELPERS (LINK FIX - SIMPLE DOUBLE ENCODE) ---
 
 def encode_payload(string_data):
-    # Layer 1: Encode
+    # Layer 1
     b64_1 = base64.urlsafe_b64encode(string_data.encode("utf-8")).decode("utf-8")
-    # Layer 2: Encode Again (Double) + KEEP PADDING (=)
+    # Layer 2 (Simple Double Encode, No Stripping)
     b64_2 = base64.urlsafe_b64encode(b64_1.encode("utf-8")).decode("utf-8")
-    return b64_2 
+    return b64_2
 
 def decode_payload(s):
     try:
-        # Layer 1: Decode
-        s = s.strip()
-        padding = len(s) % 4
-        if padding > 0: s += "=" * (4 - padding)
+        # Padding Fixer
+        def fix_pad(s):
+            return s + "=" * ((4 - len(s) % 4) % 4)
+
+        # Layer 1 Decode
+        s = fix_pad(s.strip())
         decoded_1 = base64.urlsafe_b64decode(s).decode("utf-8")
         
-        # Layer 2: Decode Again
-        decoded_1 = decoded_1.strip()
-        padding = len(decoded_1) % 4
-        if padding > 0: decoded_1 += "=" * (4 - padding)
+        # Layer 2 Decode
+        decoded_1 = fix_pad(decoded_1.strip())
         final_data = base64.urlsafe_b64decode(decoded_1).decode("utf-8")
-        
         return final_data
     except:
         return None
@@ -84,22 +83,22 @@ async def main_start(c, m):
     if m.from_user.id == OWNER_ID:
         await m.reply("👋 **Boss! Ready.**\n\n🔹 `/setclone TOKEN`\n🔹 `/addfs ID Link`\n🔹 `/delfs ID`")
 
-# 1. STORE FILE
+# 1. STORE FILE (CRASH FIXED ✅)
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo) & filters.user(OWNER_ID))
 async def store_file(c, m):
     status = await m.reply("⚙️ **Processing...**")
     try:
+        # Prepare Data
         media = m.document or m.video or m.audio or m.photo
         fname = getattr(media, "file_name", "File")
         fsize = humanbytes(getattr(media, "file_size", 0))
         dur = getattr(media, "duration", 0)
         new_cap = get_fancy_caption(fname, fsize, dur)
 
-        db_msg = await m.copy(DB_CHANNEL_ID)
-        try: await db_msg.edit_caption(new_cap)
-        except: pass
+        # STEP 1: Copy WITH Caption (Ek hi baar me kaam khatam, No Edit = No FloodWait)
+        db_msg = await m.copy(DB_CHANNEL_ID, caption=new_cap)
         
-        # Double Encode for Blogger
+        # STEP 2: Generate Link
         raw_data = f"link_{OWNER_ID}_{db_msg.id}"
         code = encode_payload(raw_data)
         
@@ -169,6 +168,7 @@ async def start_clone_bot():
             msg = await c.get_messages(DB_CHANNEL_ID, msg_id)
             if not msg: return await temp.edit("❌ **File Deleted.**")
             
+            # Use Message Caption
             cap = msg.caption or get_fancy_caption(getattr(msg.document or msg.video, "file_name", "File"), humanbytes(getattr(msg.document or msg.video, "file_size", 0)), 0)
             
             sent = await c.copy_message(m.chat.id, DB_CHANNEL_ID, msg_id, caption=cap)
@@ -180,7 +180,9 @@ async def start_clone_bot():
             await sent.delete(); await alert.delete()
             await m.reply("❌ **Time Over!**", reply_markup=btn)
         except PeerIdInvalid:
-            await temp.edit(f"❌ **Error: Clone Bot Admin Nahi Hai!**\n\nJaldi se **Clone Bot** ko DB Channel `{DB_CHANNEL_ID}` me **Admin** banao!")
+            await temp.edit(f"❌ **Error: Clone Bot Admin Nahi Hai!**\nDB Channel me Admin Banao: `{DB_CHANNEL_ID}`")
+        except FloodWait as e:
+            await m.reply(f"⏳ **Too Many Requests!** Please wait {e.value} seconds.")
         except Exception as e: await m.reply(f"❌ Error: {e}")
 
     try: await clone_app.start(); print("✅ Clone Started")

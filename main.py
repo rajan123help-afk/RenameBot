@@ -9,10 +9,10 @@ from pyrogram.errors import UserNotParticipant, PeerIdInvalid, FloodWait
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "23127"))
-API_HASH = os.environ.get("API_HASH", "0375ddc29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468501pD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
-OWNER_ID = int(os.environ.get("OWNER_ID", "50470"))
+API_ID = int(os.environ.get("API_ID", "23421127"))
+API_HASH = os.environ.get("API_HASH", "0375dd20aba9f2e7c29d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468501492:AAGpD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+OWNER_ID = int(os.environ.get("OWNER_ID", "5027914470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
@@ -28,28 +28,31 @@ channels_col = db["channels"]
 app = Client("MainBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=10, parse_mode=enums.ParseMode.HTML)
 clone_app = None
 
-# --- HELPERS (EXACT MATCH FORMULA 🧪) ---
+# --- HELPERS (THE WORKING FORMULA ✅) ---
 
 def get_link_codes(string_data):
     # Step 1: Base64 Encode
+    # Ex: link_123_456 -> bGlua18xMjNfNDU2==
     b64_1 = base64.urlsafe_b64encode(string_data.encode("utf-8")).decode("utf-8")
     
-    # TELEGRAM CODE: Strip Padding (=)
+    # Step 2: REMOVE PADDING (=) for Telegram Param
+    # Ex: bGlua18xMjNfNDU2
     tg_code = b64_1.rstrip("=")
     
-    # BLOGGER CODE: Encode the 'tg_code' again (Double) & KEEP Padding (=)
+    # Step 3: Encode AGAIN for Blogger & KEEP PADDING (=)
+    # Ex: YkdsdWExODFNREkzT1RFME5EY3dYekk0T1E=
     blogger_code = base64.urlsafe_b64encode(tg_code.encode("utf-8")).decode("utf-8")
     
     return tg_code, blogger_code
 
 def decode_payload(s):
-    # Clone Bot ko sirf 'tg_code' milega (Single Layer)
     try:
-        # Fix Padding if missing
-        s = s.strip()
-        padding = len(s) % 4
-        if padding > 0: s += "=" * (4 - padding)
-        
+        # Padding Fixer Function
+        def fix_pad(s): return s + "=" * ((4 - len(s) % 4) % 4)
+
+        # Telegram Code (tg_code) comes here. It has NO padding.
+        # So we fix padding and decode once.
+        s = fix_pad(s.strip())
         decoded = base64.urlsafe_b64decode(s).decode("utf-8")
         return decoded
     except:
@@ -89,17 +92,16 @@ async def main_start(c, m):
 async def store_file(c, m):
     status = await m.reply("⚙️ **Processing...**")
     try:
-        # Prepare Data
         media = m.document or m.video or m.audio or m.photo
         fname = getattr(media, "file_name", "File")
         fsize = humanbytes(getattr(media, "file_size", 0))
         dur = getattr(media, "duration", 0)
         new_cap = get_fancy_caption(fname, fsize, dur)
 
-        # Copy to DB (With Caption - No Edit Needed)
+        # DB Channel me Copy (with Caption)
         db_msg = await m.copy(DB_CHANNEL_ID, caption=new_cap)
         
-        # GENERATE CODES
+        # LINK GENERATION (Sahi Formula Use Kiya Hai)
         raw_data = f"link_{OWNER_ID}_{db_msg.id}"
         tg_code, blogger_code = get_link_codes(raw_data)
         
@@ -157,7 +159,7 @@ async def start_clone_bot():
             btn.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{c.me.username}?start={payload}")])
             return await m.reply("⚠️ **Join Channels First!**", reply_markup=InlineKeyboardMarkup(btn))
 
-        # Decode
+        # Decode (Fix: Clone bot ko 'tg_code' milta hai, jo single layer hai)
         decoded_string = decode_payload(payload)
         if not decoded_string: return await m.reply("❌ **Link Invalid!**")
         
@@ -200,4 +202,4 @@ async def start_services():
     await asyncio.Event().wait()
 
 if __name__ == "__main__": asyncio.get_event_loop().run_until_complete(start_services())
-        
+    

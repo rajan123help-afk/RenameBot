@@ -10,9 +10,9 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
 API_ID = int(os.environ.get("API_ID", "231127"))
-API_HASH = os.environ.get("API_HASH", "0375dc29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "846850149GpD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
-OWNER_ID = int(os.environ.get("OWNER_ID", "5014470"))
+API_HASH = os.environ.get("API_HASH", "0e7c29d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "84501495dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+OWNER_ID = int(os.environ.get("OWNER_ID", "579470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"

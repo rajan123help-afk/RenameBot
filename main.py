@@ -5,13 +5,13 @@ import html
 from aiohttp import web
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from pyrogram.errors import UserNotParticipant
+from pyrogram.errors import UserNotParticipant, MessageNotModified
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "221127"))
-API_HASH = os.environ.get("API_HASH", "037520aba9f2e7c29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "84501492:AAGpD5dzd1Ezks9AqHkAOAhPcmGv1Dwlgk")
+API_ID = int(os.environ.get("API_ID", "234227"))
+API_HASH = os.environ.get("API_HASH", "0375dd20aba9f2e7cd0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "84601492:AAGpD5dzd1Js9AkAOAhPcmGv1Dwlgk")
 OWNER_ID = int(os.environ.get("OWNER_ID", "50914470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
@@ -28,23 +28,42 @@ channels_col = db["channels"]
 app = Client("MainBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=10, parse_mode=enums.ParseMode.HTML)
 clone_app = None
 
-# --- HELPERS (LONG LINK PATTERN FIX ✅) ---
+# --- HELPERS (DOUBLE ENCODE FIX 🛠️) ---
 
-def encode_id(msg_id):
-    # Format: link_OWNERID_MSGID (Ye hai wo lamba format jo aapka blogger chahta hai)
-    string_data = f"link_{OWNER_ID}_{msg_id}"
-    return base64.urlsafe_b64encode(string_data.encode("utf-8")).decode("utf-8")
+def encode_payload(string_data):
+    # Step 1: Encode String to Base64
+    b64_1 = base64.urlsafe_b64encode(string_data.encode("utf-8")).decode("utf-8")
+    # Step 2: Encode AGAIN (Double Encode for Blogger)
+    b64_2 = base64.urlsafe_b64encode(b64_1.encode("utf-8")).decode("utf-8")
+    return b64_2.strip("=")
 
-def decode_id(s):
+def decode_payload(s):
     try:
+        # Step 1: Fix Padding & Decode First Layer
         s = s.strip()
         padding = len(s) % 4
         if padding > 0: s += "=" * (4 - padding)
-        decoded = base64.urlsafe_b64decode(s).decode("utf-8")
+        decoded_1 = base64.urlsafe_b64decode(s).decode("utf-8")
         
-        # Ab ye purane aur naye dono lambe links ko tod kar ID nikal lega
-        if "_" in decoded: return int(decoded.split("_")[-1])
-        else: return int(decoded)
+        # Step 2: Fix Padding & Decode Second Layer
+        decoded_1 = decoded_1.strip()
+        padding = len(decoded_1) % 4
+        if padding > 0: decoded_1 += "=" * (4 - padding)
+        final_data = base64.urlsafe_b64decode(decoded_1).decode("utf-8")
+        
+        return final_data
+    except:
+        # Fallback: Agar Single Encoded hai (Purane Links)
+        try:
+            return base64.urlsafe_b64decode(s).decode("utf-8")
+        except:
+            return None
+
+def extract_msg_id(payload):
+    # Format: link_OWNERID_MSGID
+    try:
+        if "_" in payload: return int(payload.split("_")[-1])
+        else: return int(payload)
     except: return None
 
 def humanbytes(size):
@@ -70,23 +89,29 @@ async def main_start(c, m):
     if m.from_user.id == OWNER_ID:
         await m.reply("👋 **Boss! Ready.**\n\n🔹 `/setclone TOKEN`\n🔹 `/addfs ID Link`\n🔹 `/delfs ID`")
 
-# 1. STORE FILE (Long Link + Caption)
+# 1. STORE FILE (Fix: MessageNotModified Error Ignored)
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo) & filters.user(OWNER_ID))
 async def store_file(c, m):
     status = await m.reply("⚙️ **Processing...**")
     try:
-        # Caption Generate
+        # Caption Logic
         media = m.document or m.video or m.audio or m.photo
         fname = getattr(media, "file_name", "File")
         fsize = humanbytes(getattr(media, "file_size", 0))
         dur = getattr(media, "duration", 0)
         new_cap = get_fancy_caption(fname, fsize, dur)
 
-        # Save to DB
-        db_msg = await m.copy(DB_CHANNEL_ID, caption=new_cap)
+        # Copy to DB
+        db_msg = await m.copy(DB_CHANNEL_ID)
         
-        # Encode (Lamba Link Banega)
-        code = encode_id(db_msg.id)
+        # Edit Caption (Try-Except Block)
+        try: await db_msg.edit_caption(new_cap)
+        except MessageNotModified: pass # Ignore if caption is same
+        except: pass 
+        
+        # Double Encode for Blogger
+        raw_data = f"link_{OWNER_ID}_{db_msg.id}"
+        code = encode_payload(raw_data)
         
         bot_uname = "CloneBot"
         try:
@@ -142,17 +167,28 @@ async def start_clone_bot():
             btn.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{c.me.username}?start={payload}")])
             return await m.reply("⚠️ **Join Channels First!**", reply_markup=InlineKeyboardMarkup(btn))
 
-        # Decode
-        msg_id = decode_id(payload)
+        # Decode Logic (Handles Double Encoded)
+        decoded_string = decode_payload(payload)
+        if not decoded_string: return await m.reply("❌ **Link Invalid!**")
+        
+        msg_id = extract_msg_id(decoded_string)
         if not msg_id: return await m.reply("❌ **Link Invalid!**")
 
         try:
             temp = await m.reply("🔄 **Checking File...**")
-            msg = await c.get_messages(DB_CHANNEL_ID, msg_id)
-            if not msg: return await temp.edit("❌ **File Deleted.**")
+            # Clone Bot MUST be Admin in DB Channel
+            try:
+                msg = await c.get_messages(DB_CHANNEL_ID, msg_id)
+            except Exception as e:
+                return await temp.edit(f"❌ **Error: Peer Id Invalid.**\nClone Bot ko DB Channel ({DB_CHANNEL_ID}) me Admin banao!")
             
-            # Send Copy
-            await c.copy_message(m.chat.id, DB_CHANNEL_ID, msg_id)
+            if not msg or not (msg.document or msg.video or msg.audio or msg.photo): 
+                return await temp.edit("❌ **File Deleted.**")
+            
+            # Use Caption from DB
+            cap = msg.caption or get_fancy_caption(getattr(msg.document or msg.video, "file_name", "File"), humanbytes(getattr(msg.document or msg.video, "file_size", 0)), 0)
+            
+            sent = await c.copy_message(m.chat.id, DB_CHANNEL_ID, msg_id, caption=cap)
             await temp.delete()
             
             btn = InlineKeyboardMarkup([[InlineKeyboardButton("📂 Get File Again", url=f"https://t.me/{c.me.username}?start={payload}")]])
@@ -160,9 +196,7 @@ async def start_clone_bot():
             await asyncio.sleep(300)
             await sent.delete(); await alert.delete()
             await m.reply("❌ **Time Over!**", reply_markup=btn)
-        except Exception as e: 
-            print(f"Error: {e}")
-            await m.reply("❌ **Error:** Make sure Clone Bot is Admin in DB Channel!")
+        except Exception as e: await m.reply(f"❌ Error: {e}")
 
     try: await clone_app.start(); print("✅ Clone Started")
     except: pass

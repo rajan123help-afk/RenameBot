@@ -9,10 +9,10 @@ from pyrogram.errors import UserNotParticipant
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "2421127"))
-API_HASH = os.environ.get("API_HASH", "0375dd20aba9f2e7c29dc06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "846851492:AAGpD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
-OWNER_ID = int(os.environ.get("OWNER_ID", "502914470"))
+API_ID = int(os.environ.get("API_ID", "221127"))
+API_HASH = os.environ.get("API_HASH", "037520aba9f2e7c29d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "84501492:AAGpD5dzd1Ezks9AqHkAOAhPcmGv1Dwlgk")
+OWNER_ID = int(os.environ.get("OWNER_ID", "50914470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
@@ -28,11 +28,12 @@ channels_col = db["channels"]
 app = Client("MainBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=10, parse_mode=enums.ParseMode.HTML)
 clone_app = None
 
-# --- HELPERS (LINK & CAPTION FIXES) ---
+# --- HELPERS (LONG LINK PATTERN FIX ✅) ---
 
-def encode_id(i):
-    # FIX: Padding strip MAT karna. Blogger ko '=' chahiye hota hai.
-    return base64.urlsafe_b64encode(str(i).encode("utf-8")).decode("utf-8")
+def encode_id(msg_id):
+    # Format: link_OWNERID_MSGID (Ye hai wo lamba format jo aapka blogger chahta hai)
+    string_data = f"link_{OWNER_ID}_{msg_id}"
+    return base64.urlsafe_b64encode(string_data.encode("utf-8")).decode("utf-8")
 
 def decode_id(s):
     try:
@@ -40,6 +41,8 @@ def decode_id(s):
         padding = len(s) % 4
         if padding > 0: s += "=" * (4 - padding)
         decoded = base64.urlsafe_b64decode(s).decode("utf-8")
+        
+        # Ab ye purane aur naye dono lambe links ko tod kar ID nikal lega
         if "_" in decoded: return int(decoded.split("_")[-1])
         else: return int(decoded)
     except: return None
@@ -61,29 +64,30 @@ def get_fancy_caption(filename, filesize, duration):
             f"<blockquote><b>⏰ Duration ➥ {get_duration_str(duration)}</b></blockquote>\n"
             f"<blockquote><b>⚡ Powered By ➥ {CREDIT_NAME}</b></blockquote>")
 
-# --- MAIN BOT COMMANDS ---
+# --- COMMANDS ---
 @app.on_message(filters.command("start") & filters.private)
 async def main_start(c, m):
     if m.from_user.id == OWNER_ID:
         await m.reply("👋 **Boss! Ready.**\n\n🔹 `/setclone TOKEN`\n🔹 `/addfs ID Link`\n🔹 `/delfs ID`")
 
-# 1. STORE FILE (FORCE CAPTION REPLACE)
+# 1. STORE FILE (Long Link + Caption)
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo) & filters.user(OWNER_ID))
 async def store_file(c, m):
     status = await m.reply("⚙️ **Processing...**")
     try:
-        # Fancy Caption Pehle Hi Banao
+        # Caption Generate
         media = m.document or m.video or m.audio or m.photo
         fname = getattr(media, "file_name", "File")
         fsize = humanbytes(getattr(media, "file_size", 0))
         dur = getattr(media, "duration", 0)
         new_cap = get_fancy_caption(fname, fsize, dur)
 
-        # Copy with NEW Caption (Force Replace)
+        # Save to DB
         db_msg = await m.copy(DB_CHANNEL_ID, caption=new_cap)
         
-        # Link Generate
+        # Encode (Lamba Link Banega)
         code = encode_id(db_msg.id)
+        
         bot_uname = "CloneBot"
         try:
             if clone_app and clone_app.is_connected:
@@ -111,7 +115,7 @@ async def del_fs(c, m):
     try: await channels_col.delete_one({"_id": int(m.command[1])}); await m.reply("🗑 Deleted.")
     except: pass
 
-# --- CLONE BOT LOGIC (ALWAYS NEW CAPTION) ---
+# --- CLONE BOT LOGIC ---
 async def start_clone_bot():
     global clone_app
     data = await settings_col.find_one({"_id": "clone_token"})
@@ -127,7 +131,7 @@ async def start_clone_bot():
 
         payload = m.command[1]
         
-        # Check Force Sub
+        # FS Check
         missing = []
         async for ch in channels_col.find():
             try: await c.get_chat_member(ch["_id"], m.from_user.id)
@@ -138,23 +142,17 @@ async def start_clone_bot():
             btn.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{c.me.username}?start={payload}")])
             return await m.reply("⚠️ **Join Channels First!**", reply_markup=InlineKeyboardMarkup(btn))
 
-        # Decode (Handles all links)
+        # Decode
         msg_id = decode_id(payload)
         if not msg_id: return await m.reply("❌ **Link Invalid!**")
 
         try:
             temp = await m.reply("🔄 **Checking File...**")
             msg = await c.get_messages(DB_CHANNEL_ID, msg_id)
-            media = msg.document or msg.video or msg.audio or msg.photo
-            if not media: return await temp.edit("❌ **File Deleted.**")
+            if not msg: return await temp.edit("❌ **File Deleted.**")
             
-            # 🔥 Fix: Always Generate NEW Fancy Caption (Ignore Old One)
-            fname = getattr(media, "file_name", "File")
-            fsize = humanbytes(getattr(media, "file_size", 0))
-            dur = getattr(media, "duration", 0)
-            cap = get_fancy_caption(fname, fsize, dur)
-            
-            sent = await c.copy_message(m.chat.id, DB_CHANNEL_ID, msg_id, caption=cap)
+            # Send Copy
+            await c.copy_message(m.chat.id, DB_CHANNEL_ID, msg_id)
             await temp.delete()
             
             btn = InlineKeyboardMarkup([[InlineKeyboardButton("📂 Get File Again", url=f"https://t.me/{c.me.username}?start={payload}")]])
@@ -162,7 +160,9 @@ async def start_clone_bot():
             await asyncio.sleep(300)
             await sent.delete(); await alert.delete()
             await m.reply("❌ **Time Over!**", reply_markup=btn)
-        except Exception as e: await m.reply(f"❌ Error: {e}")
+        except Exception as e: 
+            print(f"Error: {e}")
+            await m.reply("❌ **Error:** Make sure Clone Bot is Admin in DB Channel!")
 
     try: await clone_app.start(); print("✅ Clone Started")
     except: pass

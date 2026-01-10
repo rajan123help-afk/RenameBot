@@ -9,9 +9,9 @@ from pyrogram.errors import UserNotParticipant
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "234127"))
-API_HASH = os.environ.get("API_HASH", "0375dda9f2e7c29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "84685492:AAGpD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+API_ID = int(os.environ.get("API_ID", "23421127"))
+API_HASH = os.environ.get("API_HASH", "0375dd20aba9f2e7c29d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468501492:AAGpD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
 OWNER_ID = int(os.environ.get("OWNER_ID", "5027914470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
@@ -28,7 +28,8 @@ channels_col = db["channels"]
 app = Client("MainBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=10, parse_mode=enums.ParseMode.HTML)
 clone_app = None
 
-# --- HELPERS (Caption & Decoder Fixed) ---
+# --- HELPERS (Smart Decoder & Caption) ---
+
 def encode_id(i): 
     return base64.urlsafe_b64encode(str(i).encode("utf-8")).decode("utf-8").strip("=")
 
@@ -47,11 +48,9 @@ def humanbytes(size):
 
 def get_duration_str(duration):
     if not duration: return "0s"
-    m, s = divmod(int(duration), 60)
-    h, m = divmod(m, 60)
+    m, s = divmod(int(duration), 60); h, m = divmod(m, 60)
     return f"{h}h {m}m {s}s" if h else f"{m}m {s}s"
 
-# 🔥 NEW FANCY CAPTION (Green Line + Duration)
 def get_fancy_caption(filename, filesize, duration):
     return (f"<b>{html.escape(filename)}</b>\n\n"
             f"<blockquote><b>📂 Size ➥ {filesize}</b></blockquote>\n"
@@ -62,26 +61,42 @@ def get_fancy_caption(filename, filesize, duration):
 @app.on_message(filters.command("start") & filters.private)
 async def main_start(c, m):
     if m.from_user.id == OWNER_ID:
-        await m.reply("👋 **Boss! Main Bot Ready.**\n\n🔹 `/setclone token`\n🔹 `/addfs ID Link`\n🔹 `/delfs ID`")
+        await m.reply("👋 **Boss! Ready.**\n\n🔹 `/setclone TOKEN`\n🔹 `/addfs ID Link`\n🔹 `/delfs ID`")
 
-# 1. Store File (Updated Caption)
+# 1. STORE FILE (AB CAPTION BHI BADLEGA ✅)
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo) & filters.user(OWNER_ID))
 async def store_file(c, m):
     status = await m.reply("⚙️ **Processing...**")
     try:
+        # 1. DB Channel me Copy karo
         db_msg = await m.copy(DB_CHANNEL_ID)
-        code = encode_id(db_msg.id)
         
+        # 2. Caption Badal do (DB Channel ke andar)
+        media = db_msg.document or db_msg.video or db_msg.audio or db_msg.photo
+        if media:
+            fname = getattr(media, "file_name", "File")
+            fsize = humanbytes(getattr(media, "file_size", 0))
+            dur = getattr(media, "duration", 0)
+            
+            # Fancy Caption Banao
+            new_cap = get_fancy_caption(fname, fsize, dur)
+            
+            # DB Message Edit karo
+            try: await db_msg.edit_caption(new_cap)
+            except: pass # Agar edit fail ho jaye to ignore karo
+        
+        # 3. Link Generate karo
+        code = encode_id(db_msg.id)
         bot_uname = "CloneBot"
         try:
             if clone_app and clone_app.is_connected:
                 bot_uname = (await clone_app.get_me()).username
         except: pass
             
-        await status.edit(f"✅ **Stored!**\n\n🔗 **Blog:** `{BLOGGER_URL}?data={code}`\n\n🤖 **Bot:** `https://t.me/{bot_uname}?start={code}`")
+        await status.edit(f"✅ **Stored & Captioned!**\n\n🔗 **Blog:** `{BLOGGER_URL}?data={code}`\n\n🤖 **Direct:** `https://t.me/{bot_uname}?start={code}`")
     except Exception as e: await status.edit(f"❌ Error: {e}")
 
-# 2. Settings
+# 2. SETTINGS
 @app.on_message(filters.command("setclone") & filters.user(OWNER_ID))
 async def set_clone(c, m):
     if len(m.command) < 2: return await m.reply("Usage: `/setclone TOKEN`")
@@ -99,7 +114,7 @@ async def del_fs(c, m):
     try: await channels_col.delete_one({"_id": int(m.command[1])}); await m.reply("🗑 Deleted.")
     except: pass
 
-# --- CLONE BOT LOGIC (New Caption Here too) ---
+# --- CLONE BOT LOGIC (Delivery Fix) ---
 async def start_clone_bot():
     global clone_app
     data = await settings_col.find_one({"_id": "clone_token"})
@@ -127,7 +142,7 @@ async def start_clone_bot():
             btn.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{c.me.username}?start={payload}")])
             return await m.reply("⚠️ **Join Channels First!**", reply_markup=InlineKeyboardMarkup(btn))
 
-        # Decode & Send
+        # Decode
         decoded = decode_id(payload)
         if not decoded: return await m.reply("❌ **Invalid Link**")
 
@@ -138,11 +153,8 @@ async def start_clone_bot():
             media = msg.document or msg.video or msg.audio or msg.photo
             if not media: return await temp.edit("❌ **File Deleted.**")
             
-            # 🔥 New Fancy Caption Logic
-            fname = getattr(media, "file_name", "File")
-            fsize = humanbytes(getattr(media, "file_size", 0))
-            dur = getattr(media, "duration", 0)
-            cap = get_fancy_caption(fname, fsize, dur)
+            # Use Caption from DB or Generate New
+            cap = msg.caption or get_fancy_caption(getattr(media, "file_name", "File"), humanbytes(getattr(media, "file_size", 0)), getattr(media, "duration", 0))
             
             sent = await c.copy_message(m.chat.id, DB_CHANNEL_ID, msg_id, caption=cap)
             await temp.delete()

@@ -10,10 +10,10 @@ from pyrogram.errors import UserNotParticipant, PeerIdInvalid, FloodWait
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "234127"))
-API_HASH = os.environ.get("API_HASH", "0375dd20abac29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "846850d1EzkJs9AqHkAOAhPcmGv1Dwlgk")
-OWNER_ID = int(os.environ.get("OWNER_ID", "5027470"))
+API_ID = int(os.environ.get("API_ID", "221127"))
+API_HASH = os.environ.get("API_HASH", "0375dd2f2e7c29d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "846850D5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+OWNER_ID = int(os.environ.get("OWNER_ID", "50470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
@@ -29,28 +29,29 @@ channels_col = db["channels"]
 app = Client("MainBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=10, parse_mode=enums.ParseMode.HTML)
 clone_app = None
 
-# --- HELPERS (THE SAFETY FIX 🛡️) ---
+# --- HELPERS (RENAMER BOT LOGIC 🧪) ---
 
 def get_link_codes(string_data):
-    # Step 1: Base64 Encode
+    # Step 1: Standard Base64 Encode
     b64_bytes = base64.b64encode(string_data.encode("utf-8"))
     b64_str = b64_bytes.decode("utf-8")
     
-    # TELEGRAM LINK: Clean (Remove =)
+    # Step 2: REMOVE PADDING (=) -> Ye ban gaya Telegram Code
     tg_code = b64_str.rstrip("=")
     
-    # BLOGGER LINK: Keep the Original Padded String (=)
-    # Ye Blogger script ko crash hone se bachayega
-    blogger_bytes = base64.b64encode(b64_str.encode("utf-8"))
+    # Step 3: Blogger Link -> Telegram Code ko hi wapas Encode karo
+    # (Original string ko nahi, balki Step 2 wale result ko)
+    blogger_bytes = base64.b64encode(tg_code.encode("utf-8"))
     blogger_code = blogger_bytes.decode("utf-8")
     
     return tg_code, blogger_code
 
 def decode_payload(s):
     try:
-        # Padding Fixer (Bot should handle both Padded and Unpadded)
+        # Padding Fixer
         def fix_pad(s): return s + "=" * ((4 - len(s) % 4) % 4)
-
+        
+        # Decoder (Standard Base64)
         s = fix_pad(s.strip())
         decoded = base64.b64decode(s).decode("utf-8")
         return decoded
@@ -103,9 +104,9 @@ def get_fancy_caption(filename, filesize, duration):
 @app.on_message(filters.command("start") & filters.private)
 async def main_start(c, m):
     if m.from_user.id == OWNER_ID:
-        await m.reply("👋 **Boss! v12.0 Ready.**\n\n🔹 `/setclone TOKEN`\n🔹 `/addfs ID Link`\n🔹 `/delfs ID`")
+        await m.reply("👋 **Boss! v13.0 Ready.**\n\n🔹 `/setclone TOKEN`\n🔹 `/addfs ID Link`\n🔹 `/delfs ID`")
 
-# 1. STORE FILE (Safe Link Generation)
+# 1. STORE FILE (Renamer Logic Applied)
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo) & filters.user(OWNER_ID))
 async def store_file(c, m):
     status = await m.reply("⚙️ **Processing...**")
@@ -128,7 +129,8 @@ async def store_file(c, m):
                 bot_uname = (await clone_app.get_me()).username
         except: pass
             
-        await status.edit(f"✅ **v12.0 Stored!**\n\n🔗 **Blog:** `{BLOGGER_URL}?data={blogger_code}`\n\n🤖 **Direct:** `https://t.me/{bot_uname}?start={tg_code}`")
+        # v13.0 Tag added for verification
+        await status.edit(f"✅ **v13.0 Stored!**\n\n🔗 **Blog:** `{BLOGGER_URL}?data={blogger_code}`\n\n🤖 **Direct:** `https://t.me/{bot_uname}?start={tg_code}`")
     except Exception as e: await status.edit(f"❌ Error: {e}")
 
 # 2. SETTINGS
@@ -219,4 +221,4 @@ async def start_services():
     await asyncio.Event().wait()
 
 if __name__ == "__main__": asyncio.get_event_loop().run_until_complete(start_services())
-        
+            

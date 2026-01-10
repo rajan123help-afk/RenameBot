@@ -11,9 +11,9 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
 API_ID = int(os.environ.get("API_ID", "23127"))
-API_HASH = os.environ.get("API_HASH", "0375dd20ab29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "846855dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
-OWNER_ID = int(os.environ.get("OWNER_ID", "5914470"))
+API_HASH = os.environ.get("API_HASH", "0375dd20a7c29d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468D5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+OWNER_ID = int(os.environ.get("OWNER_ID", "502470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
@@ -29,28 +29,33 @@ channels_col = db["channels"]
 app = Client("MainBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=10, parse_mode=enums.ParseMode.HTML)
 clone_app = None
 
-# --- HELPERS (PADDING FIX 🔐) ---
+# --- HELPERS (THE EXACT WORKING FORMULA 🧪) ---
 
 def get_link_codes(string_data):
-    # Step 1: Base64 Encode (Level 1)
-    b64_1 = base64.urlsafe_b64encode(string_data.encode("utf-8")).decode("utf-8")
+    # Step 1: Standard Base64 Encode (Not URL Safe)
+    # Aapke purane snippet me 'b64encode' use ho raha tha
+    b64_bytes = base64.b64encode(string_data.encode("utf-8"))
+    b64_1 = b64_bytes.decode("utf-8")
     
-    # TELEGRAM LINK: Padding (=) HATA DO ❌
+    # TELEGRAM LINK: Padding (=) HATA DO
     tg_code = b64_1.rstrip("=")
     
-    # BLOGGER LINK: Telegram code (Jisme = nahi hai) ko wapas encode karo
-    blogger_code = base64.urlsafe_b64encode(tg_code.encode("utf-8")).decode("utf-8")
+    # BLOGGER LINK: Encode the TG Code again (Standard Base64)
+    # Padding (=) rehne do
+    blogger_bytes = base64.b64encode(tg_code.encode("utf-8"))
+    blogger_code = blogger_bytes.decode("utf-8")
     
     return tg_code, blogger_code
 
 def decode_payload(s):
     try:
-        # Padding Fixer (Zaroori hai kyunki humne hata diya tha)
+        # Padding wapas lagao
         def fix_pad(s): return s + "=" * ((4 - len(s) % 4) % 4)
-
-        # Clone bot ko Telegram code milta hai (Level 1 without padding)
+        
+        # Decode Telegram Code
         s = fix_pad(s.strip())
-        decoded = base64.urlsafe_b64decode(s).decode("utf-8")
+        # Use Standard Decode to match Encode
+        decoded = base64.b64decode(s).decode("utf-8")
         return decoded
     except:
         return None
@@ -72,7 +77,7 @@ def get_duration_str(duration):
     m, s = divmod(int(duration), 60); h, m = divmod(m, 60)
     return f"{h}h {m}m {s}s" if h else f"{m}m {s}s"
 
-# 🔥 SEASON/EPISODE DETECTOR
+# 🔥 SMART CAPTION
 def get_media_info(name):
     name = name.replace(".", " ").replace("_", " ").replace("-", " ")
     match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", name)
@@ -81,7 +86,6 @@ def get_media_info(name):
     if match2: return match2.group(1), match2.group(2)
     return None, None
 
-# 🔥 FANCY CAPTION
 def get_fancy_caption(filename, filesize, duration):
     safe_name = html.escape(filename)
     caption = f"<b>{safe_name}</b>\n\n"
@@ -102,9 +106,9 @@ def get_fancy_caption(filename, filesize, duration):
 @app.on_message(filters.command("start") & filters.private)
 async def main_start(c, m):
     if m.from_user.id == OWNER_ID:
-        await m.reply("👋 **Boss! Ready.**\n\n🔹 `/setclone TOKEN`\n🔹 `/addfs ID Link`\n🔹 `/delfs ID`")
+        await m.reply("👋 **Boss! v11.0 Ready.**\n\n🔹 `/setclone TOKEN`\n🔹 `/addfs ID Link`\n🔹 `/delfs ID`")
 
-# 1. STORE FILE (Correct Link Format)
+# 1. STORE FILE (Correct Logic)
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo) & filters.user(OWNER_ID))
 async def store_file(c, m):
     status = await m.reply("⚙️ **Processing...**")
@@ -115,10 +119,9 @@ async def store_file(c, m):
         dur = getattr(media, "duration", 0)
         new_cap = get_fancy_caption(fname, fsize, dur)
 
-        # Copy to DB (With Caption)
         db_msg = await m.copy(DB_CHANNEL_ID, caption=new_cap)
         
-        # Link Logic Call
+        # Link Logic
         raw_data = f"link_{OWNER_ID}_{db_msg.id}"
         tg_code, blogger_code = get_link_codes(raw_data)
         
@@ -127,8 +130,9 @@ async def store_file(c, m):
             if clone_app and clone_app.is_connected:
                 bot_uname = (await clone_app.get_me()).username
         except: pass
-            
-        await status.edit(f"✅ **Stored!**\n\n🔗 **Blog:** `{BLOGGER_URL}?data={blogger_code}`\n\n🤖 **Direct:** `https://t.me/{bot_uname}?start={tg_code}`")
+        
+        # Note: Added v11.0 tag to verify update
+        await status.edit(f"✅ **v11.0 Stored!**\n\n🔗 **Blog:** `{BLOGGER_URL}?data={blogger_code}`\n\n🤖 **Direct:** `https://t.me/{bot_uname}?start={tg_code}`")
     except Exception as e: await status.edit(f"❌ Error: {e}")
 
 # 2. SETTINGS
@@ -176,7 +180,6 @@ async def start_clone_bot():
             btn.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{c.me.username}?start={payload}")])
             return await m.reply("⚠️ **Join Channels First!**", reply_markup=InlineKeyboardMarkup(btn))
 
-        # Decode Logic (Handles Missing Padding)
         decoded_string = decode_payload(payload)
         if not decoded_string: return await m.reply("❌ **Link Invalid!**")
         

@@ -11,10 +11,10 @@ from pyrogram.errors import UserNotParticipant, PeerIdInvalid, FloodWait
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "23127"))
-API_HASH = os.environ.get("API_HASH", "0375f2e7c29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "846pD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
-OWNER_ID = int(os.environ.get("OWNER_ID", "504470"))
+API_ID = int(os.environ.get("API_ID", "234227"))
+API_HASH = os.environ.get("API_HASH", "0375dd20abc29d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468501pD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+OWNER_ID = int(os.environ.get("OWNER_ID", "5024470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
@@ -66,7 +66,7 @@ def get_duration_str(duration):
     m, s = divmod(int(duration), 60); h, m = divmod(m, 60)
     return f"{h}h {m}m {s}s" if h else f"{m}m {s}s"
 
-# 🔥 SMART CAPTION LOGIC (DUMDAAR STYLE)
+# 🔥 STYLE UPGRADE (v17.0)
 def get_media_info(name):
     name = name.replace(".", " ").replace("_", " ").replace("-", " ")
     match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", name)
@@ -77,24 +77,27 @@ def get_media_info(name):
 
 def get_fancy_caption(filename, filesize, duration):
     safe_name = html.escape(filename)
-    caption = f"<b>{safe_name}</b>\n\n"
     
-    # 1. Season/Episode (Plain Text)
+    # Filename in MONOSPACE (Computer Font)
+    caption = f"<code>{safe_name}</code>\n\n"
+    
+    # Season/Episode
     s, e = get_media_info(filename)
     if s: s = s.zfill(2)
     if e: e = e.zfill(2)
     
-    if s: caption += f"💿 Season ➥ {s}\n"
-    if e: caption += f"📺 Episode ➥ {e}\n"
+    if s: caption += f"💿 <b>Season ➥ {s}</b>\n"
+    if e: caption += f"📺 <b>Episode ➥ {e}</b>\n"
     if s or e: caption += "\n"
     
-    # 2. Info Blocks (Separate Blockquotes for impact)
-    # Note: <blockquote> tag Telegram me "Green Line" banata hai.
-    # Har line ko alag blockquote me dalne se beech me gap aata hai (Jaisa screenshot me hai).
+    # Info Blocks (Separated by \n\n to force separate Green Bars)
+    # Added <b> tags inside for Bold Text
     
-    caption += f"<blockquote>File Size ♻️ ➥ {filesize} ❞</blockquote>\n"
-    caption += f"<blockquote>Duration ⏰ ➥ {get_duration_str(duration)} ❞</blockquote>\n"
-    caption += f"<blockquote>Powered By ➥ {CREDIT_NAME} ❞</blockquote>"
+    caption += f"<blockquote><b>File Size ♻️ ➥ {filesize} ❞</b></blockquote>\n\n"
+    
+    caption += f"<blockquote><b>Duration ⏰ ➥ {get_duration_str(duration)} ❞</b></blockquote>\n\n"
+    
+    caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME} ❞</b></blockquote>"
     
     return caption
 
@@ -102,7 +105,7 @@ def get_fancy_caption(filename, filesize, duration):
 @app.on_message(filters.command("start") & filters.private)
 async def main_start(c, m):
     if m.from_user.id == OWNER_ID:
-        await m.reply("👋 **Boss! v16.0 Ready.**\n\n🔹 `/setclone TOKEN`\n🔹 `/addfs ID Link`\n🔹 `/delfs ID`")
+        await m.reply("👋 **Boss! v17.0 Ready.**\n\n🔹 `/setclone TOKEN`\n🔹 `/addfs ID Link`\n🔹 `/delfs ID`")
 
 # 1. STORE FILE
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo) & filters.user(OWNER_ID))
@@ -114,7 +117,7 @@ async def store_file(c, m):
         fsize = humanbytes(getattr(media, "file_size", 0))
         dur = getattr(media, "duration", 0)
         
-        # New "Dumdaar" Caption
+        # New "Dumdaar" Caption v17
         new_cap = get_fancy_caption(fname, fsize, dur)
 
         db_msg = await m.copy(DB_CHANNEL_ID, caption=new_cap)
@@ -131,7 +134,7 @@ async def store_file(c, m):
         final_blogger_link = f"{BLOGGER_URL}?data={quote(blogger_code)}"
         
         msg_text = (
-            f"✅ **v16.0 Stored!**\n\n"
+            f"✅ **v17.0 Stored!**\n\n"
             f"🔗 <b>Blog:</b> {final_blogger_link}\n\n"
             f"🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}"
         )
@@ -195,7 +198,6 @@ async def start_clone_bot():
             msg = await c.get_messages(DB_CHANNEL_ID, msg_id)
             if not msg: return await temp.edit("❌ **File Deleted.**")
             
-            # Caption Logic for Clone Bot too
             cap = msg.caption or get_fancy_caption(getattr(msg.document or msg.video, "file_name", "File"), humanbytes(getattr(msg.document or msg.video, "file_size", 0)), 0)
             
             sent = await c.copy_message(m.chat.id, DB_CHANNEL_ID, msg_id, caption=cap)
@@ -227,4 +229,4 @@ async def start_services():
     await asyncio.Event().wait()
 
 if __name__ == "__main__": asyncio.get_event_loop().run_until_complete(start_services())
-    
+                                 

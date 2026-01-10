@@ -2,6 +2,7 @@ import os
 import asyncio
 import base64
 import html
+import re  # Regex ke liye zaroori
 from aiohttp import web
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -9,10 +10,10 @@ from pyrogram.errors import UserNotParticipant, PeerIdInvalid, FloodWait
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "23421127"))
-API_HASH = os.environ.get("API_HASH", "0375dd20aba9f2e7c29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468501492:AAGpD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
-OWNER_ID = int(os.environ.get("OWNER_ID", "5027914470"))
+API_ID = int(os.environ.get("API_ID", "23427"))
+API_HASH = os.environ.get("API_HASH", "0375dd20aba0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468501dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+OWNER_ID = int(os.environ.get("OWNER_ID", "50470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
@@ -28,30 +29,26 @@ channels_col = db["channels"]
 app = Client("MainBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=10, parse_mode=enums.ParseMode.HTML)
 clone_app = None
 
-# --- HELPERS (THE WORKING FORMULA ✅) ---
+# --- HELPERS (EXACT MATCH LOGIC 🧪) ---
 
 def get_link_codes(string_data):
-    # Step 1: Base64 Encode
-    # Ex: link_123_456 -> bGlua18xMjNfNDU2==
+    # Step 1: Base64 Encode (Level 1 - Telegram)
+    # Standard encode, keeps padding if needed
     b64_1 = base64.urlsafe_b64encode(string_data.encode("utf-8")).decode("utf-8")
     
-    # Step 2: REMOVE PADDING (=) for Telegram Param
-    # Ex: bGlua18xMjNfNDU2
-    tg_code = b64_1.rstrip("=")
+    # Step 2: Base64 Encode AGAIN (Level 2 - Blogger)
+    # Aapke code me ye 'enc' variable tha jo code ko dobara encode kar raha tha
+    blogger_code = base64.urlsafe_b64encode(b64_1.encode("utf-8")).decode("utf-8")
     
-    # Step 3: Encode AGAIN for Blogger & KEEP PADDING (=)
-    # Ex: YkdsdWExODFNREkzT1RFME5EY3dYekk0T1E=
-    blogger_code = base64.urlsafe_b64encode(tg_code.encode("utf-8")).decode("utf-8")
-    
-    return tg_code, blogger_code
+    return b64_1, blogger_code
 
 def decode_payload(s):
     try:
-        # Padding Fixer Function
+        # Padding Fixer
         def fix_pad(s): return s + "=" * ((4 - len(s) % 4) % 4)
 
-        # Telegram Code (tg_code) comes here. It has NO padding.
-        # So we fix padding and decode once.
+        # Clone bot ko Level 1 code (Telegram wala) milta hai.
+        # Ise bas ek baar decode karna hai.
         s = fix_pad(s.strip())
         decoded = base64.urlsafe_b64decode(s).decode("utf-8")
         return decoded
@@ -75,11 +72,39 @@ def get_duration_str(duration):
     m, s = divmod(int(duration), 60); h, m = divmod(m, 60)
     return f"{h}h {m}m {s}s" if h else f"{m}m {s}s"
 
+# 🔥 SEASON/EPISODE DETECTOR (From Your Code)
+def get_media_info(name):
+    # Name cleaning
+    name = name.replace(".", " ").replace("_", " ").replace("-", " ")
+    
+    # S01E01 pattern
+    match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", name)
+    if match1: return match1.group(1), match1.group(2)
+    
+    # 1x01 pattern
+    match2 = re.search(r"(\d{1,2})x(\d{1,3})", name)
+    if match2: return match2.group(1), match2.group(2)
+    
+    return None, None
+
+# 🔥 FANCY CAPTION (From Your Code - Blockquotes Style)
 def get_fancy_caption(filename, filesize, duration):
-    return (f"<b>{html.escape(filename)}</b>\n\n"
-            f"<blockquote><b>📂 Size ➥ {filesize}</b></blockquote>\n"
-            f"<blockquote><b>⏰ Duration ➥ {get_duration_str(duration)}</b></blockquote>\n"
-            f"<blockquote><b>⚡ Powered By ➥ {CREDIT_NAME}</b></blockquote>")
+    safe_name = html.escape(filename)
+    caption = f"<b>{safe_name}</b>\n\n"
+    
+    # Check for Series Info
+    s, e = get_media_info(filename)
+    if s: s = s.zfill(2)
+    if e: e = e.zfill(2)
+    
+    if s: caption += f"💿 <b>Season ➥ {s}</b>\n"
+    if e: caption += f"📺 <b>Episode ➥ {e}</b>\n"
+    if s or e: caption += "\n"
+    
+    caption += f"<blockquote><b>File Size ♻️ ➥ {filesize}</b></blockquote>\n"
+    caption += f"<blockquote><b>Duration ⏰ ➥ {get_duration_str(duration)}</b></blockquote>\n"
+    caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME}</b></blockquote>"
+    return caption
 
 # --- COMMANDS ---
 @app.on_message(filters.command("start") & filters.private)
@@ -92,16 +117,19 @@ async def main_start(c, m):
 async def store_file(c, m):
     status = await m.reply("⚙️ **Processing...**")
     try:
+        # Prepare Data
         media = m.document or m.video or m.audio or m.photo
         fname = getattr(media, "file_name", "File")
         fsize = humanbytes(getattr(media, "file_size", 0))
         dur = getattr(media, "duration", 0)
+        
+        # New Caption Logic Call
         new_cap = get_fancy_caption(fname, fsize, dur)
 
-        # DB Channel me Copy (with Caption)
+        # Copy to DB (With New Caption)
         db_msg = await m.copy(DB_CHANNEL_ID, caption=new_cap)
         
-        # LINK GENERATION (Sahi Formula Use Kiya Hai)
+        # LINK GENERATION (Double Encode Logic)
         raw_data = f"link_{OWNER_ID}_{db_msg.id}"
         tg_code, blogger_code = get_link_codes(raw_data)
         
@@ -159,7 +187,7 @@ async def start_clone_bot():
             btn.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{c.me.username}?start={payload}")])
             return await m.reply("⚠️ **Join Channels First!**", reply_markup=InlineKeyboardMarkup(btn))
 
-        # Decode (Fix: Clone bot ko 'tg_code' milta hai, jo single layer hai)
+        # Decode (Expected: Telegram Level 1 Code)
         decoded_string = decode_payload(payload)
         if not decoded_string: return await m.reply("❌ **Link Invalid!**")
         
@@ -171,6 +199,7 @@ async def start_clone_bot():
             msg = await c.get_messages(DB_CHANNEL_ID, msg_id)
             if not msg: return await temp.edit("❌ **File Deleted.**")
             
+            # Use Caption from Message directly (Store karte waqt hi ban gaya tha)
             cap = msg.caption or get_fancy_caption(getattr(msg.document or msg.video, "file_name", "File"), humanbytes(getattr(msg.document or msg.video, "file_size", 0)), 0)
             
             sent = await c.copy_message(m.chat.id, DB_CHANNEL_ID, msg_id, caption=cap)

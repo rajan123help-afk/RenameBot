@@ -4,6 +4,6 @@ motor
 dnspython
 aiohttp
 aiofiles
-requests
-Pillow
 hachoir
+Pillow
+requests

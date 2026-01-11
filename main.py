@@ -8,6 +8,7 @@ import shutil
 import asyncio
 import aiofiles
 import aiohttp
+import pyrogram # Version check ke liye
 from urllib.parse import quote, unquote
 from PIL import Image
 from hachoir.metadata import extractMetadata
@@ -15,14 +16,13 @@ from hachoir.parser import createParser
 from aiohttp import web
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
-from pyrogram.errors import UserNotParticipant, PeerIdInvalid, FloodWait
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
 API_ID = int(os.environ.get("API_ID", "23127"))
-API_HASH = os.environ.get("API_HASH", "0375dd20e7c29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468pD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
-OWNER_ID = int(os.environ.get("OWNER_ID", "502470"))
+API_HASH = os.environ.get("API_HASH", "0375dd20aba9d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+OWNER_ID = int(os.environ.get("OWNER_ID", "502770"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
@@ -35,7 +35,8 @@ db = mongo["FilmyFlipStore"]
 settings_col = db["settings"]
 channels_col = db["channels"]
 
-# --- BOT SETUP (Force HTML Mode) ---
+# --- BOT SETUP ---
+print("--- STARTING BOT v32.0 ---") # Terminal me dikhega
 app = Client("MainBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=10, parse_mode=enums.ParseMode.HTML)
 clone_app = None
 download_queue = {} 
@@ -82,7 +83,7 @@ def extract_msg_id(payload):
         else: return int(payload)
     except: return None
 
-# 🔥 CAPTION LOGIC (EXACTLY AS YOU WANTED)
+# 🔥 CAPTION LOGIC (Requires Pyrogram v2.0.106+)
 def get_media_info(name):
     name = unquote(name).replace(".", " ").replace("_", " ").replace("-", " ")
     match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", name)
@@ -93,11 +94,12 @@ def get_media_info(name):
 
 def get_fancy_caption(filename, filesize, duration):
     clean_name = unquote(filename)
-    # Note: Name is explicitly in <code> for copy functionality
     safe_name = html.escape(clean_name)
     
+    # 1. Filename (Monospace Code)
     caption = f"<code>{safe_name}</code>\n\n"
     
+    # 2. Season/Episode
     s, e = get_media_info(clean_name)
     if s: s = s.zfill(2)
     if e: e = e.zfill(2)
@@ -106,10 +108,10 @@ def get_fancy_caption(filename, filesize, duration):
     if e: caption += f"📺 <b>Episode ➥ {e}</b>\n"
     if s or e: caption += "\n"
     
-    # 🔥 EXACT BLOCKQUOTE LOGIC (Green Line)
-    caption += f"<blockquote><b>File Size ♻️ ➥ {filesize}</b></blockquote>\n"
-    caption += f"<blockquote><b>Duration ⏰ ➥ {get_duration_str(duration)}</b></blockquote>\n"
-    caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME}</b></blockquote>"
+    # 3. GREEN LINE BLOCKS
+    caption += f"<blockquote><b>File Size ♻️ ➥ {filesize} ❞</b></blockquote>\n\n"
+    caption += f"<blockquote><b>Duration ⏰ ➥ {get_duration_str(duration)} ❞</b></blockquote>\n\n"
+    caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME} ❞</b></blockquote>"
     
     return caption
 
@@ -153,6 +155,7 @@ async def progress(current, total, message, start_time, task_name):
         try: await message.edit(text, parse_mode=enums.ParseMode.HTML)
         except: pass
 
+# 🔥 NAME CLEANER (Fixes ?token= issue)
 async def get_real_filename(url):
     name = None
     try:
@@ -162,15 +165,23 @@ async def get_real_filename(url):
                     fname = re.findall("filename=\"?([^\"]+)\"?", resp.headers["Content-Disposition"])
                     if fname: name = unquote(fname[0])
     except: pass
+    
+    # Fallback to URL split
     if not name: name = unquote(url.split("/")[-1])
+    
+    # Remove Query Parameters (?token=xyz)
     if "?" in name: name = name.split("?")[0]
+        
     return name
 
 # --- COMMANDS ---
 @app.on_message(filters.command("start") & filters.private)
 async def main_start(c, m):
     if m.from_user.id == OWNER_ID:
-        await m.reply("👋 **Boss! v31.0 (Exact Caption) Ready.**", parse_mode=enums.ParseMode.HTML)
+        # Version check message
+        ver = pyrogram.__version__
+        status = "✅ New" if ver >= "2.0.106" else "❌ OLD (Update needed!)"
+        await m.reply(f"👋 **Boss! v32.0 Ready.**\n\n🛠 **Pyrogram:** `{ver}` {status}", parse_mode=enums.ParseMode.HTML)
 
 @app.on_message(filters.command("cancel") & filters.private & filters.user(OWNER_ID))
 async def cancel_task(c, m):
@@ -183,14 +194,12 @@ async def cancel_task(c, m):
     await asyncio.sleep(3)
     await msg.delete()
 
-# ---------------------------------------------------------
-# 🔥 UNIVERSAL MEDIA HANDLER
-# ---------------------------------------------------------
+# --- MEDIA HANDLER ---
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo) & filters.user(OWNER_ID))
 async def media_handler(c, m):
     uid = m.from_user.id
     
-    # 1. Image Check
+    # Image Check
     is_image = False
     if m.photo: is_image = True
     elif m.document:
@@ -204,7 +213,7 @@ async def media_handler(c, m):
         await m.reply_text("📸 **Image Detected!**", reply_markup=btn, quote=True, parse_mode=enums.ParseMode.HTML)
         return
 
-    # 2. File Store Logic
+    # File Store Logic
     status = await m.reply("⚙️ **Processing...**")
     try:
         media = m.document or m.video or m.audio
@@ -214,10 +223,7 @@ async def media_handler(c, m):
         
         new_cap = get_fancy_caption(fname, fsize, dur)
         
-        # Copy to DB (FORCED HTML)
         db_msg = await m.copy(DB_CHANNEL_ID, caption=new_cap, parse_mode=enums.ParseMode.HTML)
-        
-        # Delete User Msg
         try: await m.delete()
         except: pass
         
@@ -228,7 +234,6 @@ async def media_handler(c, m):
         try:
             if clone_app and clone_app.is_connected: bot_uname = (await clone_app.get_me()).username
         except: pass
-        
         final_link = f"{BLOGGER_URL}?data={quote(blogger_code)}"
         
         await status.edit(f"✅ **Stored!**\n\n🔗 <b>Blog:</b> {final_link}\n\n🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}", disable_web_page_preview=True, parse_mode=enums.ParseMode.HTML)
@@ -251,7 +256,6 @@ async def save_img_callback(c, cb):
             return
             
         await c.download_media(message=reply, file_name=path)
-        
         try: await reply.delete()
         except: pass
         await cb.message.delete()
@@ -278,7 +282,7 @@ async def save_img_callback(c, cb):
             
     except Exception as e: await cb.message.edit(f"❌ Error: {e}")
 
-# --- URL HANDLER ---
+# --- URL HANDLER (Fixed Clean Name) ---
 @app.on_message(filters.private & filters.regex(r"^https?://") & filters.user(OWNER_ID))
 async def url_handler(c, m):
     url = m.text.strip()
@@ -287,6 +291,7 @@ async def url_handler(c, m):
     status = await m.reply("🔗 **Fetching...**")
     orig_name = await get_real_filename(url)
     download_queue[m.from_user.id] = {"url": url, "orig_name": orig_name, "prompt_id": status.id}
+    # Using <code> tag for one-click copy
     await status.edit(f"📂 **Original:**\n<code>{orig_name}</code>\n\n📝 **New Name:**", parse_mode=enums.ParseMode.HTML)
 
 @app.on_message(filters.private & filters.text & ~filters.regex(r"^https?://") & filters.user(OWNER_ID))
@@ -356,7 +361,7 @@ async def dl_process(c, cb):
         del download_queue[uid]
     except Exception as e: await cb.message.edit(f"❌ Error: {e}")
 
-# --- SETTINGS & CLONE ---
+# --- CLONE & START ---
 @app.on_message(filters.command("setclone") & filters.user(OWNER_ID))
 async def set_clone(c, m):
     if len(m.command) < 2: return await m.reply("Usage: `/setclone TOKEN`")
@@ -435,4 +440,4 @@ async def start_services():
     await asyncio.Event().wait()
 
 if __name__ == "__main__": asyncio.get_event_loop().run_until_complete(start_services())
-    
+        

@@ -15,12 +15,12 @@ from hachoir.metadata import extractMetadata
 from hachoir.parser import createParser
 from aiohttp import web
 from pyrogram import Client, filters, enums
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
 API_ID = int(os.environ.get("API_ID", "23127"))
-API_HASH = os.environ.get("API_HASH", "03752e7c29d0c1c06590dfb")
+API_HASH = os.environ.get("API_HASH", "0375dd20e7c29d0c1c06590dfb")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "84685pD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
 OWNER_ID = int(os.environ.get("OWNER_ID", "502470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
@@ -82,7 +82,7 @@ def extract_msg_id(payload):
         else: return int(payload)
     except: return None
 
-# 🔥 CAPTION LOGIC (Green Line + Bold)
+# 🔥 CAPTION LOGIC (SCREENSHOT MATCHING)
 def get_media_info(name):
     name = unquote(name).replace(".", " ").replace("_", " ").replace("-", " ")
     match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", name)
@@ -94,15 +94,31 @@ def get_media_info(name):
 def get_fancy_caption(filename, filesize, duration):
     clean_name = unquote(filename)
     safe_name = html.escape(clean_name)
+    
+    # 1. Filename (Copyable)
     caption = f"<code>{safe_name}</code>\n\n"
+    
+    # 2. Season/Episode (Bold + Icons)
     s, e = get_media_info(clean_name)
-    if s: s = s.zfill(2); caption += f"💿 <b>Season ➥ {s}</b>\n"
-    if e: e = e.zfill(2); caption += f"📺 <b>Episode ➥ {e}</b>\n"
+    if s: s = s.zfill(2)
+    if e: e = e.zfill(2)
+    
+    if s: caption += f"💿 <b>Season ➥ {s}</b>\n"
+    if e: caption += f"📺 <b>Episode ➥ {e}</b>\n"
     if s or e: caption += "\n"
+    
+    # 3. THREE SEPARATE GREEN BARS (As per screenshot)
+    # Block 1: Size
     caption += f"<blockquote><b>File Size ♻️ ➥ {filesize} ❞</b></blockquote>\n\n"
+    
+    # Block 2: Duration
     dur_str = get_duration_str(duration)
-    if dur_str: caption += f"<blockquote><b>Duration ⏰ ➥ {dur_str} ❞</b></blockquote>\n\n"
+    if dur_str:
+        caption += f"<blockquote><b>Duration ⏰ ➥ {dur_str} ❞</b></blockquote>\n\n"
+    
+    # Block 3: Powered By
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME} ❞</b></blockquote>"
+    
     return caption
 
 # 🔥 WATERMARK LOGIC
@@ -140,26 +156,22 @@ async def progress(current, total, message, start_time, task_name):
         except: pass
 
 # -----------------------------------------------------------
-# 🔥 YOUR SUPERIOR NAME FETCHER LOGIC (INTEGRATED) 🚀
+# 🔥 YOUR EXACT URL NAME LOGIC (INTEGRATED)
 # -----------------------------------------------------------
 async def get_real_filename(url):
     try:
-        # User-Agent lagana zaroori hai
         headers = {"User-Agent": "Mozilla/5.0"}
         async with aiohttp.ClientSession() as session:
-            # GET request (not HEAD) for maximum compatibility
+            # Using GET as per your request
             async with session.get(url, headers=headers, allow_redirects=True, timeout=10) as resp:
                 if "Content-Disposition" in resp.headers:
                     cd = resp.headers["Content-Disposition"]
-                    # 1. Normal Filename
                     fname_match = re.search(r'filename="?([^"]+)"?', cd)
                     if fname_match: return unquote(fname_match.group(1))
-                    # 2. UTF-8 Filename (Complex Names)
                     utf_match = re.search(r"filename\*=UTF-8''(.+)", cd)
                     if utf_match: return unquote(utf_match.group(1))
     except: pass
-    
-    # Fallback to URL split
+    # Fallback
     return unquote(url.split("/")[-1].split("?")[0])
 
 # --- COMMANDS ---
@@ -167,7 +179,7 @@ async def get_real_filename(url):
 async def main_start(c, m):
     if m.from_user.id == OWNER_ID:
         ver = pyrogram.__version__
-        await m.reply(f"👋 **Boss! v35.0 (Best URL Logic) Ready.**\n\n🛠 **Pyrogram:** `{ver}`", parse_mode=enums.ParseMode.HTML)
+        await m.reply(f"👋 **Boss! v37.0 (Mix Mode) Ready.**\n\n🛠 **Pyrogram:** `{ver}`", parse_mode=enums.ParseMode.HTML)
 
 @app.on_message(filters.command("cancel") & filters.private & filters.user(OWNER_ID))
 async def cancel_task(c, m):
@@ -207,7 +219,7 @@ async def media_handler(c, m):
         
         new_cap = get_fancy_caption(fname, fsize, dur)
         
-        # Using send_video/document to FORCE green line
+        # Explicit HTML Parse Mode
         if m.video:
              db_msg = await c.send_video(DB_CHANNEL_ID, m.video.file_id, caption=new_cap, parse_mode=enums.ParseMode.HTML)
         else:
@@ -236,7 +248,7 @@ async def url_handler(c, m):
     except: pass
     status = await m.reply("🔗 **Fetching...**")
     
-    # Using your logic here
+    # 🔥 Using your superior logic here
     orig_name = await get_real_filename(url)
     
     download_queue[m.from_user.id] = {"url": url, "orig_name": orig_name, "prompt_id": status.id}
@@ -265,7 +277,6 @@ async def dl_process(c, cb):
     await cb.message.edit("📥 **Initializing...**")
     url = data['url']; custom_name = data['new_name']; mode = "video" if "video" in cb.data else "doc"
     
-    # Name Logic
     root, ext = os.path.splitext(data['orig_name'])
     if not ext: ext = ".mkv"
     final_filename = f"{custom_name}{ext}"
@@ -274,7 +285,6 @@ async def dl_process(c, cb):
     
     try:
         start = time.time()
-        # Headers for download (Consistency)
         headers = {"User-Agent": "Mozilla/5.0"}
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers) as resp:
@@ -295,6 +305,7 @@ async def dl_process(c, cb):
         if thumb_path and os.path.exists(wm_path): thumb_path = apply_watermark(thumb_path, wm_path)
         
         start = time.time()
+        # ⚠️ FORCE HTML PARSE MODE
         if mode == "video":
             db_msg = await c.send_video(DB_CHANNEL_ID, internal_path, caption=cap, duration=duration, thumb=thumb_path, file_name=final_filename, progress=progress, progress_args=(cb.message, start, f"📤 Uploading: {final_filename}"), parse_mode=enums.ParseMode.HTML)
         else:
@@ -406,4 +417,4 @@ async def start_services():
     await asyncio.Event().wait()
 
 if __name__ == "__main__": asyncio.get_event_loop().run_until_complete(start_services())
-                    
+        

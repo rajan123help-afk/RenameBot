@@ -8,7 +8,7 @@ import shutil
 import asyncio
 import aiofiles
 import aiohttp
-import pyrogram # Version check ke liye
+import pyrogram
 from urllib.parse import quote, unquote
 from PIL import Image
 from hachoir.metadata import extractMetadata
@@ -19,10 +19,10 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceRepl
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "23127"))
-API_HASH = os.environ.get("API_HASH", "0375dd20aba9d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
-OWNER_ID = int(os.environ.get("OWNER_ID", "502770"))
+API_ID = int(os.environ.get("API_ID", "21127"))
+API_HASH = os.environ.get("API_HASH", "0375dd2c29d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468D5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+OWNER_ID = int(os.environ.get("OWNER_ID", "54470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
@@ -36,7 +36,6 @@ settings_col = db["settings"]
 channels_col = db["channels"]
 
 # --- BOT SETUP ---
-print("--- STARTING BOT v32.0 ---") # Terminal me dikhega
 app = Client("MainBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=10, parse_mode=enums.ParseMode.HTML)
 clone_app = None
 download_queue = {} 
@@ -57,7 +56,7 @@ def get_duration(filepath):
     return 0
 
 def get_duration_str(duration):
-    if not duration: return "0s"
+    if not duration: return None # Return None if 0 to hide it
     m, s = divmod(int(duration), 60); h, m = divmod(m, 60)
     return f"{h}h {m}m {s}s" if h else f"{m}m {s}s"
 
@@ -83,7 +82,7 @@ def extract_msg_id(payload):
         else: return int(payload)
     except: return None
 
-# 🔥 CAPTION LOGIC (Requires Pyrogram v2.0.106+)
+# 🔥 CAPTION LOGIC (HTML Tags Fix)
 def get_media_info(name):
     name = unquote(name).replace(".", " ").replace("_", " ").replace("-", " ")
     match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", name)
@@ -96,21 +95,25 @@ def get_fancy_caption(filename, filesize, duration):
     clean_name = unquote(filename)
     safe_name = html.escape(clean_name)
     
-    # 1. Filename (Monospace Code)
+    # Filename
     caption = f"<code>{safe_name}</code>\n\n"
     
-    # 2. Season/Episode
+    # Season/Episode
     s, e = get_media_info(clean_name)
     if s: s = s.zfill(2)
     if e: e = e.zfill(2)
-    
     if s: caption += f"💿 <b>Season ➥ {s}</b>\n"
     if e: caption += f"📺 <b>Episode ➥ {e}</b>\n"
     if s or e: caption += "\n"
     
-    # 3. GREEN LINE BLOCKS
+    # GREEN LINES (Blockquotes)
     caption += f"<blockquote><b>File Size ♻️ ➥ {filesize} ❞</b></blockquote>\n\n"
-    caption += f"<blockquote><b>Duration ⏰ ➥ {get_duration_str(duration)} ❞</b></blockquote>\n\n"
+    
+    # Only show Duration if valid
+    dur_str = get_duration_str(duration)
+    if dur_str:
+        caption += f"<blockquote><b>Duration ⏰ ➥ {dur_str} ❞</b></blockquote>\n\n"
+    
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME} ❞</b></blockquote>"
     
     return caption
@@ -144,7 +147,10 @@ async def progress(current, total, message, start_time, task_name):
         speed = current / diff if diff > 0 else 0
         filled = int(percentage // 10)
         bar = "🟢" * filled + "⚪" * (10 - filled)
-        eta = get_duration_str(round((total - current) / speed) if speed > 0 else 0)
+        eta = "0s"
+        if speed > 0:
+             eta = get_duration_str(round((total - current) / speed)) or "0s"
+             
         text = (
             f"<b>{task_name}</b>\n\n"
             f"<b>[{bar}] {round(percentage, 1)}%</b>\n"
@@ -155,7 +161,7 @@ async def progress(current, total, message, start_time, task_name):
         try: await message.edit(text, parse_mode=enums.ParseMode.HTML)
         except: pass
 
-# 🔥 NAME CLEANER (Fixes ?token= issue)
+# 🔥 AGGRESSIVE NAME CLEANER
 async def get_real_filename(url):
     name = None
     try:
@@ -166,22 +172,20 @@ async def get_real_filename(url):
                     if fname: name = unquote(fname[0])
     except: pass
     
-    # Fallback to URL split
+    # Fallback
     if not name: name = unquote(url.split("/")[-1])
     
-    # Remove Query Parameters (?token=xyz)
+    # 🔥 Aggressive Cleanup (Token removal)
     if "?" in name: name = name.split("?")[0]
-        
+    
     return name
 
 # --- COMMANDS ---
 @app.on_message(filters.command("start") & filters.private)
 async def main_start(c, m):
     if m.from_user.id == OWNER_ID:
-        # Version check message
         ver = pyrogram.__version__
-        status = "✅ New" if ver >= "2.0.106" else "❌ OLD (Update needed!)"
-        await m.reply(f"👋 **Boss! v32.0 Ready.**\n\n🛠 **Pyrogram:** `{ver}` {status}", parse_mode=enums.ParseMode.HTML)
+        await m.reply(f"👋 **Boss! v33.0 Ready.**\n\n🛠 **Pyrogram:** `{ver}`", parse_mode=enums.ParseMode.HTML)
 
 @app.on_message(filters.command("cancel") & filters.private & filters.user(OWNER_ID))
 async def cancel_task(c, m):
@@ -194,7 +198,9 @@ async def cancel_task(c, m):
     await asyncio.sleep(3)
     await msg.delete()
 
-# --- MEDIA HANDLER ---
+# ---------------------------------------------------------
+# 🔥 UNIVERSAL MEDIA HANDLER (No Copy - Send Fresh)
+# ---------------------------------------------------------
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo) & filters.user(OWNER_ID))
 async def media_handler(c, m):
     uid = m.from_user.id
@@ -223,7 +229,12 @@ async def media_handler(c, m):
         
         new_cap = get_fancy_caption(fname, fsize, dur)
         
-        db_msg = await m.copy(DB_CHANNEL_ID, caption=new_cap, parse_mode=enums.ParseMode.HTML)
+        # 🔥 FIX: Use send_document/video instead of copy to force new formatting
+        if m.video:
+             db_msg = await c.send_video(DB_CHANNEL_ID, m.video.file_id, caption=new_cap, parse_mode=enums.ParseMode.HTML)
+        else:
+             db_msg = await c.send_document(DB_CHANNEL_ID, m.document.file_id, caption=new_cap, parse_mode=enums.ParseMode.HTML)
+        
         try: await m.delete()
         except: pass
         
@@ -234,6 +245,7 @@ async def media_handler(c, m):
         try:
             if clone_app and clone_app.is_connected: bot_uname = (await clone_app.get_me()).username
         except: pass
+        
         final_link = f"{BLOGGER_URL}?data={quote(blogger_code)}"
         
         await status.edit(f"✅ **Stored!**\n\n🔗 <b>Blog:</b> {final_link}\n\n🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}", disable_web_page_preview=True, parse_mode=enums.ParseMode.HTML)
@@ -282,7 +294,7 @@ async def save_img_callback(c, cb):
             
     except Exception as e: await cb.message.edit(f"❌ Error: {e}")
 
-# --- URL HANDLER (Fixed Clean Name) ---
+# --- URL HANDLER ---
 @app.on_message(filters.private & filters.regex(r"^https?://") & filters.user(OWNER_ID))
 async def url_handler(c, m):
     url = m.text.strip()
@@ -291,7 +303,6 @@ async def url_handler(c, m):
     status = await m.reply("🔗 **Fetching...**")
     orig_name = await get_real_filename(url)
     download_queue[m.from_user.id] = {"url": url, "orig_name": orig_name, "prompt_id": status.id}
-    # Using <code> tag for one-click copy
     await status.edit(f"📂 **Original:**\n<code>{orig_name}</code>\n\n📝 **New Name:**", parse_mode=enums.ParseMode.HTML)
 
 @app.on_message(filters.private & filters.text & ~filters.regex(r"^https?://") & filters.user(OWNER_ID))
@@ -361,7 +372,7 @@ async def dl_process(c, cb):
         del download_queue[uid]
     except Exception as e: await cb.message.edit(f"❌ Error: {e}")
 
-# --- CLONE & START ---
+# --- SETTINGS & CLONE ---
 @app.on_message(filters.command("setclone") & filters.user(OWNER_ID))
 async def set_clone(c, m):
     if len(m.command) < 2: return await m.reply("Usage: `/setclone TOKEN`")
@@ -408,6 +419,7 @@ async def start_clone_bot():
             if not msg: return await temp.edit("❌ **File Deleted.**")
             cap = msg.caption or get_fancy_caption(getattr(msg.document or msg.video, "file_name", "File"), humanbytes(getattr(msg.document or msg.video, "file_size", 0)), 0)
             
+            # Send File with HTML Parse Mode
             sent_file = await c.copy_message(m.chat.id, DB_CHANNEL_ID, msg_id, caption=cap, parse_mode=enums.ParseMode.HTML)
             await temp.delete()
             

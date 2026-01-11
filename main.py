@@ -19,10 +19,10 @@ from pyrogram.errors import UserNotParticipant, PeerIdInvalid, FloodWait
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "23427"))
-API_HASH = os.environ.get("API_HASH", "0375dd20ac1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "84685dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
-OWNER_ID = int(os.environ.get("OWNER_ID", "502470"))
+API_ID = int(os.environ.get("API_ID", "234127"))
+API_HASH = os.environ.get("API_HASH", "0375dd20ac29d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "846850D5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+OWNER_ID = int(os.environ.get("OWNER_ID", "504470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
@@ -126,18 +126,15 @@ def apply_watermark(base_path, wm_path):
         return base_path
     except: return base_path
 
-# 🔥 CIRCLE PROGRESS BAR (Updated)
+# 🔥 CIRCLE PROGRESS BAR
 async def progress(current, total, message, start_time, task_name):
     now = time.time()
     diff = now - start_time
     if round(diff % 5.00) == 0 or current == total:
         percentage = current * 100 / total
         speed = current / diff if diff > 0 else 0
-        
-        # New Circle Logic
         filled = int(percentage // 10)
         bar = "🟢" * filled + "⚪" * (10 - filled)
-        
         eta = get_duration_str(round((total - current) / speed) if speed > 0 else 0)
         text = (
             f"<b>{task_name}</b>\n\n"
@@ -149,21 +146,31 @@ async def progress(current, total, message, start_time, task_name):
         try: await message.edit(text)
         except: pass
 
+# 🔥 NAME CLEANER (Fix for messy URLs)
 async def get_real_filename(url):
+    name = None
     try:
         async with aiohttp.ClientSession() as session:
             async with session.head(url, allow_redirects=True) as resp:
                 if "Content-Disposition" in resp.headers:
                     fname = re.findall("filename=\"?([^\"]+)\"?", resp.headers["Content-Disposition"])
-                    if fname: return unquote(fname[0])
+                    if fname: name = unquote(fname[0])
     except: pass
-    return unquote(url.split("/")[-1])
+    
+    if not name:
+        name = unquote(url.split("/")[-1])
+    
+    # Clean Query Params (Remove ?token=...)
+    if "?" in name:
+        name = name.split("?")[0]
+        
+    return name
 
 # --- COMMANDS ---
 @app.on_message(filters.command("start") & filters.private)
 async def main_start(c, m):
     if m.from_user.id == OWNER_ID:
-        await m.reply("👋 **Boss! v27.0 (Circle Bar) Ready.**")
+        await m.reply("👋 **Boss! v28.0 (Clean Name) Ready.**")
 
 @app.on_message(filters.command("cancel") & filters.private & filters.user(OWNER_ID))
 async def cancel_task(c, m):
@@ -245,7 +252,6 @@ async def save_img_callback(c, cb):
             
         await c.download_media(message=reply, file_name=path)
         
-        # DELETE ORIGINAL IMAGE & BUTTON MSG
         try: await reply.delete()
         except: pass
         await cb.message.delete()
@@ -281,7 +287,9 @@ async def url_handler(c, m):
     status = await m.reply("🔗 **Fetching...**")
     orig_name = await get_real_filename(url)
     download_queue[m.from_user.id] = {"url": url, "orig_name": orig_name, "prompt_id": status.id}
-    await status.edit(f"📂 **Original:** `{orig_name}`\n\n📝 **New Name:**")
+    
+    # ✅ Clean Copyable Name
+    await status.edit(f"📂 **Original:**\n<code>{orig_name}</code>\n\n📝 **New Name:**")
 
 @app.on_message(filters.private & filters.text & ~filters.regex(r"^https?://") & filters.user(OWNER_ID))
 async def text_handler(c, m):
@@ -305,6 +313,7 @@ async def dl_process(c, cb):
     
     await cb.message.edit("📥 **Initializing...**")
     url = data['url']; custom_name = data['new_name']; mode = "video" if "video" in cb.data else "doc"
+    
     root, ext = os.path.splitext(data['orig_name'])
     if not ext: ext = ".mkv"
     final_filename = f"{custom_name}{ext}"
@@ -429,4 +438,4 @@ async def start_services():
     await asyncio.Event().wait()
 
 if __name__ == "__main__": asyncio.get_event_loop().run_until_complete(start_services())
-                            
+    

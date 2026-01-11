@@ -19,8 +19,8 @@ from pyrogram.errors import UserNotParticipant, PeerIdInvalid, FloodWait
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "234227"))
-API_HASH = os.environ.get("API_HASH", "0375dd20aba9d0c1c06590dfb")
+API_ID = int(os.environ.get("API_ID", "23427"))
+API_HASH = os.environ.get("API_HASH", "0375dd20ac1c06590dfb")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "84685dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
 OWNER_ID = int(os.environ.get("OWNER_ID", "502470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
@@ -82,7 +82,7 @@ def extract_msg_id(payload):
         else: return int(payload)
     except: return None
 
-# 🔥 CAPTION LOGIC (Updated v24 style)
+# 🔥 CAPTION LOGIC
 def get_media_info(name):
     name = unquote(name).replace(".", " ").replace("_", " ").replace("-", " ")
     match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", name)
@@ -126,15 +126,18 @@ def apply_watermark(base_path, wm_path):
         return base_path
     except: return base_path
 
-# 🔥 PROGRESS BAR
+# 🔥 CIRCLE PROGRESS BAR (Updated)
 async def progress(current, total, message, start_time, task_name):
     now = time.time()
     diff = now - start_time
     if round(diff % 5.00) == 0 or current == total:
         percentage = current * 100 / total
         speed = current / diff if diff > 0 else 0
+        
+        # New Circle Logic
         filled = int(percentage // 10)
-        bar = "■" * filled + "□" * (10 - filled)
+        bar = "🟢" * filled + "⚪" * (10 - filled)
+        
         eta = get_duration_str(round((total - current) / speed) if speed > 0 else 0)
         text = (
             f"<b>{task_name}</b>\n\n"
@@ -160,7 +163,7 @@ async def get_real_filename(url):
 @app.on_message(filters.command("start") & filters.private)
 async def main_start(c, m):
     if m.from_user.id == OWNER_ID:
-        await m.reply("👋 **Boss! v25.0 (Bug Fix) Ready.**")
+        await m.reply("👋 **Boss! v27.0 (Circle Bar) Ready.**")
 
 @app.on_message(filters.command("cancel") & filters.private & filters.user(OWNER_ID))
 async def cancel_task(c, m):
@@ -169,12 +172,12 @@ async def cancel_task(c, m):
     try: shutil.rmtree("downloads"); os.makedirs("downloads", exist_ok=True)
     except: pass
     await m.delete()
-    msg = await m.reply("✅ **Tasks Cleared!**")
+    msg = await m.reply("✅ **Cleaned!**")
     await asyncio.sleep(3)
     await msg.delete()
 
 # ---------------------------------------------------------
-# 🔥 UNIVERSAL MEDIA HANDLER (Smart Delete Fix)
+# 🔥 UNIVERSAL MEDIA HANDLER
 # ---------------------------------------------------------
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo) & filters.user(OWNER_ID))
 async def media_handler(c, m):
@@ -190,14 +193,11 @@ async def media_handler(c, m):
             is_image = True
             
     if is_image:
-        # ⚠️ DO NOT DELETE HERE! (Wait for button click)
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🖼 Set Thumbnail", callback_data="save_thumb"), InlineKeyboardButton("💧 Set Watermark", callback_data="save_wm")]])
         await m.reply_text("📸 **Image Detected!**", reply_markup=btn, quote=True)
         return
 
     # 2. File Store Logic
-    # ⚠️ DO NOT DELETE HERE YET! Copy first.
-    
     status = await m.reply("⚙️ **Processing...**")
     try:
         media = m.document or m.video or m.audio
@@ -210,7 +210,7 @@ async def media_handler(c, m):
         # Copy to DB
         db_msg = await m.copy(DB_CHANNEL_ID, caption=new_cap)
         
-        # NOW DELETE USER MESSAGE ✅
+        # DELETE USER MESSAGE
         try: await m.delete()
         except: pass
         
@@ -227,7 +227,7 @@ async def media_handler(c, m):
         await status.edit(f"✅ **Stored!**\n\n🔗 <b>Blog:</b> {final_link}\n\n🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}", disable_web_page_preview=True)
     except Exception as e: await status.edit(f"❌ Error: {e}")
 
-# --- CALLBACK FOR IMAGES (Clean Up After Save) ---
+# --- CALLBACK FOR IMAGES ---
 @app.on_callback_query(filters.regex("^save_"))
 async def save_img_callback(c, cb):
     uid = cb.from_user.id
@@ -243,12 +243,12 @@ async def save_img_callback(c, cb):
             await cb.message.edit("❌ Error: Image not found!")
             return
             
-        # Download
         await c.download_media(message=reply, file_name=path)
         
-        # NOW DELETE ORIGINAL IMAGE ✅
+        # DELETE ORIGINAL IMAGE & BUTTON MSG
         try: await reply.delete()
         except: pass
+        await cb.message.delete()
         
         if mode == "thumbnails":
             wm_path = f"watermarks/{uid}.png"
@@ -257,20 +257,22 @@ async def save_img_callback(c, cb):
                 img = Image.open(path).convert("RGB")
                 img.save(preview_path)
                 apply_watermark(preview_path, wm_path)
-                await c.send_photo(uid, preview_path, caption="✅ **Thumbnail Set!** (Preview)")
+                prev_msg = await c.send_photo(uid, preview_path, caption="✅ **Thumbnail Set!** (Preview)")
                 os.remove(preview_path)
+                await asyncio.sleep(5)
+                await prev_msg.delete()
             else:
-                # Just confirm msg, no preview if no WM
-                await c.send_message(uid, "✅ **Thumbnail Set!**")
+                msg = await c.send_message(uid, "✅ **Thumbnail Set!**")
+                await asyncio.sleep(3)
+                await msg.delete()
         else:
-            await c.send_message(uid, "✅ **Watermark Saved!** (60% Size)")
-            
-        # Delete the Button Message
-        await cb.message.delete()
+            msg = await c.send_message(uid, "✅ **Watermark Saved!** (60% Size)")
+            await asyncio.sleep(3)
+            await msg.delete()
             
     except Exception as e: await cb.message.edit(f"❌ Error: {e}")
 
-# --- URL HANDLER (Auto Clean) ---
+# --- URL HANDLER ---
 @app.on_message(filters.private & filters.regex(r"^https?://") & filters.user(OWNER_ID))
 async def url_handler(c, m):
     url = m.text.strip()
@@ -281,7 +283,7 @@ async def url_handler(c, m):
     download_queue[m.from_user.id] = {"url": url, "orig_name": orig_name, "prompt_id": status.id}
     await status.edit(f"📂 **Original:** `{orig_name}`\n\n📝 **New Name:**")
 
-@app.on_message(filters.private & filters.text & filters.user(OWNER_ID))
+@app.on_message(filters.private & filters.text & ~filters.regex(r"^https?://") & filters.user(OWNER_ID))
 async def text_handler(c, m):
     if m.text.startswith("/"): return
     uid = m.from_user.id
@@ -398,7 +400,6 @@ async def start_clone_bot():
             sent_file = await c.copy_message(m.chat.id, DB_CHANNEL_ID, msg_id, caption=cap)
             await temp.delete()
             
-            # Timer & Buttons (5 Min -> 1 Min)
             timer_msg = await m.reply("⏳ **File will be deleted in 5 Mins!**")
             await asyncio.sleep(300)
             await sent_file.delete()
@@ -428,4 +429,4 @@ async def start_services():
     await asyncio.Event().wait()
 
 if __name__ == "__main__": asyncio.get_event_loop().run_until_complete(start_services())
-            
+                            

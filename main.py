@@ -19,10 +19,10 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "23127"))
-API_HASH = os.environ.get("API_HASH", "0375dd20e7c29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "84685pD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
-OWNER_ID = int(os.environ.get("OWNER_ID", "502470"))
+API_ID = int(os.environ.get("API_ID", "2127"))
+API_HASH = os.environ.get("API_HASH", "03759f2e7c29d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "846GpD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+OWNER_ID = int(os.environ.get("OWNER_ID", "54470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
@@ -35,8 +35,15 @@ db = mongo["FilmyFlipStore"]
 settings_col = db["settings"]
 channels_col = db["channels"]
 
-# --- BOT SETUP ---
-app = Client("MainBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=10, parse_mode=enums.ParseMode.HTML)
+# --- BOT SETUP (Global HTML Mode Enforced) ---
+app = Client(
+    "MainBot", 
+    api_id=API_ID, 
+    api_hash=API_HASH, 
+    bot_token=BOT_TOKEN, 
+    workers=10, 
+    parse_mode=enums.ParseMode.HTML
+)
 clone_app = None
 download_queue = {} 
 
@@ -82,41 +89,37 @@ def extract_msg_id(payload):
         else: return int(payload)
     except: return None
 
-# 🔥 CAPTION LOGIC (SCREENSHOT MATCHING)
+# 🔥 CAPTION LOGIC (Corrected Structure)
 def get_media_info(name):
-    name = unquote(name).replace(".", " ").replace("_", " ").replace("-", " ")
-    match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", name)
+    # Cleaning inside Regex input
+    clean_name = name.replace(".", " ").replace("_", " ").replace("-", " ")
+    match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", clean_name)
     if match1: return match1.group(1), match1.group(2)
-    match2 = re.search(r"(\d{1,2})x(\d{1,3})", name)
+    match2 = re.search(r"(\d{1,2})x(\d{1,3})", clean_name)
     if match2: return match2.group(1), match2.group(2)
     return None, None
 
 def get_fancy_caption(filename, filesize, duration):
-    clean_name = unquote(filename)
+    # 1. Clean filename logic (Remove dots for display)
+    clean_name = filename.replace(".", " ").replace("_", " ")
     safe_name = html.escape(clean_name)
     
-    # 1. Filename (Copyable)
+    # 2. Header
     caption = f"<code>{safe_name}</code>\n\n"
     
-    # 2. Season/Episode (Bold + Icons)
+    # 3. Season/Episode
     s, e = get_media_info(clean_name)
-    if s: s = s.zfill(2)
-    if e: e = e.zfill(2)
-    
-    if s: caption += f"💿 <b>Season ➥ {s}</b>\n"
-    if e: caption += f"📺 <b>Episode ➥ {e}</b>\n"
+    if s: s = s.zfill(2); caption += f"💿 <b>Season ➥ {s}</b>\n"
+    if e: e = e.zfill(2); caption += f"📺 <b>Episode ➥ {e}</b>\n"
     if s or e: caption += "\n"
     
-    # 3. THREE SEPARATE GREEN BARS (As per screenshot)
-    # Block 1: Size
+    # 4. Green Line Blocks (Using standard HTML quote)
     caption += f"<blockquote><b>File Size ♻️ ➥ {filesize} ❞</b></blockquote>\n\n"
     
-    # Block 2: Duration
     dur_str = get_duration_str(duration)
     if dur_str:
         caption += f"<blockquote><b>Duration ⏰ ➥ {dur_str} ❞</b></blockquote>\n\n"
     
-    # Block 3: Powered By
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME} ❞</b></blockquote>"
     
     return caption
@@ -152,34 +155,45 @@ async def progress(current, total, message, start_time, task_name):
         bar = "🟢" * filled + "⚪" * (10 - filled)
         eta = get_duration_str(round((total - current) / speed)) if speed > 0 else "0s"
         text = f"<b>{task_name}</b>\n\n<b>[{bar}] {round(percentage, 1)}%</b>\n<b>📦 Done:</b> {humanbytes(current)} / {humanbytes(total)}\n<b>⚡ Speed:</b> {humanbytes(speed)}/s\n<b>⏳ ETA:</b> {eta}"
-        try: await message.edit(text, parse_mode=enums.ParseMode.HTML)
+        try: await message.edit(text) # Parse mode handled globally
         except: pass
 
-# -----------------------------------------------------------
-# 🔥 YOUR EXACT URL NAME LOGIC (INTEGRATED)
-# -----------------------------------------------------------
+# 🔥 NAME FETCHER (Now with Dot Removal)
 async def get_real_filename(url):
+    final_name = "Video.mkv"
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
         async with aiohttp.ClientSession() as session:
-            # Using GET as per your request
             async with session.get(url, headers=headers, allow_redirects=True, timeout=10) as resp:
                 if "Content-Disposition" in resp.headers:
                     cd = resp.headers["Content-Disposition"]
                     fname_match = re.search(r'filename="?([^"]+)"?', cd)
-                    if fname_match: return unquote(fname_match.group(1))
-                    utf_match = re.search(r"filename\*=UTF-8''(.+)", cd)
-                    if utf_match: return unquote(utf_match.group(1))
-    except: pass
-    # Fallback
-    return unquote(url.split("/")[-1].split("?")[0])
+                    if fname_match: final_name = unquote(fname_match.group(1))
+                    else:
+                        utf_match = re.search(r"filename\*=UTF-8''(.+)", cd)
+                        if utf_match: final_name = unquote(utf_match.group(1))
+                else:
+                    final_name = unquote(url.split("/")[-1].split("?")[0])
+    except:
+        final_name = unquote(url.split("/")[-1].split("?")[0])
+    
+    # 🔥 FINAL CLEANING STEP (Remove dots here)
+    # This ensures the stored file AND the prompt display have clean names
+    clean_final_name = final_name.replace(".", " ").replace("_", " ")
+    # Restore extension dot
+    if " " in clean_final_name:
+        parts = clean_final_name.rsplit(" ", 1)
+        if len(parts) > 1 and len(parts[1]) <= 4: # Assume last part is ext
+            clean_final_name = f"{parts[0]}.{parts[1]}"
+            
+    return clean_final_name
 
 # --- COMMANDS ---
 @app.on_message(filters.command("start") & filters.private)
 async def main_start(c, m):
     if m.from_user.id == OWNER_ID:
         ver = pyrogram.__version__
-        await m.reply(f"👋 **Boss! v37.0 (Mix Mode) Ready.**\n\n🛠 **Pyrogram:** `{ver}`", parse_mode=enums.ParseMode.HTML)
+        await m.reply(f"👋 **Boss! v39.0 (Dot Fix + Green Line) Ready.**\n\n🛠 **Pyrogram:** `{ver}`")
 
 @app.on_message(filters.command("cancel") & filters.private & filters.user(OWNER_ID))
 async def cancel_task(c, m):
@@ -207,7 +221,7 @@ async def media_handler(c, m):
             
     if is_image:
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🖼 Set Thumbnail", callback_data="save_thumb"), InlineKeyboardButton("💧 Set Watermark", callback_data="save_wm")]])
-        await m.reply_text("📸 **Image Detected!**", reply_markup=btn, quote=True, parse_mode=enums.ParseMode.HTML)
+        await m.reply_text("📸 **Image Detected!**", reply_markup=btn, quote=True)
         return
 
     status = await m.reply("⚙️ **Processing...**")
@@ -219,11 +233,10 @@ async def media_handler(c, m):
         
         new_cap = get_fancy_caption(fname, fsize, dur)
         
-        # Explicit HTML Parse Mode
         if m.video:
-             db_msg = await c.send_video(DB_CHANNEL_ID, m.video.file_id, caption=new_cap, parse_mode=enums.ParseMode.HTML)
+             db_msg = await c.send_video(DB_CHANNEL_ID, m.video.file_id, caption=new_cap)
         else:
-             db_msg = await c.send_document(DB_CHANNEL_ID, m.document.file_id, caption=new_cap, parse_mode=enums.ParseMode.HTML)
+             db_msg = await c.send_document(DB_CHANNEL_ID, m.document.file_id, caption=new_cap)
         
         try: await m.delete()
         except: pass
@@ -237,7 +250,7 @@ async def media_handler(c, m):
         except: pass
         final_link = f"{BLOGGER_URL}?data={quote(blogger_code)}"
         
-        await status.edit(f"✅ **Stored!**\n\n🔗 <b>Blog:</b> {final_link}\n\n🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}", disable_web_page_preview=True, parse_mode=enums.ParseMode.HTML)
+        await status.edit(f"✅ **Stored!**\n\n🔗 <b>Blog:</b> {final_link}\n\n🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}", disable_web_page_preview=True)
     except Exception as e: await status.edit(f"❌ Error: {e}")
 
 # --- URL HANDLER ---
@@ -248,11 +261,13 @@ async def url_handler(c, m):
     except: pass
     status = await m.reply("🔗 **Fetching...**")
     
-    # 🔥 Using your superior logic here
-    orig_name = await get_real_filename(url)
+    # 🔥 Get CLEAN Name here
+    clean_name = await get_real_filename(url)
     
-    download_queue[m.from_user.id] = {"url": url, "orig_name": orig_name, "prompt_id": status.id}
-    await status.edit(f"📂 **Original:**\n<code>{orig_name}</code>\n\n📝 **New Name:**", parse_mode=enums.ParseMode.HTML)
+    download_queue[m.from_user.id] = {"url": url, "orig_name": clean_name, "prompt_id": status.id}
+    
+    # Show clean name in prompt
+    await status.edit(f"📂 **Original:**\n<code>{clean_name}</code>\n\n📝 **New Name:**")
 
 @app.on_message(filters.private & filters.text & ~filters.regex(r"^https?://") & filters.user(OWNER_ID))
 async def text_handler(c, m):
@@ -265,7 +280,7 @@ async def text_handler(c, m):
         prompt_id = download_queue[uid].get("prompt_id")
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎥 Video", callback_data="dl_video"), InlineKeyboardButton("📁 Document", callback_data="dl_doc")]])
         if prompt_id:
-            try: await c.edit_message_text(uid, prompt_id, f"✅ **Name:** `{m.text.strip()}`\n\n👇 **Format:**", reply_markup=btn, parse_mode=enums.ParseMode.HTML)
+            try: await c.edit_message_text(uid, prompt_id, f"✅ **Name:** `{m.text.strip()}`\n\n👇 **Format:**", reply_markup=btn)
             except: pass
 
 @app.on_callback_query(filters.regex("^dl_"))
@@ -277,8 +292,12 @@ async def dl_process(c, cb):
     await cb.message.edit("📥 **Initializing...**")
     url = data['url']; custom_name = data['new_name']; mode = "video" if "video" in cb.data else "doc"
     
-    root, ext = os.path.splitext(data['orig_name'])
+    # Use original clean name logic to get ext
+    orig_clean = data['orig_name']
+    root, ext = os.path.splitext(orig_clean)
     if not ext: ext = ".mkv"
+    
+    # Ensure final filename is clean too
     final_filename = f"{custom_name}{ext}"
     internal_path = f"downloads/{uid}_{final_filename}"
     os.makedirs("downloads", exist_ok=True)
@@ -305,11 +324,10 @@ async def dl_process(c, cb):
         if thumb_path and os.path.exists(wm_path): thumb_path = apply_watermark(thumb_path, wm_path)
         
         start = time.time()
-        # ⚠️ FORCE HTML PARSE MODE
         if mode == "video":
-            db_msg = await c.send_video(DB_CHANNEL_ID, internal_path, caption=cap, duration=duration, thumb=thumb_path, file_name=final_filename, progress=progress, progress_args=(cb.message, start, f"📤 Uploading: {final_filename}"), parse_mode=enums.ParseMode.HTML)
+            db_msg = await c.send_video(DB_CHANNEL_ID, internal_path, caption=cap, duration=duration, thumb=thumb_path, file_name=final_filename, progress=progress, progress_args=(cb.message, start, f"📤 Uploading: {final_filename}"))
         else:
-            db_msg = await c.send_document(DB_CHANNEL_ID, internal_path, caption=cap, thumb=thumb_path, file_name=final_filename, progress=progress, progress_args=(cb.message, start, f"📤 Uploading: {final_filename}"), parse_mode=enums.ParseMode.HTML)
+            db_msg = await c.send_document(DB_CHANNEL_ID, internal_path, caption=cap, thumb=thumb_path, file_name=final_filename, progress=progress, progress_args=(cb.message, start, f"📤 Uploading: {final_filename}"))
             
         raw_data = f"link_{OWNER_ID}_{db_msg.id}"
         tg_code, blogger_code = get_link_codes(raw_data)
@@ -319,7 +337,7 @@ async def dl_process(c, cb):
         except: pass
         final_link = f"{BLOGGER_URL}?data={quote(blogger_code)}"
         
-        await cb.message.edit(f"✅ **Stored!**\n\n🔗 <b>Blog:</b> {final_link}\n\n🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}", disable_web_page_preview=True, parse_mode=enums.ParseMode.HTML)
+        await cb.message.edit(f"✅ **Stored!**\n\n🔗 <b>Blog:</b> {final_link}\n\n🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}", disable_web_page_preview=True)
         os.remove(internal_path)
         del download_queue[uid]
     except Exception as e: await cb.message.edit(f"❌ Error: {e}")
@@ -346,7 +364,7 @@ async def save_img_callback(c, cb):
                 preview_path = f"{mode}/{uid}_preview.jpg"
                 img = Image.open(path).convert("RGB")
                 img.save(preview_path); apply_watermark(preview_path, wm_path)
-                prev_msg = await c.send_photo(uid, preview_path, caption="✅ **Thumbnail Set!** (Preview)", parse_mode=enums.ParseMode.HTML)
+                prev_msg = await c.send_photo(uid, preview_path, caption="✅ **Thumbnail Set!** (Preview)")
                 os.remove(preview_path); await asyncio.sleep(5); await prev_msg.delete()
             else: msg = await c.send_message(uid, "✅ **Thumbnail Set!**"); await asyncio.sleep(3); await msg.delete()
         else: msg = await c.send_message(uid, "✅ **Watermark Saved!** (60% Size)"); await asyncio.sleep(3); await msg.delete()
@@ -396,7 +414,7 @@ async def start_clone_bot():
             msg = await c.get_messages(DB_CHANNEL_ID, msg_id)
             if not msg: return await temp.edit("❌ **File Deleted.**")
             cap = msg.caption or get_fancy_caption(getattr(msg.document or msg.video, "file_name", "File"), humanbytes(getattr(msg.document or msg.video, "file_size", 0)), 0)
-            sent_file = await c.copy_message(m.chat.id, DB_CHANNEL_ID, msg_id, caption=cap, parse_mode=enums.ParseMode.HTML)
+            sent_file = await c.copy_message(m.chat.id, DB_CHANNEL_ID, msg_id, caption=cap)
             await temp.delete(); timer_msg = await m.reply("⏳ **File will be deleted in 5 Mins!**")
             await asyncio.sleep(300); await sent_file.delete(); await timer_msg.delete()
             btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Get File Again", url=f"https://t.me/{c.me.username}?start={payload}")]])
@@ -417,4 +435,4 @@ async def start_services():
     await asyncio.Event().wait()
 
 if __name__ == "__main__": asyncio.get_event_loop().run_until_complete(start_services())
-        
+                

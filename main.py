@@ -15,13 +15,13 @@ from hachoir.metadata import extractMetadata
 from hachoir.parser import createParser
 from aiohttp import web
 from pyrogram import Client, filters, enums
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "21127"))
-API_HASH = os.environ.get("API_HASH", "0375dd2c29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468D5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+API_ID = int(os.environ.get("API_ID", "234127"))
+API_HASH = os.environ.get("API_HASH", "0375dd20a7c29d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "846850D5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
 OWNER_ID = int(os.environ.get("OWNER_ID", "54470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
@@ -56,7 +56,7 @@ def get_duration(filepath):
     return 0
 
 def get_duration_str(duration):
-    if not duration: return None # Return None if 0 to hide it
+    if not duration: return None
     m, s = divmod(int(duration), 60); h, m = divmod(m, 60)
     return f"{h}h {m}m {s}s" if h else f"{m}m {s}s"
 
@@ -82,7 +82,7 @@ def extract_msg_id(payload):
         else: return int(payload)
     except: return None
 
-# 🔥 CAPTION LOGIC (HTML Tags Fix)
+# 🔥 CAPTION LOGIC
 def get_media_info(name):
     name = unquote(name).replace(".", " ").replace("_", " ").replace("-", " ")
     match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", name)
@@ -94,28 +94,15 @@ def get_media_info(name):
 def get_fancy_caption(filename, filesize, duration):
     clean_name = unquote(filename)
     safe_name = html.escape(clean_name)
-    
-    # Filename
     caption = f"<code>{safe_name}</code>\n\n"
-    
-    # Season/Episode
     s, e = get_media_info(clean_name)
-    if s: s = s.zfill(2)
-    if e: e = e.zfill(2)
-    if s: caption += f"💿 <b>Season ➥ {s}</b>\n"
-    if e: caption += f"📺 <b>Episode ➥ {e}</b>\n"
+    if s: s = s.zfill(2); caption += f"💿 <b>Season ➥ {s}</b>\n"
+    if e: e = e.zfill(2); caption += f"📺 <b>Episode ➥ {e}</b>\n"
     if s or e: caption += "\n"
-    
-    # GREEN LINES (Blockquotes)
     caption += f"<blockquote><b>File Size ♻️ ➥ {filesize} ❞</b></blockquote>\n\n"
-    
-    # Only show Duration if valid
     dur_str = get_duration_str(duration)
-    if dur_str:
-        caption += f"<blockquote><b>Duration ⏰ ➥ {dur_str} ❞</b></blockquote>\n\n"
-    
+    if dur_str: caption += f"<blockquote><b>Duration ⏰ ➥ {dur_str} ❞</b></blockquote>\n\n"
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME} ❞</b></blockquote>"
-    
     return caption
 
 # 🔥 WATERMARK LOGIC
@@ -147,37 +134,41 @@ async def progress(current, total, message, start_time, task_name):
         speed = current / diff if diff > 0 else 0
         filled = int(percentage // 10)
         bar = "🟢" * filled + "⚪" * (10 - filled)
-        eta = "0s"
-        if speed > 0:
-             eta = get_duration_str(round((total - current) / speed)) or "0s"
-             
-        text = (
-            f"<b>{task_name}</b>\n\n"
-            f"<b>[{bar}] {round(percentage, 1)}%</b>\n"
-            f"<b>📦 Done:</b> {humanbytes(current)} / {humanbytes(total)}\n"
-            f"<b>⚡ Speed:</b> {humanbytes(speed)}/s\n"
-            f"<b>⏳ ETA:</b> {eta}"
-        )
+        eta = get_duration_str(round((total - current) / speed)) if speed > 0 else "0s"
+        text = f"<b>{task_name}</b>\n\n<b>[{bar}] {round(percentage, 1)}%</b>\n<b>📦 Done:</b> {humanbytes(current)} / {humanbytes(total)}\n<b>⚡ Speed:</b> {humanbytes(speed)}/s\n<b>⏳ ETA:</b> {eta}"
         try: await message.edit(text, parse_mode=enums.ParseMode.HTML)
         except: pass
 
-# 🔥 AGGRESSIVE NAME CLEANER
+# 🔥 ADVANCED NAME FETCHER (With Fake Browser Headers)
 async def get_real_filename(url):
     name = None
+    # ⚠️ Fake Browser Headers to trick server
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.head(url, allow_redirects=True) as resp:
+            # 1. Try HEAD request
+            async with session.head(url, headers=headers, allow_redirects=True) as resp:
                 if "Content-Disposition" in resp.headers:
                     fname = re.findall("filename=\"?([^\"]+)\"?", resp.headers["Content-Disposition"])
-                    if fname: name = unquote(fname[0])
+                    if fname: return unquote(fname[0])
+            
+            # 2. Try GET request (Streamed)
+            if not name:
+                async with session.get(url, headers=headers, allow_redirects=True) as resp:
+                    if "Content-Disposition" in resp.headers:
+                        fname = re.findall("filename=\"?([^\"]+)\"?", resp.headers["Content-Disposition"])
+                        if fname: return unquote(fname[0])
     except: pass
     
-    # Fallback
+    # 3. Fallback: Clean URL
     if not name: name = unquote(url.split("/")[-1])
     
-    # 🔥 Aggressive Cleanup (Token removal)
+    # Remove Query Params
     if "?" in name: name = name.split("?")[0]
-    
+        
     return name
 
 # --- COMMANDS ---
@@ -185,7 +176,7 @@ async def get_real_filename(url):
 async def main_start(c, m):
     if m.from_user.id == OWNER_ID:
         ver = pyrogram.__version__
-        await m.reply(f"👋 **Boss! v33.0 Ready.**\n\n🛠 **Pyrogram:** `{ver}`", parse_mode=enums.ParseMode.HTML)
+        await m.reply(f"👋 **Boss! v34.0 (Browser Mode) Ready.**\n\n🛠 **Pyrogram:** `{ver}`", parse_mode=enums.ParseMode.HTML)
 
 @app.on_message(filters.command("cancel") & filters.private & filters.user(OWNER_ID))
 async def cancel_task(c, m):
@@ -198,14 +189,11 @@ async def cancel_task(c, m):
     await asyncio.sleep(3)
     await msg.delete()
 
-# ---------------------------------------------------------
-# 🔥 UNIVERSAL MEDIA HANDLER (No Copy - Send Fresh)
-# ---------------------------------------------------------
+# --- MEDIA HANDLER ---
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo) & filters.user(OWNER_ID))
 async def media_handler(c, m):
     uid = m.from_user.id
     
-    # Image Check
     is_image = False
     if m.photo: is_image = True
     elif m.document:
@@ -219,7 +207,6 @@ async def media_handler(c, m):
         await m.reply_text("📸 **Image Detected!**", reply_markup=btn, quote=True, parse_mode=enums.ParseMode.HTML)
         return
 
-    # File Store Logic
     status = await m.reply("⚙️ **Processing...**")
     try:
         media = m.document or m.video or m.audio
@@ -229,7 +216,7 @@ async def media_handler(c, m):
         
         new_cap = get_fancy_caption(fname, fsize, dur)
         
-        # 🔥 FIX: Use send_document/video instead of copy to force new formatting
+        # Use send_video/document to FORCE green line
         if m.video:
              db_msg = await c.send_video(DB_CHANNEL_ID, m.video.file_id, caption=new_cap, parse_mode=enums.ParseMode.HTML)
         else:
@@ -245,54 +232,10 @@ async def media_handler(c, m):
         try:
             if clone_app and clone_app.is_connected: bot_uname = (await clone_app.get_me()).username
         except: pass
-        
         final_link = f"{BLOGGER_URL}?data={quote(blogger_code)}"
         
         await status.edit(f"✅ **Stored!**\n\n🔗 <b>Blog:</b> {final_link}\n\n🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}", disable_web_page_preview=True, parse_mode=enums.ParseMode.HTML)
     except Exception as e: await status.edit(f"❌ Error: {e}")
-
-# --- CALLBACK FOR IMAGES ---
-@app.on_callback_query(filters.regex("^save_"))
-async def save_img_callback(c, cb):
-    uid = cb.from_user.id
-    mode = "thumbnails" if "thumb" in cb.data else "watermarks"
-    os.makedirs(mode, exist_ok=True)
-    ext = ".png" if mode == "watermarks" else ".jpg"
-    path = f"{mode}/{uid}{ext}"
-    
-    await cb.message.edit("⏳ **Processing...**")
-    try:
-        reply = cb.message.reply_to_message
-        if not reply:
-            await cb.message.edit("❌ Error: Image not found!")
-            return
-            
-        await c.download_media(message=reply, file_name=path)
-        try: await reply.delete()
-        except: pass
-        await cb.message.delete()
-        
-        if mode == "thumbnails":
-            wm_path = f"watermarks/{uid}.png"
-            if os.path.exists(wm_path):
-                preview_path = f"{mode}/{uid}_preview.jpg"
-                img = Image.open(path).convert("RGB")
-                img.save(preview_path)
-                apply_watermark(preview_path, wm_path)
-                prev_msg = await c.send_photo(uid, preview_path, caption="✅ **Thumbnail Set!** (Preview)", parse_mode=enums.ParseMode.HTML)
-                os.remove(preview_path)
-                await asyncio.sleep(5)
-                await prev_msg.delete()
-            else:
-                msg = await c.send_message(uid, "✅ **Thumbnail Set!**")
-                await asyncio.sleep(3)
-                await msg.delete()
-        else:
-            msg = await c.send_message(uid, "✅ **Watermark Saved!** (60% Size)")
-            await asyncio.sleep(3)
-            await msg.delete()
-            
-    except Exception as e: await cb.message.edit(f"❌ Error: {e}")
 
 # --- URL HANDLER ---
 @app.on_message(filters.private & filters.regex(r"^https?://") & filters.user(OWNER_ID))
@@ -335,8 +278,10 @@ async def dl_process(c, cb):
     
     try:
         start = time.time()
+        # Headers for download too!
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
         async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
+            async with session.get(url, headers=headers) as resp:
                 total = int(resp.headers.get("Content-Length", 0))
                 with open(internal_path, "wb") as f:
                     dl = 0
@@ -372,7 +317,35 @@ async def dl_process(c, cb):
         del download_queue[uid]
     except Exception as e: await cb.message.edit(f"❌ Error: {e}")
 
-# --- SETTINGS & CLONE ---
+# --- CALLBACK FOR SAVE IMAGE (SAME AS BEFORE) ---
+@app.on_callback_query(filters.regex("^save_"))
+async def save_img_callback(c, cb):
+    uid = cb.from_user.id
+    mode = "thumbnails" if "thumb" in cb.data else "watermarks"
+    os.makedirs(mode, exist_ok=True)
+    ext = ".png" if mode == "watermarks" else ".jpg"
+    path = f"{mode}/{uid}{ext}"
+    await cb.message.edit("⏳ **Processing...**")
+    try:
+        reply = cb.message.reply_to_message
+        if not reply: return await cb.message.edit("❌ Error: Image not found!")
+        await c.download_media(message=reply, file_name=path)
+        try: await reply.delete()
+        except: pass
+        await cb.message.delete()
+        if mode == "thumbnails":
+            wm_path = f"watermarks/{uid}.png"
+            if os.path.exists(wm_path):
+                preview_path = f"{mode}/{uid}_preview.jpg"
+                img = Image.open(path).convert("RGB")
+                img.save(preview_path); apply_watermark(preview_path, wm_path)
+                prev_msg = await c.send_photo(uid, preview_path, caption="✅ **Thumbnail Set!** (Preview)", parse_mode=enums.ParseMode.HTML)
+                os.remove(preview_path); await asyncio.sleep(5); await prev_msg.delete()
+            else: msg = await c.send_message(uid, "✅ **Thumbnail Set!**"); await asyncio.sleep(3); await msg.delete()
+        else: msg = await c.send_message(uid, "✅ **Watermark Saved!** (60% Size)"); await asyncio.sleep(3); await msg.delete()
+    except Exception as e: await cb.message.edit(f"❌ Error: {e}")
+
+# --- CLONE SETUP (SAME AS BEFORE) ---
 @app.on_message(filters.command("setclone") & filters.user(OWNER_ID))
 async def set_clone(c, m):
     if len(m.command) < 2: return await m.reply("Usage: `/setclone TOKEN`")
@@ -396,7 +369,6 @@ async def start_clone_bot():
     if not data: return
     if clone_app: await clone_app.stop()
     clone_app = Client("CloneBot_Session", api_id=API_ID, api_hash=API_HASH, bot_token=data["token"], parse_mode=enums.ParseMode.HTML)
-
     @clone_app.on_message(filters.command("start") & filters.private)
     async def clone_start(c, m):
         if len(m.command) < 2: return await m.reply("👋 **Hello!**")
@@ -404,8 +376,7 @@ async def start_clone_bot():
         missing = []
         async for ch in channels_col.find():
             try: await c.get_chat_member(ch["_id"], m.from_user.id)
-            except UserNotParticipant: missing.append(ch["link"])
-            except: pass
+            except: missing.append(ch["link"])
         if missing:
             btn = [[InlineKeyboardButton(f"📢 Join Channel {i+1}", url=l)] for i, l in enumerate(missing)]
             btn.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{c.me.username}?start={payload}")])
@@ -418,31 +389,18 @@ async def start_clone_bot():
             msg = await c.get_messages(DB_CHANNEL_ID, msg_id)
             if not msg: return await temp.edit("❌ **File Deleted.**")
             cap = msg.caption or get_fancy_caption(getattr(msg.document or msg.video, "file_name", "File"), humanbytes(getattr(msg.document or msg.video, "file_size", 0)), 0)
-            
-            # Send File with HTML Parse Mode
             sent_file = await c.copy_message(m.chat.id, DB_CHANNEL_ID, msg_id, caption=cap, parse_mode=enums.ParseMode.HTML)
-            await temp.delete()
-            
-            timer_msg = await m.reply("⏳ **File will be deleted in 5 Mins!**")
-            await asyncio.sleep(300)
-            await sent_file.delete()
-            await timer_msg.delete()
-            
+            await temp.delete(); timer_msg = await m.reply("⏳ **File will be deleted in 5 Mins!**")
+            await asyncio.sleep(300); await sent_file.delete(); await timer_msg.delete()
             btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Get File Again", url=f"https://t.me/{c.me.username}?start={payload}")]])
             get_again_msg = await m.reply("❌ **Time Over! File Deleted.**\n👇 Get again (Valid 1 Min).", reply_markup=btn)
-            
-            await asyncio.sleep(60)
-            await get_again_msg.delete()
-            await m.reply(f"🚫 **Link Expired!**\n\n🌐 Visit: {FINAL_WEBSITE_URL}", disable_web_page_preview=True)
-
+            await asyncio.sleep(60); await get_again_msg.delete(); await m.reply(f"🚫 **Link Expired!**\n\n🌐 Visit: {FINAL_WEBSITE_URL}", disable_web_page_preview=True)
         except Exception as e: await m.reply(f"❌ Error: {e}")
-
     try: await clone_app.start(); print("✅ Clone Started")
     except: pass
 
 async def start_services():
-    await app.start()
-    await start_clone_bot()
+    await app.start(); await start_clone_bot()
     r = web.RouteTableDef()
     @r.get("/", allow_head=True)
     async def h(q): return web.json_response({"status": "running"})
@@ -452,4 +410,4 @@ async def start_services():
     await asyncio.Event().wait()
 
 if __name__ == "__main__": asyncio.get_event_loop().run_until_complete(start_services())
-        
+                

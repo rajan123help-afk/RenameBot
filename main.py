@@ -19,10 +19,10 @@ from pyrogram.errors import UserNotParticipant, PeerIdInvalid, FloodWait
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "23421127"))
-API_HASH = os.environ.get("API_HASH", "0375dd20aba9f2e7c29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468501492:AAGpD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
-OWNER_ID = int(os.environ.get("OWNER_ID", "5027914470"))
+API_ID = int(os.environ.get("API_ID", "234227"))
+API_HASH = os.environ.get("API_HASH", "0375dd20aba9d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "84685dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+OWNER_ID = int(os.environ.get("OWNER_ID", "502470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
@@ -82,7 +82,7 @@ def extract_msg_id(payload):
         else: return int(payload)
     except: return None
 
-# 🔥 CAPTION LOGIC
+# 🔥 CAPTION LOGIC (Updated v24 style)
 def get_media_info(name):
     name = unquote(name).replace(".", " ").replace("_", " ").replace("-", " ")
     match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", name)
@@ -160,7 +160,7 @@ async def get_real_filename(url):
 @app.on_message(filters.command("start") & filters.private)
 async def main_start(c, m):
     if m.from_user.id == OWNER_ID:
-        await m.reply("👋 **Boss! v24.0 Ready.**\n\n✅ 5 Min File -> 1 Min Button -> Website Link.")
+        await m.reply("👋 **Boss! v25.0 (Bug Fix) Ready.**")
 
 @app.on_message(filters.command("cancel") & filters.private & filters.user(OWNER_ID))
 async def cancel_task(c, m):
@@ -174,7 +174,7 @@ async def cancel_task(c, m):
     await msg.delete()
 
 # ---------------------------------------------------------
-# 🔥 UNIVERSAL MEDIA HANDLER (Auto Clean User Msg)
+# 🔥 UNIVERSAL MEDIA HANDLER (Smart Delete Fix)
 # ---------------------------------------------------------
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo) & filters.user(OWNER_ID))
 async def media_handler(c, m):
@@ -190,15 +190,13 @@ async def media_handler(c, m):
             is_image = True
             
     if is_image:
-        try: await m.delete()
-        except: pass
+        # ⚠️ DO NOT DELETE HERE! (Wait for button click)
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🖼 Set Thumbnail", callback_data="save_thumb"), InlineKeyboardButton("💧 Set Watermark", callback_data="save_wm")]])
         await m.reply_text("📸 **Image Detected!**", reply_markup=btn, quote=True)
         return
 
     # 2. File Store Logic
-    try: await m.delete()
-    except: pass
+    # ⚠️ DO NOT DELETE HERE YET! Copy first.
     
     status = await m.reply("⚙️ **Processing...**")
     try:
@@ -208,7 +206,13 @@ async def media_handler(c, m):
         dur = getattr(media, "duration", 0)
         
         new_cap = get_fancy_caption(fname, fsize, dur)
+        
+        # Copy to DB
         db_msg = await m.copy(DB_CHANNEL_ID, caption=new_cap)
+        
+        # NOW DELETE USER MESSAGE ✅
+        try: await m.delete()
+        except: pass
         
         raw_data = f"link_{OWNER_ID}_{db_msg.id}"
         tg_code, blogger_code = get_link_codes(raw_data)
@@ -223,7 +227,7 @@ async def media_handler(c, m):
         await status.edit(f"✅ **Stored!**\n\n🔗 <b>Blog:</b> {final_link}\n\n🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}", disable_web_page_preview=True)
     except Exception as e: await status.edit(f"❌ Error: {e}")
 
-# --- CALLBACK FOR IMAGES ---
+# --- CALLBACK FOR IMAGES (Clean Up After Save) ---
 @app.on_callback_query(filters.regex("^save_"))
 async def save_img_callback(c, cb):
     uid = cb.from_user.id
@@ -231,17 +235,40 @@ async def save_img_callback(c, cb):
     os.makedirs(mode, exist_ok=True)
     ext = ".png" if mode == "watermarks" else ".jpg"
     path = f"{mode}/{uid}{ext}"
+    
     await cb.message.edit("⏳ **Processing...**")
     try:
-        # Note: Since user msg is deleted, we rely on the bot prompt's context.
-        # But wait! We can't download from deleted message.
-        # FIX: The button is attached to bot's message, but where is the image?
-        # If user msg deleted, we lost the file_id.
-        # Quick Fix: Don't delete IMAGE messages in media_handler immediately.
-        # (This is handled in logic but for robust flow, let's keep it simple: 
-        # Uploading images for settings is rare, so admin can manually delete if needed or keep it.)
-        await cb.message.edit("❌ **Error:** Please don't delete image before saving!")
-    except: pass
+        reply = cb.message.reply_to_message
+        if not reply:
+            await cb.message.edit("❌ Error: Image not found!")
+            return
+            
+        # Download
+        await c.download_media(message=reply, file_name=path)
+        
+        # NOW DELETE ORIGINAL IMAGE ✅
+        try: await reply.delete()
+        except: pass
+        
+        if mode == "thumbnails":
+            wm_path = f"watermarks/{uid}.png"
+            if os.path.exists(wm_path):
+                preview_path = f"{mode}/{uid}_preview.jpg"
+                img = Image.open(path).convert("RGB")
+                img.save(preview_path)
+                apply_watermark(preview_path, wm_path)
+                await c.send_photo(uid, preview_path, caption="✅ **Thumbnail Set!** (Preview)")
+                os.remove(preview_path)
+            else:
+                # Just confirm msg, no preview if no WM
+                await c.send_message(uid, "✅ **Thumbnail Set!**")
+        else:
+            await c.send_message(uid, "✅ **Watermark Saved!** (60% Size)")
+            
+        # Delete the Button Message
+        await cb.message.delete()
+            
+    except Exception as e: await cb.message.edit(f"❌ Error: {e}")
 
 # --- URL HANDLER (Auto Clean) ---
 @app.on_message(filters.private & filters.regex(r"^https?://") & filters.user(OWNER_ID))
@@ -363,7 +390,6 @@ async def start_clone_bot():
         msg_id = extract_msg_id(decoded_string) if decoded_string else None
         if not msg_id: return await m.reply("❌ **Link Invalid!**")
         try:
-            # 1. SEND FILE
             temp = await m.reply("🔄 **Processing...**")
             msg = await c.get_messages(DB_CHANNEL_ID, msg_id)
             if not msg: return await temp.edit("❌ **File Deleted.**")
@@ -372,25 +398,18 @@ async def start_clone_bot():
             sent_file = await c.copy_message(m.chat.id, DB_CHANNEL_ID, msg_id, caption=cap)
             await temp.delete()
             
-            # 2. 5 MINUTE WARNING
-            timer_msg = await m.reply("⏳ **Note:** File will be auto-deleted in **5 Minutes**!\n(Save it to Saved Messages)")
-            await asyncio.sleep(300) # 5 Mins
-            
-            # 3. DELETE FILE & TIMER
+            # Timer & Buttons (5 Min -> 1 Min)
+            timer_msg = await m.reply("⏳ **File will be deleted in 5 Mins!**")
+            await asyncio.sleep(300)
             await sent_file.delete()
             await timer_msg.delete()
             
-            # 4. SHOW GET AGAIN BUTTON (1 MINUTE)
             btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Get File Again", url=f"https://t.me/{c.me.username}?start={payload}")]])
-            get_again_msg = await m.reply("❌ **Time Over! File Deleted.**\n\n👇 Click below to get it again (Valid for 1 min).", reply_markup=btn)
+            get_again_msg = await m.reply("❌ **Time Over! File Deleted.**\n👇 Get again (Valid 1 Min).", reply_markup=btn)
             
-            await asyncio.sleep(60) # 1 Min
-            
-            # 5. DELETE BUTTON & SHOW FINAL WEBSITE
+            await asyncio.sleep(60)
             await get_again_msg.delete()
-            
-            # Final Message
-            await m.reply(f"🚫 **Link Expired!**\n\n🌐 Visit our website for more movies:\n👉 {FINAL_WEBSITE_URL}", disable_web_page_preview=True)
+            await m.reply(f"🚫 **Link Expired!**\n\n🌐 Visit: {FINAL_WEBSITE_URL}", disable_web_page_preview=True)
 
         except Exception as e: await m.reply(f"❌ Error: {e}")
 

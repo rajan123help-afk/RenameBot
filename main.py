@@ -15,14 +15,14 @@ from hachoir.metadata import extractMetadata
 from hachoir.parser import createParser
 from aiohttp import web
 from pyrogram import Client, filters, enums
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "234127"))
-API_HASH = os.environ.get("API_HASH", "0375dd20a7c29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "846850D5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
-OWNER_ID = int(os.environ.get("OWNER_ID", "54470"))
+API_ID = int(os.environ.get("API_ID", "23127"))
+API_HASH = os.environ.get("API_HASH", "03752e7c29d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "84685pD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+OWNER_ID = int(os.environ.get("OWNER_ID", "502470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
@@ -82,7 +82,7 @@ def extract_msg_id(payload):
         else: return int(payload)
     except: return None
 
-# 🔥 CAPTION LOGIC
+# 🔥 CAPTION LOGIC (Green Line + Bold)
 def get_media_info(name):
     name = unquote(name).replace(".", " ").replace("_", " ").replace("-", " ")
     match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", name)
@@ -139,44 +139,35 @@ async def progress(current, total, message, start_time, task_name):
         try: await message.edit(text, parse_mode=enums.ParseMode.HTML)
         except: pass
 
-# 🔥 ADVANCED NAME FETCHER (With Fake Browser Headers)
+# -----------------------------------------------------------
+# 🔥 YOUR SUPERIOR NAME FETCHER LOGIC (INTEGRATED) 🚀
+# -----------------------------------------------------------
 async def get_real_filename(url):
-    name = None
-    # ⚠️ Fake Browser Headers to trick server
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-    
     try:
+        # User-Agent lagana zaroori hai
+        headers = {"User-Agent": "Mozilla/5.0"}
         async with aiohttp.ClientSession() as session:
-            # 1. Try HEAD request
-            async with session.head(url, headers=headers, allow_redirects=True) as resp:
+            # GET request (not HEAD) for maximum compatibility
+            async with session.get(url, headers=headers, allow_redirects=True, timeout=10) as resp:
                 if "Content-Disposition" in resp.headers:
-                    fname = re.findall("filename=\"?([^\"]+)\"?", resp.headers["Content-Disposition"])
-                    if fname: return unquote(fname[0])
-            
-            # 2. Try GET request (Streamed)
-            if not name:
-                async with session.get(url, headers=headers, allow_redirects=True) as resp:
-                    if "Content-Disposition" in resp.headers:
-                        fname = re.findall("filename=\"?([^\"]+)\"?", resp.headers["Content-Disposition"])
-                        if fname: return unquote(fname[0])
+                    cd = resp.headers["Content-Disposition"]
+                    # 1. Normal Filename
+                    fname_match = re.search(r'filename="?([^"]+)"?', cd)
+                    if fname_match: return unquote(fname_match.group(1))
+                    # 2. UTF-8 Filename (Complex Names)
+                    utf_match = re.search(r"filename\*=UTF-8''(.+)", cd)
+                    if utf_match: return unquote(utf_match.group(1))
     except: pass
     
-    # 3. Fallback: Clean URL
-    if not name: name = unquote(url.split("/")[-1])
-    
-    # Remove Query Params
-    if "?" in name: name = name.split("?")[0]
-        
-    return name
+    # Fallback to URL split
+    return unquote(url.split("/")[-1].split("?")[0])
 
 # --- COMMANDS ---
 @app.on_message(filters.command("start") & filters.private)
 async def main_start(c, m):
     if m.from_user.id == OWNER_ID:
         ver = pyrogram.__version__
-        await m.reply(f"👋 **Boss! v34.0 (Browser Mode) Ready.**\n\n🛠 **Pyrogram:** `{ver}`", parse_mode=enums.ParseMode.HTML)
+        await m.reply(f"👋 **Boss! v35.0 (Best URL Logic) Ready.**\n\n🛠 **Pyrogram:** `{ver}`", parse_mode=enums.ParseMode.HTML)
 
 @app.on_message(filters.command("cancel") & filters.private & filters.user(OWNER_ID))
 async def cancel_task(c, m):
@@ -216,7 +207,7 @@ async def media_handler(c, m):
         
         new_cap = get_fancy_caption(fname, fsize, dur)
         
-        # Use send_video/document to FORCE green line
+        # Using send_video/document to FORCE green line
         if m.video:
              db_msg = await c.send_video(DB_CHANNEL_ID, m.video.file_id, caption=new_cap, parse_mode=enums.ParseMode.HTML)
         else:
@@ -244,7 +235,10 @@ async def url_handler(c, m):
     try: await m.delete()
     except: pass
     status = await m.reply("🔗 **Fetching...**")
+    
+    # Using your logic here
     orig_name = await get_real_filename(url)
+    
     download_queue[m.from_user.id] = {"url": url, "orig_name": orig_name, "prompt_id": status.id}
     await status.edit(f"📂 **Original:**\n<code>{orig_name}</code>\n\n📝 **New Name:**", parse_mode=enums.ParseMode.HTML)
 
@@ -270,6 +264,8 @@ async def dl_process(c, cb):
     
     await cb.message.edit("📥 **Initializing...**")
     url = data['url']; custom_name = data['new_name']; mode = "video" if "video" in cb.data else "doc"
+    
+    # Name Logic
     root, ext = os.path.splitext(data['orig_name'])
     if not ext: ext = ".mkv"
     final_filename = f"{custom_name}{ext}"
@@ -278,8 +274,8 @@ async def dl_process(c, cb):
     
     try:
         start = time.time()
-        # Headers for download too!
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+        # Headers for download (Consistency)
+        headers = {"User-Agent": "Mozilla/5.0"}
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers) as resp:
                 total = int(resp.headers.get("Content-Length", 0))
@@ -317,7 +313,7 @@ async def dl_process(c, cb):
         del download_queue[uid]
     except Exception as e: await cb.message.edit(f"❌ Error: {e}")
 
-# --- CALLBACK FOR SAVE IMAGE (SAME AS BEFORE) ---
+# --- CALLBACK FOR SAVE IMAGE ---
 @app.on_callback_query(filters.regex("^save_"))
 async def save_img_callback(c, cb):
     uid = cb.from_user.id
@@ -345,7 +341,7 @@ async def save_img_callback(c, cb):
         else: msg = await c.send_message(uid, "✅ **Watermark Saved!** (60% Size)"); await asyncio.sleep(3); await msg.delete()
     except Exception as e: await cb.message.edit(f"❌ Error: {e}")
 
-# --- CLONE SETUP (SAME AS BEFORE) ---
+# --- CLONE SETUP ---
 @app.on_message(filters.command("setclone") & filters.user(OWNER_ID))
 async def set_clone(c, m):
     if len(m.command) < 2: return await m.reply("Usage: `/setclone TOKEN`")
@@ -410,4 +406,4 @@ async def start_services():
     await asyncio.Event().wait()
 
 if __name__ == "__main__": asyncio.get_event_loop().run_until_complete(start_services())
-                
+                    

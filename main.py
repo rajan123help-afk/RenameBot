@@ -19,10 +19,10 @@ from pyrogram.errors import UserNotParticipant, PeerIdInvalid, FloodWait
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "234127"))
-API_HASH = os.environ.get("API_HASH", "0375dd20ae7c29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "84685014pD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
-OWNER_ID = int(os.environ.get("OWNER_ID", "5014470"))
+API_ID = int(os.environ.get("API_ID", "23127"))
+API_HASH = os.environ.get("API_HASH", "0375dd20e7c29d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468pD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+OWNER_ID = int(os.environ.get("OWNER_ID", "502470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
@@ -35,7 +35,7 @@ db = mongo["FilmyFlipStore"]
 settings_col = db["settings"]
 channels_col = db["channels"]
 
-# --- BOT SETUP ---
+# --- BOT SETUP (Force HTML Mode) ---
 app = Client("MainBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=10, parse_mode=enums.ParseMode.HTML)
 clone_app = None
 download_queue = {} 
@@ -82,7 +82,7 @@ def extract_msg_id(payload):
         else: return int(payload)
     except: return None
 
-# 🔥 CAPTION LOGIC (HTML Forced)
+# 🔥 CAPTION LOGIC (EXACTLY AS YOU WANTED)
 def get_media_info(name):
     name = unquote(name).replace(".", " ").replace("_", " ").replace("-", " ")
     match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", name)
@@ -93,22 +93,23 @@ def get_media_info(name):
 
 def get_fancy_caption(filename, filesize, duration):
     clean_name = unquote(filename)
+    # Note: Name is explicitly in <code> for copy functionality
     safe_name = html.escape(clean_name)
     
-    # Filename in Code Box
     caption = f"<code>{safe_name}</code>\n\n"
     
     s, e = get_media_info(clean_name)
     if s: s = s.zfill(2)
     if e: e = e.zfill(2)
+    
     if s: caption += f"💿 <b>Season ➥ {s}</b>\n"
     if e: caption += f"📺 <b>Episode ➥ {e}</b>\n"
     if s or e: caption += "\n"
     
-    # BLOCKQUOTE for Green Line
-    caption += f"<blockquote><b>File Size ♻️ ➥ {filesize} ❞</b></blockquote>\n\n"
-    caption += f"<blockquote><b>Duration ⏰ ➥ {get_duration_str(duration)} ❞</b></blockquote>\n\n"
-    caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME} ❞</b></blockquote>"
+    # 🔥 EXACT BLOCKQUOTE LOGIC (Green Line)
+    caption += f"<blockquote><b>File Size ♻️ ➥ {filesize}</b></blockquote>\n"
+    caption += f"<blockquote><b>Duration ⏰ ➥ {get_duration_str(duration)}</b></blockquote>\n"
+    caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME}</b></blockquote>"
     
     return caption
 
@@ -169,7 +170,7 @@ async def get_real_filename(url):
 @app.on_message(filters.command("start") & filters.private)
 async def main_start(c, m):
     if m.from_user.id == OWNER_ID:
-        await m.reply("👋 **Boss! v30.0 (Final) Ready.**", parse_mode=enums.ParseMode.HTML)
+        await m.reply("👋 **Boss! v31.0 (Exact Caption) Ready.**", parse_mode=enums.ParseMode.HTML)
 
 @app.on_message(filters.command("cancel") & filters.private & filters.user(OWNER_ID))
 async def cancel_task(c, m):
@@ -402,7 +403,6 @@ async def start_clone_bot():
             if not msg: return await temp.edit("❌ **File Deleted.**")
             cap = msg.caption or get_fancy_caption(getattr(msg.document or msg.video, "file_name", "File"), humanbytes(getattr(msg.document or msg.video, "file_size", 0)), 0)
             
-            # Send File with HTML Parse Mode
             sent_file = await c.copy_message(m.chat.id, DB_CHANNEL_ID, msg_id, caption=cap, parse_mode=enums.ParseMode.HTML)
             await temp.delete()
             

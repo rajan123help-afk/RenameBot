@@ -19,10 +19,10 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "2327"))
-API_HASH = os.environ.get("API_HASH", "037lf2e7c29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468AGpD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
-OWNER_ID = int(os.environ.get("OWNER_ID", "5070"))
+API_ID = int(os.environ.get("API_ID", "23127"))
+API_HASH = os.environ.get("API_HASH", "0375a9f2e7c29d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "84685D5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+OWNER_ID = int(os.environ.get("OWNER_ID", "5470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
@@ -82,7 +82,7 @@ def extract_msg_id(payload):
         else: return int(payload)
     except: return None
 
-# 🔥 CAPTION LOGIC (EXACT MATCH TO YOUR PHOTO)
+# 🔥 CAPTION LOGIC (EXACT PHOTO MATCH)
 def get_media_info(name):
     clean_name = name.replace(".", " ").replace("_", " ").replace("-", " ")
     match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", clean_name)
@@ -105,18 +105,18 @@ def get_fancy_caption(filename, filesize, duration):
     if e: e = e.zfill(2); caption += f"📺 <b>Episode ➥ {e}</b>\n"
     if s or e: caption += "\n"
     
-    # 4. BLOCKS (Matching your image Style)
+    # 4. BLOCKS (Same as Screenshot)
     
     # Block 1: File Size (Monospace font inside Quote)
-    # <blockquote><code>Text</code></blockquote> creates the look in your 1st block
-    caption += f"<blockquote><code>File Size ♻️ ➥ {filesize}</code></blockquote>\n"
+    # \n\n adds the gap between bars
+    caption += f"<blockquote><code>File Size ♻️ ➥ {filesize}</code></blockquote>\n\n"
     
     # Block 2: Duration (Monospace font inside Quote)
     dur_str = get_duration_str(duration)
     if dur_str:
-        caption += f"<blockquote><code>Duration ⏰ ➥ {dur_str}</code></blockquote>\n"
+        caption += f"<blockquote><code>Duration ⏰ ➥ {dur_str}</code></blockquote>\n\n"
     
-    # Block 3: Powered By (Bold font inside Quote with Red Quote Mark)
+    # Block 3: Powered By (Bold font inside Quote)
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME} ❞</b></blockquote>"
     
     return caption
@@ -175,7 +175,7 @@ async def get_real_filename(url):
 @app.on_message(filters.command("start") & filters.private)
 async def main_start(c, m):
     if m.from_user.id == OWNER_ID:
-        await m.reply(f"👋 **Boss! v42.0 (Matched Style) Ready.**")
+        await m.reply(f"👋 **Boss! v42.1 (Exact Style) Ready.**")
 
 @app.on_message(filters.command("cancel") & filters.private & filters.user(OWNER_ID))
 async def cancel_task(c, m):
@@ -410,4 +410,4 @@ async def start_services():
     await asyncio.Event().wait()
 
 if __name__ == "__main__": asyncio.get_event_loop().run_until_complete(start_services())
-    
+        

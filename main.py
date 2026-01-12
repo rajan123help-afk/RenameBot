@@ -18,11 +18,11 @@ from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from motor.motor_asyncio import AsyncIOMotorClient
 
-# --- CONFIGURATION (Fixed Syntax) ---
-API_ID = int(os.environ.get("API_ID", "23127"))
-API_HASH = os.environ.get("API_HASH", "0375dd2e7c29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "84685pD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
-OWNER_ID = int(os.environ.get("OWNER_ID", "502470"))
+# --- CONFIGURATION ---
+API_ID = int(os.environ.get("API_ID", "2327"))
+API_HASH = os.environ.get("API_HASH", "0375dd20aba9f206590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468501dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+OWNER_ID = int(os.environ.get("OWNER_ID", "504470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
@@ -30,15 +30,14 @@ FINAL_WEBSITE_URL = "https://filmyflip-hub.blogspot.com"
 CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"
 
 # --- DATABASE SETUP ---
-mongo = AsyncIOMotorClient(MONGO_URL)
-db = mongo["FilmyFlipStore"]
-settings_col = db["settings"]
-channels_col = db["channels"]
-
-# --- BOT SETUP ---
-app = Client("MainBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=10, parse_mode=enums.ParseMode.HTML)
-clone_app = None
-download_queue = {} 
+try:
+    mongo = AsyncIOMotorClient(MONGO_URL)
+    db = mongo["FilmyFlipStore"]
+    settings_col = db["settings"]
+    channels_col = db["channels"]
+    print("✅ MongoDB Connected")
+except Exception as e:
+    print(f"❌ MongoDB Error: {e}")
 
 # --- HELPERS ---
 
@@ -82,7 +81,7 @@ def extract_msg_id(payload):
         else: return int(payload)
     except: return None
 
-# 🔥 CAPTION LOGIC (SIMPLE BOLD)
+# 🔥 CAPTION LOGIC (Matched Style)
 def get_media_info(name):
     clean_name = name.replace(".", " ").replace("_", " ").replace("-", " ")
     match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", clean_name)
@@ -95,21 +94,23 @@ def get_fancy_caption(filename, filesize, duration):
     clean_name = filename.replace(".", " ").replace("_", " ")
     safe_name = html.escape(clean_name)
     
-    # Simple Bold Format
+    # 1. Filename (Simple Bold)
     caption = f"<b>{safe_name}</b>\n\n"
     
+    # 2. Season/Episode
     s, e = get_media_info(filename)
     if s: s = s.zfill(2); caption += f"💿 <b>Season ➥ {s}</b>\n"
     if e: e = e.zfill(2); caption += f"📺 <b>Episode ➥ {e}</b>\n"
     if s or e: caption += "\n"
     
-    caption += f"<b>File Size ♻️ ➥ {filesize}</b>\n\n"
+    # 3. BLOCKS (Matching Style)
+    caption += f"<blockquote><code>File Size ♻️ ➥ {filesize}</code></blockquote>\n\n"
     
     dur_str = get_duration_str(duration)
     if dur_str:
-        caption += f"<b>Duration ⏰ ➥ {dur_str}</b>\n\n"
+        caption += f"<blockquote><code>Duration ⏰ ➥ {dur_str}</code></blockquote>\n\n"
     
-    caption += f"<b>Powered By ➥ {CREDIT_NAME}</b>"
+    caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME} ❞</b></blockquote>"
     
     return caption
 
@@ -133,20 +134,6 @@ def apply_watermark(base_path, wm_path):
         return base_path
     except: return base_path
 
-# 🔥 CIRCLE PROGRESS BAR
-async def progress(current, total, message, start_time, task_name):
-    now = time.time()
-    diff = now - start_time
-    if round(diff % 5.00) == 0 or current == total:
-        percentage = current * 100 / total
-        speed = current / diff if diff > 0 else 0
-        filled = int(percentage // 10)
-        bar = "🟢" * filled + "⚪" * (10 - filled)
-        eta = get_duration_str(round((total - current) / speed)) if speed > 0 else "0s"
-        text = f"<b>{task_name}</b>\n\n<b>[{bar}] {round(percentage, 1)}%</b>\n<b>📦 Done:</b> {humanbytes(current)} / {humanbytes(total)}\n<b>⚡ Speed:</b> {humanbytes(speed)}/s\n<b>⏳ ETA:</b> {eta}"
-        try: await message.edit(text, parse_mode=enums.ParseMode.HTML)
-        except: pass
-
 # 🔥 NAME FETCHER
 async def get_real_filename(url):
     try:
@@ -163,11 +150,28 @@ async def get_real_filename(url):
     name = unquote(url.split("/")[-1].split("?")[0])
     return name.replace(".", " ").replace("_", " ")
 
-# --- COMMANDS ---
+# 🔥 PROGRESS BAR
+async def progress(current, total, message, start_time, task_name):
+    now = time.time()
+    diff = now - start_time
+    if round(diff % 5.00) == 0 or current == total:
+        percentage = current * 100 / total
+        speed = current / diff if diff > 0 else 0
+        filled = int(percentage // 10)
+        bar = "🟢" * filled + "⚪" * (10 - filled)
+        eta = get_duration_str(round((total - current) / speed)) if speed > 0 else "0s"
+        text = f"<b>{task_name}</b>\n\n<b>[{bar}] {round(percentage, 1)}%</b>\n<b>📦 Done:</b> {humanbytes(current)} / {humanbytes(total)}\n<b>⚡ Speed:</b> {humanbytes(speed)}/s\n<b>⏳ ETA:</b> {eta}"
+        try: await message.edit(text, parse_mode=enums.ParseMode.HTML)
+        except: pass
+          # --- COMMANDS ---
 @app.on_message(filters.command("start") & filters.private)
 async def main_start(c, m):
     if m.from_user.id == OWNER_ID:
-        await m.reply(f"👋 **Boss! v44.0 Ready.**\n\n🆔 **DB Channel:** `{DB_CHANNEL_ID}`")
+        # Check DB status
+        db_status = "✅ Connected"
+        try: await db.command("ping")
+        except: db_status = "❌ Disconnected (Check MongoDB)"
+        await m.reply(f"👋 **Boss! v45.0 Ready.**\n\n🗄 **DB:** `{db_status}`\n🆔 **ID:** `{DB_CHANNEL_ID}`")
 
 @app.on_message(filters.command("cancel") & filters.private & filters.user(OWNER_ID))
 async def cancel_task(c, m):
@@ -190,8 +194,26 @@ async def set_db_channel(c, m):
         global DB_CHANNEL_ID
         DB_CHANNEL_ID = new_id
         await m.reply(f"✅ **DB Channel Updated!**\n🆔 New ID: `{new_id}`")
-    except ValueError:
-        await m.reply("❌ **Invalid ID!** Numbers only.")
+    except Exception as e:
+        await m.reply(f"❌ Error: {e}")
+
+# 🔥 ADD FS COMMAND (DEBUG MODE)
+@app.on_message(filters.command("addfs") & filters.user(OWNER_ID))
+async def add_fs(c, m):
+    if len(m.command) < 3: return await m.reply("❌ Usage: `/addfs ID Link`")
+    status = await m.reply("🔄 **Adding to DB...**")
+    try:
+        ch_id = int(m.command[1])
+        link = m.command[2]
+        await channels_col.update_one({"_id": ch_id}, {"$set": {"link": link}}, upsert=True)
+        await status.edit(f"✅ **Force Subscribe Added!**\n\n🆔 `{ch_id}`\n🔗 {link}")
+    except Exception as e:
+        await status.edit(f"❌ **DB Error:** `{e}`\n\nCheck MongoDB URL or Network Access!")
+
+@app.on_message(filters.command("delfs") & filters.user(OWNER_ID))
+async def del_fs(c, m):
+    try: await channels_col.delete_one({"_id": int(m.command[1])}); await m.reply("🗑 Deleted.")
+    except: pass
 
 # --- MEDIA HANDLER ---
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo) & filters.user(OWNER_ID))
@@ -358,17 +380,6 @@ async def set_clone(c, m):
     await settings_col.update_one({"_id": "clone_token"}, {"$set": {"token": m.command[1]}}, upsert=True)
     await m.reply("♻️ **Saved! Restarting...**"); await start_clone_bot()
 
-@app.on_message(filters.command("addfs") & filters.user(OWNER_ID))
-async def add_fs(c, m):
-    if len(m.command) < 3: return await m.reply("Usage: `/addfs ID Link`")
-    await channels_col.update_one({"_id": int(m.command[1])}, {"$set": {"link": m.command[2]}}, upsert=True)
-    await m.reply("✅ Added.")
-
-@app.on_message(filters.command("delfs") & filters.user(OWNER_ID))
-async def del_fs(c, m):
-    try: await channels_col.delete_one({"_id": int(m.command[1])}); await m.reply("🗑 Deleted.")
-    except: pass
-
 async def start_clone_bot():
     global clone_app
     # Load DB Channel ID from DB if exists
@@ -441,4 +452,4 @@ async def start_services():
     await asyncio.Event().wait()
 
 if __name__ == "__main__": asyncio.get_event_loop().run_until_complete(start_services())
-    
+                    

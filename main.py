@@ -19,11 +19,12 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "23127"))
-API_HASH = os.environ.get("API_HASH", "0375a9f2e7c29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "84685D5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
-OWNER_ID = int(os.environ.get("OWNER_ID", "5470"))
-MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
+API_ID = int(os.environ.get("API_ID", "21127"))
+API_HASH = os.environ.get("API_HASH", "03759f2e7c29d0c1c06590dfb"))
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "84685GpD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk"))
+OWNER_ID = int(os.environ.get("OWNER_ID", "50470"))
+MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip"))
+# Default DB Channel (Can be changed via command)
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 FINAL_WEBSITE_URL = "https://filmyflip-hub.blogspot.com"
@@ -82,7 +83,7 @@ def extract_msg_id(payload):
         else: return int(payload)
     except: return None
 
-# 🔥 CAPTION LOGIC (EXACT PHOTO MATCH)
+# 🔥 CAPTION LOGIC (SIMPLE BOLD - NO FANCY STUFF)
 def get_media_info(name):
     clean_name = name.replace(".", " ").replace("_", " ").replace("-", " ")
     match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", clean_name)
@@ -92,32 +93,24 @@ def get_media_info(name):
     return None, None
 
 def get_fancy_caption(filename, filesize, duration):
-    # 1. Clean Name (No Dots)
     clean_name = filename.replace(".", " ").replace("_", " ")
     safe_name = html.escape(clean_name)
     
-    # 2. Filename (Simple Bold)
+    # Simple Bold Format
     caption = f"<b>{safe_name}</b>\n\n"
     
-    # 3. Season/Episode
     s, e = get_media_info(filename)
     if s: s = s.zfill(2); caption += f"💿 <b>Season ➥ {s}</b>\n"
     if e: e = e.zfill(2); caption += f"📺 <b>Episode ➥ {e}</b>\n"
     if s or e: caption += "\n"
     
-    # 4. BLOCKS (Same as Screenshot)
+    caption += f"<b>File Size ♻️ ➥ {filesize}</b>\n\n"
     
-    # Block 1: File Size (Monospace font inside Quote)
-    # \n\n adds the gap between bars
-    caption += f"<blockquote><code>File Size ♻️ ➥ {filesize}</code></blockquote>\n\n"
-    
-    # Block 2: Duration (Monospace font inside Quote)
     dur_str = get_duration_str(duration)
     if dur_str:
-        caption += f"<blockquote><code>Duration ⏰ ➥ {dur_str}</code></blockquote>\n\n"
+        caption += f"<b>Duration ⏰ ➥ {dur_str}</b>\n\n"
     
-    # Block 3: Powered By (Bold font inside Quote)
-    caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME} ❞</b></blockquote>"
+    caption += f"<b>Powered By ➥ {CREDIT_NAME}</b>"
     
     return caption
 
@@ -175,7 +168,7 @@ async def get_real_filename(url):
 @app.on_message(filters.command("start") & filters.private)
 async def main_start(c, m):
     if m.from_user.id == OWNER_ID:
-        await m.reply(f"👋 **Boss! v42.1 (Exact Style) Ready.**")
+        await m.reply(f"👋 **Boss! v43.0 Ready.**\n\n🆔 **DB Channel:** `{DB_CHANNEL_ID}`")
 
 @app.on_message(filters.command("cancel") & filters.private & filters.user(OWNER_ID))
 async def cancel_task(c, m):
@@ -187,6 +180,19 @@ async def cancel_task(c, m):
     msg = await m.reply("✅ **Cleaned!**")
     await asyncio.sleep(3)
     await msg.delete()
+
+# 🔥 SET DB CHANNEL COMMAND
+@app.on_message(filters.command("setdb") & filters.user(OWNER_ID))
+async def set_db_channel(c, m):
+    if len(m.command) < 2: return await m.reply("❌ Usage: `/setdb -100xxxxxxx`")
+    try:
+        new_id = int(m.command[1])
+        await settings_col.update_one({"_id": "db_channel"}, {"$set": {"id": new_id}}, upsert=True)
+        global DB_CHANNEL_ID
+        DB_CHANNEL_ID = new_id
+        await m.reply(f"✅ **DB Channel Updated!**\n🆔 New ID: `{new_id}`")
+    except ValueError:
+        await m.reply("❌ **Invalid ID!** Numbers only.")
 
 # --- MEDIA HANDLER ---
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo) & filters.user(OWNER_ID))
@@ -215,6 +221,7 @@ async def media_handler(c, m):
         
         new_cap = get_fancy_caption(fname, fsize, dur)
         
+        # Ensure we use the global DB_CHANNEL_ID
         if m.video:
              db_msg = await c.send_video(DB_CHANNEL_ID, m.video.file_id, caption=new_cap)
         else:
@@ -318,7 +325,7 @@ async def dl_process(c, cb):
         del download_queue[uid]
     except Exception as e: await cb.message.edit(f"❌ Error: {e}")
 
-# --- CALLBACKS & CLONE SAME AS BEFORE ---
+# --- CALLBACKS & CLONE ---
 @app.on_callback_query(filters.regex("^save_"))
 async def save_img_callback(c, cb):
     uid = cb.from_user.id
@@ -365,10 +372,20 @@ async def del_fs(c, m):
 
 async def start_clone_bot():
     global clone_app
+    # Load DB Channel ID from DB if exists
+    try:
+        db_data = await settings_col.find_one({"_id": "db_channel"})
+        if db_data: 
+            global DB_CHANNEL_ID
+            DB_CHANNEL_ID = db_data["id"]
+            print(f"✅ Loaded DB Channel: {DB_CHANNEL_ID}")
+    except: pass
+
     data = await settings_col.find_one({"_id": "clone_token"})
     if not data: return
     if clone_app: await clone_app.stop()
     clone_app = Client("CloneBot_Session", api_id=API_ID, api_hash=API_HASH, bot_token=data["token"], parse_mode=enums.ParseMode.HTML)
+    
     @clone_app.on_message(filters.command("start") & filters.private)
     async def clone_start(c, m):
         if len(m.command) < 2: return await m.reply("👋 **Hello!**")
@@ -389,12 +406,27 @@ async def start_clone_bot():
             msg = await c.get_messages(DB_CHANNEL_ID, msg_id)
             if not msg: return await temp.edit("❌ **File Deleted.**")
             cap = msg.caption or get_fancy_caption(getattr(msg.document or msg.video, "file_name", "File"), humanbytes(getattr(msg.document or msg.video, "file_size", 0)), 0)
+            
+            # 1. SEND FILE
             sent_file = await c.copy_message(m.chat.id, DB_CHANNEL_ID, msg_id, caption=cap)
-            await temp.delete(); timer_msg = await m.reply("⏳ **File will be deleted in 5 Mins!**")
-            await asyncio.sleep(300); await sent_file.delete(); await timer_msg.delete()
+            await temp.delete()
+            
+            # 2. 5 MIN TIMER
+            timer_msg = await m.reply("⏳ **File will be deleted in 5 Mins!**")
+            await asyncio.sleep(300) # 5 Mins
+            await sent_file.delete()
+            await timer_msg.delete()
+            
+            # 3. 1 MIN GET AGAIN TIMER
             btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Get File Again", url=f"https://t.me/{c.me.username}?start={payload}")]])
             get_again_msg = await m.reply("❌ **Time Over! File Deleted.**\n👇 Get again (Valid 1 Min).", reply_markup=btn)
-            await asyncio.sleep(60); await get_again_msg.delete(); await m.reply(f"🚫 **Link Expired!**\n\n🌐 Visit: {FINAL_WEBSITE_URL}", disable_web_page_preview=True)
+            await asyncio.sleep(60) # 1 Min
+            await get_again_msg.delete()
+            
+            # 4. FINAL WEBSITE LINK BUTTON
+            web_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🌐 Visit Website", url=FINAL_WEBSITE_URL)]])
+            await m.reply(f"🚫 **Link Expired!**", reply_markup=web_btn)
+            
         except Exception as e: await m.reply(f"❌ Error: {e}")
     try: await clone_app.start(); print("✅ Clone Started")
     except: pass
@@ -410,4 +442,4 @@ async def start_services():
     await asyncio.Event().wait()
 
 if __name__ == "__main__": asyncio.get_event_loop().run_until_complete(start_services())
-        
+                

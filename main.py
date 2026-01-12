@@ -19,12 +19,13 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "23427"))
-API_HASH = os.environ.get("API_HASH", "0375dd20c29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "846850D5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+API_ID = int(os.environ.get("API_ID", "21127"))
+API_HASH = os.environ.get("API_HASH", "037ba9f2e7c29d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "846GpD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
 OWNER_ID = int(os.environ.get("OWNER_ID", "502470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
+TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "02a832d91755c2f5e8a2d1a6740a8674")
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 FINAL_WEBSITE_URL = "https://filmyflip-hub.blogspot.com"
 CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"
@@ -108,12 +109,15 @@ def get_fancy_caption(filename, filesize, duration):
     if e: e = e.zfill(2); caption += f"📺 <b>Episode ➥ {e}</b>\n"
     if s or e: caption += "\n"
     
-    # 3. BLOCKS
+    # 3. BLOCKS (Matching Style)
     caption += f"<blockquote><code>File Size ♻️ ➥ {filesize}</code></blockquote>\n\n"
+    
     dur_str = get_duration_str(duration)
     if dur_str:
         caption += f"<blockquote><code>Duration ⏰ ➥ {dur_str}</code></blockquote>\n\n"
+    
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME} ❞</b></blockquote>"
+    
     return caption
 
 # 🔥 WATERMARK LOGIC
@@ -169,11 +173,10 @@ async def progress(current, total, message, start_time, task_name):
 @app.on_message(filters.command("start") & filters.private)
 async def main_start(c, m):
     if m.from_user.id == OWNER_ID:
-        # Check DB status
         db_status = "✅ Connected"
         try: await db.command("ping")
-        except: db_status = "❌ Disconnected (Check MongoDB)"
-        await m.reply(f"👋 **Boss! v45.0 Ready.**\n\n🗄 **DB:** `{db_status}`\n🆔 **ID:** `{DB_CHANNEL_ID}`")
+        except: db_status = "❌ Disconnected"
+        await m.reply(f"👋 **Boss! v46.0 Ready.**\n\n🗄 **DB:** `{db_status}`\n🆔 **ID:** `{DB_CHANNEL_ID}`")
 
 @app.on_message(filters.command("cancel") & filters.private & filters.user(OWNER_ID))
 async def cancel_task(c, m):
@@ -186,7 +189,7 @@ async def cancel_task(c, m):
     await asyncio.sleep(3)
     await msg.delete()
 
-# 🔥 SET DB CHANNEL COMMAND
+# 🔥 SET DB CHANNEL
 @app.on_message(filters.command("setdb") & filters.user(OWNER_ID))
 async def set_db_channel(c, m):
     if len(m.command) < 2: return await m.reply("❌ Usage: `/setdb -100xxxxxxx`")
@@ -196,10 +199,9 @@ async def set_db_channel(c, m):
         global DB_CHANNEL_ID
         DB_CHANNEL_ID = new_id
         await m.reply(f"✅ **DB Channel Updated!**\n🆔 New ID: `{new_id}`")
-    except Exception as e:
-        await m.reply(f"❌ Error: {e}")
+    except Exception as e: await m.reply(f"❌ Error: {e}")
 
-# 🔥 ADD FS COMMAND (DEBUG MODE - Error Batayega)
+# 🔥 ADD FS
 @app.on_message(filters.command("addfs") & filters.user(OWNER_ID))
 async def add_fs(c, m):
     if len(m.command) < 3: return await m.reply("❌ Usage: `/addfs ID Link`")
@@ -209,19 +211,133 @@ async def add_fs(c, m):
         link = m.command[2]
         await channels_col.update_one({"_id": ch_id}, {"$set": {"link": link}}, upsert=True)
         await status.edit(f"✅ **Force Subscribe Added!**\n\n🆔 `{ch_id}`\n🔗 {link}")
-    except Exception as e:
-        await status.edit(f"❌ **DB Error:** `{e}`\n\nCheck MongoDB URL or Network Access!")
+    except Exception as e: await status.edit(f"❌ Error: {e}")
 
 @app.on_message(filters.command("delfs") & filters.user(OWNER_ID))
 async def del_fs(c, m):
     try: await channels_col.delete_one({"_id": int(m.command[1])}); await m.reply("🗑 Deleted.")
     except: pass
 
-# --- MEDIA HANDLER ---
+# ---------------------------------------------------
+# 🎬 TMDB IMAGE SEARCH (Title Logo Filter Included)
+# ---------------------------------------------------
+
+@app.on_message(filters.command(["search", "series"]))
+async def search_handler(c, m):
+    if len(m.command) < 2: return await m.reply("❌ **Usage:**\n`/search Movie Name`\n`/series Name S1`")
+    
+    raw_query = " ".join(m.command[1:])
+    stype = "tv" if "series" in m.command[0] else "movie"
+    season_num = 0
+    
+    if stype == "tv":
+        match = re.search(r"(?i)\s*(?:s|season)\s*(\d+)$", raw_query)
+        if match:
+            season_num = int(match.group(1))
+            raw_query = re.sub(r"(?i)\s*(?:s|season)\s*(\d+)$", "", raw_query).strip()
+            
+    status = await m.reply(f"🔎 **Searching:** `{raw_query}`...")
+    
+    try:
+        url = f"https://api.themoviedb.org/3/search/{stype}?api_key={TMDB_API_KEY}&query={quote(raw_query)}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                data = await resp.json()
+                
+        results = data.get('results')
+        if not results: return await status.edit("❌ **Not Found!**")
+        
+        mid = results[0]['id']
+        title = results[0].get('name') if stype == 'tv' else results[0].get('title')
+        overview = results[0].get('overview', 'No description.')[:200] + "..."
+        
+        btn = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🖼 Poster", callback_data=f"type_poster_{stype}_{mid}_{season_num}"), 
+             InlineKeyboardButton("🎞 Thumbnail", callback_data=f"type_backdrop_{stype}_{mid}_{season_num}")]
+        ])
+        
+        txt = f"🎬 <b>{title}</b>\n\n📝 <i>{overview}</i>"
+        if season_num > 0: txt += f"\n\n💿 <b>Season: {season_num}</b>"
+        txt += "\n\n👇 **Select Type:**"
+        
+        await status.edit(txt, reply_markup=btn)
+        
+    except Exception as e: await status.edit(f"❌ Error: {e}")
+
+@app.on_callback_query(filters.regex("^type_"))
+async def type_callback(c, cb):
+    try:
+        _, img_type, stype, mid, s_num = cb.data.split("_")
+        btn = InlineKeyboardMarkup([
+            [InlineKeyboardButton("1", callback_data=f"num_1_{img_type}_{stype}_{mid}_{s_num}"), 
+             InlineKeyboardButton("2", callback_data=f"num_2_{img_type}_{stype}_{mid}_{s_num}")],
+            [InlineKeyboardButton("3", callback_data=f"num_3_{img_type}_{stype}_{mid}_{s_num}"), 
+             InlineKeyboardButton("4", callback_data=f"num_4_{img_type}_{stype}_{mid}_{s_num}")]
+        ])
+        await cb.message.edit(f"✅ **{img_type.capitalize()} Selected!**\nHow many images?", reply_markup=btn)
+    except: pass
+
+@app.on_callback_query(filters.regex("^num_"))
+async def num_callback(c, cb):
+    uid = cb.from_user.id
+    try:
+        _, count, img_type, stype, mid, s_num = cb.data.split("_")
+        count = int(count); s_num = int(s_num)
+        
+        await cb.answer(f"⚡ Fetching Title Logos...")
+        await cb.message.delete()
+        
+        raw_pool = []
+        async with aiohttp.ClientSession() as session:
+            # 1. API Call
+            if stype == "tv" and s_num > 0:
+                url = f"https://api.themoviedb.org/3/tv/{mid}/season/{s_num}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi,null"
+                async with session.get(url) as resp:
+                    data = await resp.json()
+                    raw_pool = data.get('posters' if img_type == 'poster' else 'backdrops', [])
+            else:
+                url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi,null"
+                async with session.get(url) as resp:
+                    data = await resp.json()
+                    raw_pool = data.get('posters' if img_type == 'poster' else 'backdrops', [])
+        
+        # 🔥 FILTER: ONLY IMAGES WITH TITLE LOGO (Lang: en/hi)
+        final_pool = [img for img in raw_pool if img.get('iso_639_1') in ['en', 'hi']]
+        if not final_pool: final_pool = raw_pool # Fallback if no text image
+        
+        if not final_pool: return await c.send_message(uid, "❌ No images found!")
+        
+        # Download & Send
+        images_to_send = final_pool[:count]
+        wm_path = f"watermarks/{uid}.png"
+        os.makedirs("downloads", exist_ok=True)
+        
+        for i, img_data in enumerate(images_to_send):
+            img_path = img_data['file_path']
+            full_url = f"https://image.tmdb.org/t/p/original{img_path}"
+            temp_path = f"downloads/temp_{uid}_{i}.jpg"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(full_url) as resp:
+                    if resp.status == 200:
+                        f = await aiofiles.open(temp_path, mode='wb')
+                        await f.write(await resp.read())
+                        await f.close()
+            
+            final_path = temp_path
+            if os.path.exists(wm_path): final_path = apply_watermark(temp_path, wm_path)
+            
+            await c.send_photo(uid, photo=final_path, caption=f"🖼 <b>{img_type.capitalize()} {i+1} (with Title)</b>")
+            
+            if os.path.exists(temp_path): os.remove(temp_path)
+            await asyncio.sleep(0.5)
+            
+    except Exception as e: await c.send_message(uid, f"❌ Error: {e}")
+
+# --- MEDIA & URL HANDLER ---
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo) & filters.user(OWNER_ID))
 async def media_handler(c, m):
     uid = m.from_user.id
-    
     is_image = False
     if m.photo: is_image = True
     elif m.document:
@@ -244,18 +360,14 @@ async def media_handler(c, m):
         
         new_cap = get_fancy_caption(fname, fsize, dur)
         
-        # Ensure we use the global DB_CHANNEL_ID
-        if m.video:
-             db_msg = await c.send_video(DB_CHANNEL_ID, m.video.file_id, caption=new_cap)
-        else:
-             db_msg = await c.send_document(DB_CHANNEL_ID, m.document.file_id, caption=new_cap)
+        if m.video: db_msg = await c.send_video(DB_CHANNEL_ID, m.video.file_id, caption=new_cap)
+        else: db_msg = await c.send_document(DB_CHANNEL_ID, m.document.file_id, caption=new_cap)
         
         try: await m.delete()
         except: pass
         
         raw_data = f"link_{OWNER_ID}_{db_msg.id}"
         tg_code, blogger_code = get_link_codes(raw_data)
-        
         bot_uname = "CloneBot"
         try:
             if clone_app and clone_app.is_connected: bot_uname = (await clone_app.get_me()).username
@@ -265,7 +377,6 @@ async def media_handler(c, m):
         await status.edit(f"✅ **Stored!**\n\n🔗 <b>Blog:</b> {final_link}\n\n🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}", disable_web_page_preview=True)
     except Exception as e: await status.edit(f"❌ Error: {e}")
 
-# --- URL HANDLER ---
 @app.on_message(filters.private & filters.regex(r"^https?://") & filters.user(OWNER_ID))
 async def url_handler(c, m):
     url = m.text.strip()
@@ -295,7 +406,6 @@ async def dl_process(c, cb):
     uid = cb.from_user.id
     data = download_queue.get(uid)
     if not data: return await cb.answer("❌ Task Expired!")
-    
     await cb.message.edit("📥 **Initializing...**")
     url = data['url']; custom_name = data['new_name']; mode = "video" if "video" in cb.data else "doc"
     
@@ -304,7 +414,6 @@ async def dl_process(c, cb):
     root, ext = os.path.splitext(orig_clean)
     if not ext or len(ext) > 5: ext = ".mkv"
     final_filename = f"{clean_custom}{ext}"
-    
     internal_path = f"downloads/{uid}_{final_filename}"
     os.makedirs("downloads", exist_ok=True)
     
@@ -344,11 +453,9 @@ async def dl_process(c, cb):
         final_link = f"{BLOGGER_URL}?data={quote(blogger_code)}"
         
         await cb.message.edit(f"✅ **Stored!**\n\n🔗 <b>Blog:</b> {final_link}\n\n🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}", disable_web_page_preview=True)
-        os.remove(internal_path)
-        del download_queue[uid]
+        os.remove(internal_path); del download_queue[uid]
     except Exception as e: await cb.message.edit(f"❌ Error: {e}")
 
-# --- CALLBACKS & CLONE ---
 @app.on_callback_query(filters.regex("^save_"))
 async def save_img_callback(c, cb):
     uid = cb.from_user.id
@@ -384,13 +491,11 @@ async def set_clone(c, m):
 
 async def start_clone_bot():
     global clone_app
-    # Load DB Channel ID from DB if exists
     try:
         db_data = await settings_col.find_one({"_id": "db_channel"})
         if db_data: 
             global DB_CHANNEL_ID
             DB_CHANNEL_ID = db_data["id"]
-            print(f"✅ Loaded DB Channel: {DB_CHANNEL_ID}")
     except: pass
 
     data = await settings_col.find_one({"_id": "clone_token"})
@@ -419,26 +524,18 @@ async def start_clone_bot():
             if not msg: return await temp.edit("❌ **File Deleted.**")
             cap = msg.caption or get_fancy_caption(getattr(msg.document or msg.video, "file_name", "File"), humanbytes(getattr(msg.document or msg.video, "file_size", 0)), 0)
             
-            # 1. SEND FILE
             sent_file = await c.copy_message(m.chat.id, DB_CHANNEL_ID, msg_id, caption=cap)
             await temp.delete()
-            
-            # 2. 5 MIN TIMER
             timer_msg = await m.reply("⏳ **File will be deleted in 5 Mins!**")
-            await asyncio.sleep(300) # 5 Mins
-            await sent_file.delete()
-            await timer_msg.delete()
+            await asyncio.sleep(300)
+            await sent_file.delete(); await timer_msg.delete()
             
-            # 3. 1 MIN GET AGAIN TIMER
             btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Get File Again", url=f"https://t.me/{c.me.username}?start={payload}")]])
             get_again_msg = await m.reply("❌ **Time Over! File Deleted.**\n👇 Get again (Valid 1 Min).", reply_markup=btn)
-            await asyncio.sleep(60) # 1 Min
-            await get_again_msg.delete()
+            await asyncio.sleep(60); await get_again_msg.delete()
             
-            # 4. FINAL WEBSITE LINK BUTTON
             web_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🌐 Visit Website", url=FINAL_WEBSITE_URL)]])
             await m.reply(f"🚫 **Link Expired!**", reply_markup=web_btn)
-            
         except Exception as e: await m.reply(f"❌ Error: {e}")
     try: await clone_app.start(); print("✅ Clone Started")
     except: pass
@@ -454,4 +551,3 @@ async def start_services():
     await asyncio.Event().wait()
 
 if __name__ == "__main__": asyncio.get_event_loop().run_until_complete(start_services())
-    

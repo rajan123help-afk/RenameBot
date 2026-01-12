@@ -19,10 +19,10 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "21127"))
-API_HASH = os.environ.get("API_HASH", "037ba9f2e7c29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "846GpD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
-OWNER_ID = int(os.environ.get("OWNER_ID", "502470"))
+API_ID = int(os.environ.get("API_ID", "2127"))
+API_HASH = os.environ.get("API_HASH", "0375dd20a7c29d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "84685015dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+OWNER_ID = int(os.environ.get("OWNER_ID", "504470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "02a832d91755c2f5e8a2d1a6740a8674")
@@ -176,7 +176,7 @@ async def main_start(c, m):
         db_status = "✅ Connected"
         try: await db.command("ping")
         except: db_status = "❌ Disconnected"
-        await m.reply(f"👋 **Boss! v46.0 Ready.**\n\n🗄 **DB:** `{db_status}`\n🆔 **ID:** `{DB_CHANNEL_ID}`")
+        await m.reply(f"👋 **Boss! v46.1 (Smart Search) Ready.**\n\n🗄 **DB:** `{db_status}`\n🆔 **ID:** `{DB_CHANNEL_ID}`")
 
 @app.on_message(filters.command("cancel") & filters.private & filters.user(OWNER_ID))
 async def cancel_task(c, m):
@@ -219,7 +219,7 @@ async def del_fs(c, m):
     except: pass
 
 # ---------------------------------------------------
-# 🎬 TMDB IMAGE SEARCH (Title Logo Filter Included)
+# 🎬 TMDB IMAGE SEARCH (SMART FALLBACK)
 # ---------------------------------------------------
 
 @app.on_message(filters.command(["search", "series"]))
@@ -284,18 +284,20 @@ async def num_callback(c, cb):
         _, count, img_type, stype, mid, s_num = cb.data.split("_")
         count = int(count); s_num = int(s_num)
         
-        await cb.answer(f"⚡ Fetching Title Logos...")
+        await cb.answer(f"⚡ Fetching Best Images...")
         await cb.message.delete()
         
         raw_pool = []
         async with aiohttp.ClientSession() as session:
-            # 1. API Call
+            # 1. Try Specific Season First
             if stype == "tv" and s_num > 0:
                 url = f"https://api.themoviedb.org/3/tv/{mid}/season/{s_num}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi,null"
                 async with session.get(url) as resp:
                     data = await resp.json()
                     raw_pool = data.get('posters' if img_type == 'poster' else 'backdrops', [])
-            else:
+
+            # 2. FALLBACK: If no season images, fetch Main Series images
+            if not raw_pool:
                 url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi,null"
                 async with session.get(url) as resp:
                     data = await resp.json()
@@ -303,9 +305,11 @@ async def num_callback(c, cb):
         
         # 🔥 FILTER: ONLY IMAGES WITH TITLE LOGO (Lang: en/hi)
         final_pool = [img for img in raw_pool if img.get('iso_639_1') in ['en', 'hi']]
-        if not final_pool: final_pool = raw_pool # Fallback if no text image
         
-        if not final_pool: return await c.send_message(uid, "❌ No images found!")
+        # Fallback: If no text image found, use any available (Clean Art)
+        if not final_pool: final_pool = raw_pool
+        
+        if not final_pool: return await c.send_message(uid, "❌ **No images found!** (Try searching without Season)")
         
         # Download & Send
         images_to_send = final_pool[:count]
@@ -327,7 +331,8 @@ async def num_callback(c, cb):
             final_path = temp_path
             if os.path.exists(wm_path): final_path = apply_watermark(temp_path, wm_path)
             
-            await c.send_photo(uid, photo=final_path, caption=f"🖼 <b>{img_type.capitalize()} {i+1} (with Title)</b>")
+            has_logo = " (with Logo)" if img_data.get('iso_639_1') else ""
+            await c.send_photo(uid, photo=final_path, caption=f"🖼 <b>{img_type.capitalize()} {i+1}{has_logo}</b>")
             
             if os.path.exists(temp_path): os.remove(temp_path)
             await asyncio.sleep(0.5)

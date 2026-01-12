@@ -19,10 +19,10 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "234127"))
-API_HASH = os.environ.get("API_HASH", "02e7c29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "84GpD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
-OWNER_ID = int(os.environ.get("OWNER_ID", "502470"))
+API_ID = int(os.environ.get("API_ID", "2327"))
+API_HASH = os.environ.get("API_HASH", "037lf2e7c29d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468AGpD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+OWNER_ID = int(os.environ.get("OWNER_ID", "5070"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
@@ -82,7 +82,7 @@ def extract_msg_id(payload):
         else: return int(payload)
     except: return None
 
-# 🔥 CAPTION LOGIC (BOLD TITLE + SIMPLE LOOK)
+# 🔥 CAPTION LOGIC (EXACT MATCH TO YOUR PHOTO)
 def get_media_info(name):
     clean_name = name.replace(".", " ").replace("_", " ").replace("-", " ")
     match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", clean_name)
@@ -92,31 +92,32 @@ def get_media_info(name):
     return None, None
 
 def get_fancy_caption(filename, filesize, duration):
-    # 1. Clean Name (Remove Dots)
+    # 1. Clean Name (No Dots)
     clean_name = filename.replace(".", " ").replace("_", " ")
     safe_name = html.escape(clean_name)
     
-    # 2. BOLD + COPYABLE Title (<b><code>...</code></b>)
-    # Filename sabse upar rahega taaki user ko pata chale file kya hai
-    caption = f"<b><code>{safe_name}</code></b>\n\n"
+    # 2. Filename (Simple Bold)
+    caption = f"<b>{safe_name}</b>\n\n"
     
-    # 3. Season/Episode (Optional)
+    # 3. Season/Episode
     s, e = get_media_info(filename)
-    if s: s = s.zfill(2); caption += f"<b>💿 Season ➥ {s}</b>\n"
-    if e: e = e.zfill(2); caption += f"<b>📺 Episode ➥ {e}</b>\n"
+    if s: s = s.zfill(2); caption += f"💿 <b>Season ➥ {s}</b>\n"
+    if e: e = e.zfill(2); caption += f"📺 <b>Episode ➥ {e}</b>\n"
     if s or e: caption += "\n"
     
-    # 4. EXACT MATCHING STATS (Jaisa image me tha)
-    # File Size ♻️ ➥ 1.25 GB ❞
-    caption += f"<b>File Size ♻️ ➥ {filesize} ❞</b>\n\n"
+    # 4. BLOCKS (Matching your image Style)
     
+    # Block 1: File Size (Monospace font inside Quote)
+    # <blockquote><code>Text</code></blockquote> creates the look in your 1st block
+    caption += f"<blockquote><code>File Size ♻️ ➥ {filesize}</code></blockquote>\n"
+    
+    # Block 2: Duration (Monospace font inside Quote)
     dur_str = get_duration_str(duration)
     if dur_str:
-        # Duration ⏰ ➥ 50m 34s ❞
-        caption += f"<b>Duration ⏰ ➥ {dur_str} ❞</b>\n\n"
+        caption += f"<blockquote><code>Duration ⏰ ➥ {dur_str}</code></blockquote>\n"
     
-    # Powered By ➥ 🦋 Filmy Flip Hub 🦋 ❞
-    caption += f"<b>Powered By ➥ {CREDIT_NAME} ❞</b>"
+    # Block 3: Powered By (Bold font inside Quote with Red Quote Mark)
+    caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME} ❞</b></blockquote>"
     
     return caption
 
@@ -154,7 +155,7 @@ async def progress(current, total, message, start_time, task_name):
         try: await message.edit(text, parse_mode=enums.ParseMode.HTML)
         except: pass
 
-# 🔥 NAME FETCHER (User-Agent Added)
+# 🔥 NAME FETCHER
 async def get_real_filename(url):
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
@@ -167,17 +168,14 @@ async def get_real_filename(url):
                     utf_match = re.search(r"filename\*=UTF-8''(.+)", cd)
                     if utf_match: return unquote(utf_match.group(1))
     except: pass
-    
-    # Fallback Clean Name
     name = unquote(url.split("/")[-1].split("?")[0])
-    # Clean dots here too
     return name.replace(".", " ").replace("_", " ")
 
 # --- COMMANDS ---
 @app.on_message(filters.command("start") & filters.private)
 async def main_start(c, m):
     if m.from_user.id == OWNER_ID:
-        await m.reply(f"👋 **Boss! v40.1 (New Caption Style) Ready.**")
+        await m.reply(f"👋 **Boss! v42.0 (Matched Style) Ready.**")
 
 @app.on_message(filters.command("cancel") & filters.private & filters.user(OWNER_ID))
 async def cancel_task(c, m):
@@ -271,16 +269,12 @@ async def dl_process(c, cb):
     await cb.message.edit("📥 **Initializing...**")
     url = data['url']; custom_name = data['new_name']; mode = "video" if "video" in cb.data else "doc"
     
-    # Clean dots from name again just in case
     clean_custom = custom_name.replace(".", " ").replace("_", " ")
-    
-    # Extension handling
     orig_clean = data['orig_name']
     root, ext = os.path.splitext(orig_clean)
     if not ext or len(ext) > 5: ext = ".mkv"
-    
-    # Final name with extension
     final_filename = f"{clean_custom}{ext}"
+    
     internal_path = f"downloads/{uid}_{final_filename}"
     os.makedirs("downloads", exist_ok=True)
     
@@ -324,7 +318,7 @@ async def dl_process(c, cb):
         del download_queue[uid]
     except Exception as e: await cb.message.edit(f"❌ Error: {e}")
 
-# --- CALLBACK FOR SAVE IMAGE (SAME AS BEFORE) ---
+# --- CALLBACKS & CLONE SAME AS BEFORE ---
 @app.on_callback_query(filters.regex("^save_"))
 async def save_img_callback(c, cb):
     uid = cb.from_user.id
@@ -352,7 +346,6 @@ async def save_img_callback(c, cb):
         else: msg = await c.send_message(uid, "✅ **Watermark Saved!** (60% Size)"); await asyncio.sleep(3); await msg.delete()
     except Exception as e: await cb.message.edit(f"❌ Error: {e}")
 
-# --- CLONE SETUP ---
 @app.on_message(filters.command("setclone") & filters.user(OWNER_ID))
 async def set_clone(c, m):
     if len(m.command) < 2: return await m.reply("Usage: `/setclone TOKEN`")
@@ -417,3 +410,4 @@ async def start_services():
     await asyncio.Event().wait()
 
 if __name__ == "__main__": asyncio.get_event_loop().run_until_complete(start_services())
+    

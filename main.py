@@ -18,13 +18,12 @@ from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from motor.motor_asyncio import AsyncIOMotorClient
 
-# --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "21127"))
-API_HASH = os.environ.get("API_HASH", "03759f2e7c29d0c1c06590dfb"))
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "84685GpD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk"))
-OWNER_ID = int(os.environ.get("OWNER_ID", "50470"))
-MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip"))
-# Default DB Channel (Can be changed via command)
+# --- CONFIGURATION (Fixed Syntax) ---
+API_ID = int(os.environ.get("API_ID", "23127"))
+API_HASH = os.environ.get("API_HASH", "0375dd2e7c29d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "84685pD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+OWNER_ID = int(os.environ.get("OWNER_ID", "502470"))
+MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 FINAL_WEBSITE_URL = "https://filmyflip-hub.blogspot.com"
@@ -83,7 +82,7 @@ def extract_msg_id(payload):
         else: return int(payload)
     except: return None
 
-# 🔥 CAPTION LOGIC (SIMPLE BOLD - NO FANCY STUFF)
+# 🔥 CAPTION LOGIC (SIMPLE BOLD)
 def get_media_info(name):
     clean_name = name.replace(".", " ").replace("_", " ").replace("-", " ")
     match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", clean_name)
@@ -168,7 +167,7 @@ async def get_real_filename(url):
 @app.on_message(filters.command("start") & filters.private)
 async def main_start(c, m):
     if m.from_user.id == OWNER_ID:
-        await m.reply(f"👋 **Boss! v43.0 Ready.**\n\n🆔 **DB Channel:** `{DB_CHANNEL_ID}`")
+        await m.reply(f"👋 **Boss! v44.0 Ready.**\n\n🆔 **DB Channel:** `{DB_CHANNEL_ID}`")
 
 @app.on_message(filters.command("cancel") & filters.private & filters.user(OWNER_ID))
 async def cancel_task(c, m):
@@ -442,4 +441,4 @@ async def start_services():
     await asyncio.Event().wait()
 
 if __name__ == "__main__": asyncio.get_event_loop().run_until_complete(start_services())
-                
+    

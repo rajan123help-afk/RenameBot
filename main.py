@@ -19,10 +19,10 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "2327"))
-API_HASH = os.environ.get("API_HASH", "0375dd20aba9f206590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468501dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
-OWNER_ID = int(os.environ.get("OWNER_ID", "504470"))
+API_ID = int(os.environ.get("API_ID", "23427"))
+API_HASH = os.environ.get("API_HASH", "0375dd20c29d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "846850D5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+OWNER_ID = int(os.environ.get("OWNER_ID", "502470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
@@ -38,6 +38,11 @@ try:
     print("✅ MongoDB Connected")
 except Exception as e:
     print(f"❌ MongoDB Error: {e}")
+
+# --- BOT SETUP ---
+app = Client("MainBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=10, parse_mode=enums.ParseMode.HTML)
+clone_app = None
+download_queue = {} 
 
 # --- HELPERS ---
 
@@ -103,15 +108,12 @@ def get_fancy_caption(filename, filesize, duration):
     if e: e = e.zfill(2); caption += f"📺 <b>Episode ➥ {e}</b>\n"
     if s or e: caption += "\n"
     
-    # 3. BLOCKS (Matching Style)
+    # 3. BLOCKS
     caption += f"<blockquote><code>File Size ♻️ ➥ {filesize}</code></blockquote>\n\n"
-    
     dur_str = get_duration_str(duration)
     if dur_str:
         caption += f"<blockquote><code>Duration ⏰ ➥ {dur_str}</code></blockquote>\n\n"
-    
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME} ❞</b></blockquote>"
-    
     return caption
 
 # 🔥 WATERMARK LOGIC
@@ -163,7 +165,7 @@ async def progress(current, total, message, start_time, task_name):
         text = f"<b>{task_name}</b>\n\n<b>[{bar}] {round(percentage, 1)}%</b>\n<b>📦 Done:</b> {humanbytes(current)} / {humanbytes(total)}\n<b>⚡ Speed:</b> {humanbytes(speed)}/s\n<b>⏳ ETA:</b> {eta}"
         try: await message.edit(text, parse_mode=enums.ParseMode.HTML)
         except: pass
-          # --- COMMANDS ---
+            # --- COMMANDS ---
 @app.on_message(filters.command("start") & filters.private)
 async def main_start(c, m):
     if m.from_user.id == OWNER_ID:
@@ -197,7 +199,7 @@ async def set_db_channel(c, m):
     except Exception as e:
         await m.reply(f"❌ Error: {e}")
 
-# 🔥 ADD FS COMMAND (DEBUG MODE)
+# 🔥 ADD FS COMMAND (DEBUG MODE - Error Batayega)
 @app.on_message(filters.command("addfs") & filters.user(OWNER_ID))
 async def add_fs(c, m):
     if len(m.command) < 3: return await m.reply("❌ Usage: `/addfs ID Link`")
@@ -452,4 +454,4 @@ async def start_services():
     await asyncio.Event().wait()
 
 if __name__ == "__main__": asyncio.get_event_loop().run_until_complete(start_services())
-                    
+    

@@ -19,9 +19,9 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "2127"))
-API_HASH = os.environ.get("API_HASH", "0375dd20a7c29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "84685015dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+API_ID = int(os.environ.get("API_ID", "2327"))
+API_HASH = os.environ.get("API_HASH", "037f2e7c29d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468AGpD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
 OWNER_ID = int(os.environ.get("OWNER_ID", "504470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
@@ -30,12 +30,17 @@ BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 FINAL_WEBSITE_URL = "https://filmyflip-hub.blogspot.com"
 CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"
 
+# Image Upload Config
+IMG_API_KEY = "6d207e02198a847aa98d0a2a901485a5"
+IMG_API_URL = "https://freeimage.host/api/1/upload"
+
 # --- DATABASE SETUP ---
 try:
     mongo = AsyncIOMotorClient(MONGO_URL)
     db = mongo["FilmyFlipStore"]
     settings_col = db["settings"]
     channels_col = db["channels"]
+    users_col = db["users"] # For Broadcast/Stats
     print("✅ MongoDB Connected")
 except Exception as e:
     print(f"❌ MongoDB Error: {e}")
@@ -87,7 +92,7 @@ def extract_msg_id(payload):
         else: return int(payload)
     except: return None
 
-# 🔥 CAPTION LOGIC (Matched Style)
+# 🔥 CAPTION LOGIC
 def get_media_info(name):
     clean_name = name.replace(".", " ").replace("_", " ").replace("-", " ")
     match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", clean_name)
@@ -99,25 +104,15 @@ def get_media_info(name):
 def get_fancy_caption(filename, filesize, duration):
     clean_name = filename.replace(".", " ").replace("_", " ")
     safe_name = html.escape(clean_name)
-    
-    # 1. Filename (Simple Bold)
     caption = f"<b>{safe_name}</b>\n\n"
-    
-    # 2. Season/Episode
     s, e = get_media_info(filename)
     if s: s = s.zfill(2); caption += f"💿 <b>Season ➥ {s}</b>\n"
     if e: e = e.zfill(2); caption += f"📺 <b>Episode ➥ {e}</b>\n"
     if s or e: caption += "\n"
-    
-    # 3. BLOCKS (Matching Style)
     caption += f"<blockquote><code>File Size ♻️ ➥ {filesize}</code></blockquote>\n\n"
-    
     dur_str = get_duration_str(duration)
-    if dur_str:
-        caption += f"<blockquote><code>Duration ⏰ ➥ {dur_str}</code></blockquote>\n\n"
-    
+    if dur_str: caption += f"<blockquote><code>Duration ⏰ ➥ {dur_str}</code></blockquote>\n\n"
     caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME} ❞</b></blockquote>"
-    
     return caption
 
 # 🔥 WATERMARK LOGIC
@@ -172,11 +167,20 @@ async def progress(current, total, message, start_time, task_name):
             # --- COMMANDS ---
 @app.on_message(filters.command("start") & filters.private)
 async def main_start(c, m):
+    try: await users_col.update_one({"_id": m.from_user.id}, {"$set": {"id": m.from_user.id}}, upsert=True)
+    except: pass
     if m.from_user.id == OWNER_ID:
         db_status = "✅ Connected"
         try: await db.command("ping")
         except: db_status = "❌ Disconnected"
-        await m.reply(f"👋 **Boss! v46.1 (Smart Search) Ready.**\n\n🗄 **DB:** `{db_status}`\n🆔 **ID:** `{DB_CHANNEL_ID}`")
+        await m.reply(f"👋 **Boss! v48.0 (Stats + Img Upload) Ready.**\n\n🗄 **DB:** `{db_status}`\n🆔 **ID:** `{DB_CHANNEL_ID}`")
+
+# 🔥 STATS COMMAND
+@app.on_message(filters.command("stats") & filters.user(OWNER_ID))
+async def get_stats(c, m):
+    status = await m.reply("📊 **Counting Users...**")
+    count = await users_col.count_documents({})
+    await status.edit(f"👥 **Total Users:** `{count}`")
 
 @app.on_message(filters.command("cancel") & filters.private & filters.user(OWNER_ID))
 async def cancel_task(c, m):
@@ -189,7 +193,6 @@ async def cancel_task(c, m):
     await asyncio.sleep(3)
     await msg.delete()
 
-# 🔥 SET DB CHANNEL
 @app.on_message(filters.command("setdb") & filters.user(OWNER_ID))
 async def set_db_channel(c, m):
     if len(m.command) < 2: return await m.reply("❌ Usage: `/setdb -100xxxxxxx`")
@@ -201,7 +204,6 @@ async def set_db_channel(c, m):
         await m.reply(f"✅ **DB Channel Updated!**\n🆔 New ID: `{new_id}`")
     except Exception as e: await m.reply(f"❌ Error: {e}")
 
-# 🔥 ADD FS
 @app.on_message(filters.command("addfs") & filters.user(OWNER_ID))
 async def add_fs(c, m):
     if len(m.command) < 3: return await m.reply("❌ Usage: `/addfs ID Link`")
@@ -218,62 +220,41 @@ async def del_fs(c, m):
     try: await channels_col.delete_one({"_id": int(m.command[1])}); await m.reply("🗑 Deleted.")
     except: pass
 
-# ---------------------------------------------------
-# 🎬 TMDB IMAGE SEARCH (SMART FALLBACK)
-# ---------------------------------------------------
-
+# --- TMDB SEARCH ---
 @app.on_message(filters.command(["search", "series"]))
 async def search_handler(c, m):
     if len(m.command) < 2: return await m.reply("❌ **Usage:**\n`/search Movie Name`\n`/series Name S1`")
-    
     raw_query = " ".join(m.command[1:])
     stype = "tv" if "series" in m.command[0] else "movie"
     season_num = 0
-    
     if stype == "tv":
         match = re.search(r"(?i)\s*(?:s|season)\s*(\d+)$", raw_query)
         if match:
             season_num = int(match.group(1))
             raw_query = re.sub(r"(?i)\s*(?:s|season)\s*(\d+)$", "", raw_query).strip()
-            
     status = await m.reply(f"🔎 **Searching:** `{raw_query}`...")
-    
     try:
         url = f"https://api.themoviedb.org/3/search/{stype}?api_key={TMDB_API_KEY}&query={quote(raw_query)}"
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
                 data = await resp.json()
-                
         results = data.get('results')
         if not results: return await status.edit("❌ **Not Found!**")
-        
         mid = results[0]['id']
         title = results[0].get('name') if stype == 'tv' else results[0].get('title')
         overview = results[0].get('overview', 'No description.')[:200] + "..."
-        
-        btn = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🖼 Poster", callback_data=f"type_poster_{stype}_{mid}_{season_num}"), 
-             InlineKeyboardButton("🎞 Thumbnail", callback_data=f"type_backdrop_{stype}_{mid}_{season_num}")]
-        ])
-        
+        btn = InlineKeyboardMarkup([[InlineKeyboardButton("🖼 Poster", callback_data=f"type_poster_{stype}_{mid}_{season_num}"), InlineKeyboardButton("🎞 Thumbnail", callback_data=f"type_backdrop_{stype}_{mid}_{season_num}")]])
         txt = f"🎬 <b>{title}</b>\n\n📝 <i>{overview}</i>"
         if season_num > 0: txt += f"\n\n💿 <b>Season: {season_num}</b>"
         txt += "\n\n👇 **Select Type:**"
-        
         await status.edit(txt, reply_markup=btn)
-        
     except Exception as e: await status.edit(f"❌ Error: {e}")
 
 @app.on_callback_query(filters.regex("^type_"))
 async def type_callback(c, cb):
     try:
         _, img_type, stype, mid, s_num = cb.data.split("_")
-        btn = InlineKeyboardMarkup([
-            [InlineKeyboardButton("1", callback_data=f"num_1_{img_type}_{stype}_{mid}_{s_num}"), 
-             InlineKeyboardButton("2", callback_data=f"num_2_{img_type}_{stype}_{mid}_{s_num}")],
-            [InlineKeyboardButton("3", callback_data=f"num_3_{img_type}_{stype}_{mid}_{s_num}"), 
-             InlineKeyboardButton("4", callback_data=f"num_4_{img_type}_{stype}_{mid}_{s_num}")]
-        ])
+        btn = InlineKeyboardMarkup([[InlineKeyboardButton("1", callback_data=f"num_1_{img_type}_{stype}_{mid}_{s_num}"), InlineKeyboardButton("2", callback_data=f"num_2_{img_type}_{stype}_{mid}_{s_num}")], [InlineKeyboardButton("3", callback_data=f"num_3_{img_type}_{stype}_{mid}_{s_num}"), InlineKeyboardButton("4", callback_data=f"num_4_{img_type}_{stype}_{mid}_{s_num}")]])
         await cb.message.edit(f"✅ **{img_type.capitalize()} Selected!**\nHow many images?", reply_markup=btn)
     except: pass
 
@@ -283,63 +264,44 @@ async def num_callback(c, cb):
     try:
         _, count, img_type, stype, mid, s_num = cb.data.split("_")
         count = int(count); s_num = int(s_num)
-        
         await cb.answer(f"⚡ Fetching Best Images...")
         await cb.message.delete()
-        
         raw_pool = []
         async with aiohttp.ClientSession() as session:
-            # 1. Try Specific Season First
             if stype == "tv" and s_num > 0:
                 url = f"https://api.themoviedb.org/3/tv/{mid}/season/{s_num}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi,null"
                 async with session.get(url) as resp:
                     data = await resp.json()
                     raw_pool = data.get('posters' if img_type == 'poster' else 'backdrops', [])
-
-            # 2. FALLBACK: If no season images, fetch Main Series images
             if not raw_pool:
                 url = f"https://api.themoviedb.org/3/{stype}/{mid}/images?api_key={TMDB_API_KEY}&include_image_language=en,hi,null"
                 async with session.get(url) as resp:
                     data = await resp.json()
                     raw_pool = data.get('posters' if img_type == 'poster' else 'backdrops', [])
-        
-        # 🔥 FILTER: ONLY IMAGES WITH TITLE LOGO (Lang: en/hi)
         final_pool = [img for img in raw_pool if img.get('iso_639_1') in ['en', 'hi']]
-        
-        # Fallback: If no text image found, use any available (Clean Art)
-        if not final_pool: final_pool = raw_pool
-        
-        if not final_pool: return await c.send_message(uid, "❌ **No images found!** (Try searching without Season)")
-        
-        # Download & Send
+        if not final_pool: final_pool = raw_pool 
+        if not final_pool: return await c.send_message(uid, "❌ **No images found!**")
         images_to_send = final_pool[:count]
         wm_path = f"watermarks/{uid}.png"
         os.makedirs("downloads", exist_ok=True)
-        
         for i, img_data in enumerate(images_to_send):
             img_path = img_data['file_path']
             full_url = f"https://image.tmdb.org/t/p/original{img_path}"
             temp_path = f"downloads/temp_{uid}_{i}.jpg"
-            
             async with aiohttp.ClientSession() as session:
                 async with session.get(full_url) as resp:
                     if resp.status == 200:
                         f = await aiofiles.open(temp_path, mode='wb')
-                        await f.write(await resp.read())
-                        await f.close()
-            
+                        await f.write(await resp.read()); await f.close()
             final_path = temp_path
             if os.path.exists(wm_path): final_path = apply_watermark(temp_path, wm_path)
-            
             has_logo = " (with Logo)" if img_data.get('iso_639_1') else ""
             await c.send_photo(uid, photo=final_path, caption=f"🖼 <b>{img_type.capitalize()} {i+1}{has_logo}</b>")
-            
             if os.path.exists(temp_path): os.remove(temp_path)
             await asyncio.sleep(0.5)
-            
     except Exception as e: await c.send_message(uid, f"❌ Error: {e}")
 
-# --- MEDIA & URL HANDLER ---
+# --- MEDIA HANDLER (IMAGE UPLOAD) ---
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo) & filters.user(OWNER_ID))
 async def media_handler(c, m):
     uid = m.from_user.id
@@ -352,7 +314,10 @@ async def media_handler(c, m):
             is_image = True
             
     if is_image:
-        btn = InlineKeyboardMarkup([[InlineKeyboardButton("🖼 Set Thumbnail", callback_data="save_thumb"), InlineKeyboardButton("💧 Set Watermark", callback_data="save_wm")]])
+        btn = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🖼 Set Thumbnail", callback_data="save_thumb"), InlineKeyboardButton("💧 Set Watermark", callback_data="save_wm")],
+            [InlineKeyboardButton("🌐 Generate Link (JPG)", callback_data="upload_img")]
+        ])
         await m.reply_text("📸 **Image Detected!**", reply_markup=btn, quote=True)
         return
 
@@ -362,15 +327,11 @@ async def media_handler(c, m):
         fname = getattr(media, "file_name", "File")
         fsize = humanbytes(getattr(media, "file_size", 0))
         dur = getattr(media, "duration", 0)
-        
         new_cap = get_fancy_caption(fname, fsize, dur)
-        
         if m.video: db_msg = await c.send_video(DB_CHANNEL_ID, m.video.file_id, caption=new_cap)
         else: db_msg = await c.send_document(DB_CHANNEL_ID, m.document.file_id, caption=new_cap)
-        
         try: await m.delete()
         except: pass
-        
         raw_data = f"link_{OWNER_ID}_{db_msg.id}"
         tg_code, blogger_code = get_link_codes(raw_data)
         bot_uname = "CloneBot"
@@ -378,9 +339,33 @@ async def media_handler(c, m):
             if clone_app and clone_app.is_connected: bot_uname = (await clone_app.get_me()).username
         except: pass
         final_link = f"{BLOGGER_URL}?data={quote(blogger_code)}"
-        
-        await status.edit(f"✅ **Stored!**\n\n🔗 <b>Blog:</b> {final_link}\n\n🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}", disable_web_page_preview=True)
+        await status.edit(f"✅ **Stored!**\n\n📂 **File:** `{fname}`\n\n🔗 <b>Blog:</b> {final_link}\n\n🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}", disable_web_page_preview=True)
     except Exception as e: await status.edit(f"❌ Error: {e}")
+
+# 🔥 UPLOAD CALLBACK
+@app.on_callback_query(filters.regex("^upload_img"))
+async def upload_to_cloud(c, cb):
+    await cb.message.edit("⏳ **Uploading to Cloud...**")
+    try:
+        reply = cb.message.reply_to_message
+        if not reply or not reply.photo: return await cb.message.edit("❌ Photo not found!")
+        path = await c.download_media(reply, file_name=f"downloads/upload_{cb.from_user.id}.jpg")
+        payload = {'key': IMG_API_KEY, 'action': 'upload', 'format': 'json'}
+        async with aiohttp.ClientSession() as session:
+            with open(path, 'rb') as f:
+                data = aiohttp.FormData()
+                for k, v in payload.items(): data.add_field(k, v)
+                data.add_field('source', f, filename='image.jpg', content_type='image/jpeg')
+                async with session.post(IMG_API_URL, data=data) as resp:
+                    result = await resp.json()
+        os.remove(path)
+        if 'image' in result:
+            img_url = result['image']['url']
+            await cb.message.edit(f"✅ **Upload Successful!**\n\n🔗 **Link:**\n`{img_url}`", disable_web_page_preview=True)
+        else:
+            err = result.get('error', {}).get('message', 'Unknown Error')
+            await cb.message.edit(f"❌ Upload Failed: {err}")
+    except Exception as e: await cb.message.edit(f"❌ Error: {e}")
 
 @app.on_message(filters.private & filters.regex(r"^https?://") & filters.user(OWNER_ID))
 async def url_handler(c, m):
@@ -413,7 +398,6 @@ async def dl_process(c, cb):
     if not data: return await cb.answer("❌ Task Expired!")
     await cb.message.edit("📥 **Initializing...**")
     url = data['url']; custom_name = data['new_name']; mode = "video" if "video" in cb.data else "doc"
-    
     clean_custom = custom_name.replace(".", " ").replace("_", " ")
     orig_clean = data['orig_name']
     root, ext = os.path.splitext(orig_clean)
@@ -421,7 +405,6 @@ async def dl_process(c, cb):
     final_filename = f"{clean_custom}{ext}"
     internal_path = f"downloads/{uid}_{final_filename}"
     os.makedirs("downloads", exist_ok=True)
-    
     try:
         start = time.time()
         headers = {"User-Agent": "Mozilla/5.0"}
@@ -433,22 +416,18 @@ async def dl_process(c, cb):
                     async for chunk in resp.content.iter_chunked(1024*1024):
                         f.write(chunk); dl += len(chunk)
                         if time.time() - start > 5: await progress(dl, total, cb.message, start, f"📥 Downloading: {final_filename}")
-        
         await cb.message.edit("⚙️ **Processing...**")
         duration = get_duration(internal_path)
         fsize = humanbytes(os.path.getsize(internal_path))
         cap = get_fancy_caption(final_filename, fsize, duration)
-        
         thumb_path = f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None
         wm_path = f"watermarks/{uid}.png"
         if thumb_path and os.path.exists(wm_path): thumb_path = apply_watermark(thumb_path, wm_path)
-        
         start = time.time()
         if mode == "video":
             db_msg = await c.send_video(DB_CHANNEL_ID, internal_path, caption=cap, duration=duration, thumb=thumb_path, file_name=final_filename, progress=progress, progress_args=(cb.message, start, f"📤 Uploading: {final_filename}"))
         else:
             db_msg = await c.send_document(DB_CHANNEL_ID, internal_path, caption=cap, thumb=thumb_path, file_name=final_filename, progress=progress, progress_args=(cb.message, start, f"📤 Uploading: {final_filename}"))
-            
         raw_data = f"link_{OWNER_ID}_{db_msg.id}"
         tg_code, blogger_code = get_link_codes(raw_data)
         bot_uname = "CloneBot"
@@ -456,12 +435,10 @@ async def dl_process(c, cb):
             if clone_app and clone_app.is_connected: bot_uname = (await clone_app.get_me()).username
         except: pass
         final_link = f"{BLOGGER_URL}?data={quote(blogger_code)}"
-        
-        await cb.message.edit(f"✅ **Stored!**\n\n🔗 <b>Blog:</b> {final_link}\n\n🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}", disable_web_page_preview=True)
+        await cb.message.edit(f"✅ **Stored!**\n\n📂 **File:** `{final_filename}`\n\n🔗 <b>Blog:</b> {final_link}\n\n🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}", disable_web_page_preview=True)
         os.remove(internal_path); del download_queue[uid]
     except Exception as e: await cb.message.edit(f"❌ Error: {e}")
-
-@app.on_callback_query(filters.regex("^save_"))
+    @app.on_callback_query(filters.regex("^save_"))
 async def save_img_callback(c, cb):
     uid = cb.from_user.id
     mode = "thumbnails" if "thumb" in cb.data else "watermarks"
@@ -510,7 +487,18 @@ async def start_clone_bot():
     
     @clone_app.on_message(filters.command("start") & filters.private)
     async def clone_start(c, m):
-        if len(m.command) < 2: return await m.reply("👋 **Hello!**")
+        try: await users_col.update_one({"_id": m.from_user.id}, {"$set": {"id": m.from_user.id}}, upsert=True)
+        except: pass
+        if len(m.command) < 2:
+            return await m.reply(
+                f"👋 **Hello {m.from_user.first_name}!**\n\n"
+                f"🚀 **{CREDIT_NAME} Fast Bot!**\n"
+                f"Use this bot to get your files instantly.\n\n"
+                f"📂 **Join our Channel:**\n"
+                f"👉 {FINAL_WEBSITE_URL}",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("👨‍💻 Contact Admin", url="https://t.me/Moviessrudio_bot")]])
+            )
+        
         payload = m.command[1]
         missing = []
         async for ch in channels_col.find():
@@ -556,3 +544,4 @@ async def start_services():
     await asyncio.Event().wait()
 
 if __name__ == "__main__": asyncio.get_event_loop().run_until_complete(start_services())
+        

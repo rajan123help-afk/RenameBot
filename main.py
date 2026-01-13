@@ -20,9 +20,9 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
 API_ID = int(os.environ.get("API_ID", "2327"))
-API_HASH = os.environ.get("API_HASH", "037f2e7c29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468AGpD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
-OWNER_ID = int(os.environ.get("OWNER_ID", "504470"))
+API_HASH = os.environ.get("API_HASH", "0d20aba9f2e7c29d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "84685GpD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+OWNER_ID = int(os.environ.get("OWNER_ID", "5027470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "02a832d91755c2f5e8a2d1a6740a8674")
@@ -40,7 +40,7 @@ try:
     db = mongo["FilmyFlipStore"]
     settings_col = db["settings"]
     channels_col = db["channels"]
-    users_col = db["users"] # For Broadcast/Stats
+    users_col = db["users"] # For Stats
     print("✅ MongoDB Connected")
 except Exception as e:
     print(f"❌ MongoDB Error: {e}")
@@ -300,8 +300,7 @@ async def num_callback(c, cb):
             if os.path.exists(temp_path): os.remove(temp_path)
             await asyncio.sleep(0.5)
     except Exception as e: await c.send_message(uid, f"❌ Error: {e}")
-
-# --- MEDIA HANDLER (IMAGE UPLOAD) ---
+    # --- MEDIA HANDLER (IMAGE UPLOAD) ---
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo) & filters.user(OWNER_ID))
 async def media_handler(c, m):
     uid = m.from_user.id
@@ -438,7 +437,8 @@ async def dl_process(c, cb):
         await cb.message.edit(f"✅ **Stored!**\n\n📂 **File:** `{final_filename}`\n\n🔗 <b>Blog:</b> {final_link}\n\n🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}", disable_web_page_preview=True)
         os.remove(internal_path); del download_queue[uid]
     except Exception as e: await cb.message.edit(f"❌ Error: {e}")
-    @app.on_callback_query(filters.regex("^save_"))
+
+@app.on_callback_query(filters.regex("^save_"))
 async def save_img_callback(c, cb):
     uid = cb.from_user.id
     mode = "thumbnails" if "thumb" in cb.data else "watermarks"

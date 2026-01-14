@@ -19,10 +19,10 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "23427"))
-API_HASH = os.environ.get("API_HASH", "0375a9f2e7c29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "846850D5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
-OWNER_ID = int(os.environ.get("OWNER_ID", "5027470"))
+API_ID = int(os.environ.get("API_ID", "234127"))
+API_HASH = os.environ.get("API_HASH", "0375dd2029d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468501pD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+OWNER_ID = int(os.environ.get("OWNER_ID", "5014470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "02a832d91755c2f5e8a2d1a6740a8674")
@@ -30,7 +30,7 @@ BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 FINAL_WEBSITE_URL = "https://filmyflip-hub.blogspot.com"
 CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"
 
-# 🔥 FIXED: Your New ImgBB API Key
+# 🔥 ImgBB API Key (Fixed)
 IMG_API_KEY = "727ccce0985cf58d329ffb4d0005ea06"
 IMG_API_URL = "https://api.imgbb.com/1/upload"
 
@@ -173,7 +173,7 @@ async def main_start(c, m):
         db_status = "✅ Connected"
         try: await db.command("ping")
         except: db_status = "❌ Disconnected"
-        await m.reply(f"👋 **Boss! v52.0 (ImgBB Integration) Ready.**\n\n🗄 **DB:** `{db_status}`\n🆔 **ID:** `{DB_CHANNEL_ID}`")
+        await m.reply(f"👋 **Boss! v53.0 (Speed Boost) Ready.**\n\n🗄 **DB:** `{db_status}`\n🆔 **ID:** `{DB_CHANNEL_ID}`")
 
 # 🔥 STATS COMMAND
 @app.on_message(filters.command("stats") & filters.user(OWNER_ID))
@@ -350,12 +350,10 @@ async def upload_to_cloud(c, cb):
         reply = cb.message.reply_to_message
         if not reply or not reply.photo: return await cb.message.edit("❌ Photo not found!")
         
-        # Download file safely
         timestamp = int(time.time())
         path = await c.download_media(reply, file_name=f"downloads/imgbb_{timestamp}.jpg")
-        await asyncio.sleep(1) # Ensure file closes
+        await asyncio.sleep(1) 
         
-        # Upload using your ImgBB API Key
         async with aiohttp.ClientSession() as session:
             payload = {'key': IMG_API_KEY}
             with open(path, 'rb') as f:
@@ -366,7 +364,6 @@ async def upload_to_cloud(c, cb):
                 async with session.post(IMG_API_URL, data=data) as resp:
                     result = await resp.json()
         
-        # Clean up
         if path and os.path.exists(path): os.remove(path)
         
         if 'data' in result and 'url' in result['data']:
@@ -418,17 +415,32 @@ async def dl_process(c, cb):
     final_filename = f"{clean_custom}{ext}"
     internal_path = f"downloads/{uid}_{final_filename}"
     os.makedirs("downloads", exist_ok=True)
+    
+    # 🔥 OPTIMIZED DOWNLOADER
     try:
         start = time.time()
-        headers = {"User-Agent": "Mozilla/5.0"}
-        async with aiohttp.ClientSession() as session:
+        # Fake Chrome Headers to Boost Speed
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+            "Accept": "*/*",
+            "Accept-Encoding": "identity" # Force no compression for direct stream
+        }
+        
+        # High Timeout to prevent "Error" on slow starts
+        timeout_settings = aiohttp.ClientTimeout(total=3600, connect=60) # 1 Hour total time, 60s connect
+        
+        async with aiohttp.ClientSession(timeout=timeout_settings) as session:
             async with session.get(url, headers=headers) as resp:
+                if resp.status != 200:
+                    return await cb.message.edit(f"❌ Error: Server returned {resp.status}")
+                
                 total = int(resp.headers.get("Content-Length", 0))
                 with open(internal_path, "wb") as f:
                     dl = 0
-                    async for chunk in resp.content.iter_chunked(1024*1024):
+                    async for chunk in resp.content.iter_chunked(1024*1024): # 1MB Chunk
                         f.write(chunk); dl += len(chunk)
                         if time.time() - start > 5: await progress(dl, total, cb.message, start, f"📥 Downloading: {final_filename}")
+        
         await cb.message.edit("⚙️ **Processing...**")
         duration = get_duration(internal_path)
         fsize = humanbytes(os.path.getsize(internal_path))
@@ -450,7 +462,7 @@ async def dl_process(c, cb):
         final_link = f"{BLOGGER_URL}?data={quote(blogger_code)}"
         await cb.message.edit(f"✅ **Stored!**\n\n📂 **File:** `{final_filename}`\n\n🔗 <b>Blog:</b> {final_link}\n\n🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}", disable_web_page_preview=True)
         os.remove(internal_path); del download_queue[uid]
-    except Exception as e: await cb.message.edit(f"❌ Error: {e}")
+    except Exception as e: await cb.message.edit(f"❌ Error: {str(e)}")
 
 @app.on_callback_query(filters.regex("^save_"))
 async def save_img_callback(c, cb):

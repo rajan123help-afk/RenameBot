@@ -19,10 +19,10 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "2327"))
-API_HASH = os.environ.get("API_HASH", "0d20aba9f2e7c29d0c1c06590dfb")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "84685GpD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
-OWNER_ID = int(os.environ.get("OWNER_ID", "5027470"))
+API_ID = int(os.environ.get("API_ID", "23421127"))
+API_HASH = os.environ.get("API_HASH", "0375dd20aba9f2e7c29d0c1c06590dfb")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8468501492:AAGpD5dzd1EzkJs9AqHkAOAhPcmGv1Dwlgk")
+OWNER_ID = int(os.environ.get("OWNER_ID", "5027914470"))
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://raja:raja12345@filmyflip.jlitika.mongodb.net/?retryWrites=true&w=majority&appName=Filmyflip")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "-1003311810643"))
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "02a832d91755c2f5e8a2d1a6740a8674")
@@ -30,17 +30,13 @@ BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 FINAL_WEBSITE_URL = "https://filmyflip-hub.blogspot.com"
 CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"
 
-# Image Upload Config
-IMG_API_KEY = "6d207e02198a847aa98d0a2a901485a5"
-IMG_API_URL = "https://freeimage.host/api/1/upload"
-
 # --- DATABASE SETUP ---
 try:
     mongo = AsyncIOMotorClient(MONGO_URL)
     db = mongo["FilmyFlipStore"]
     settings_col = db["settings"]
     channels_col = db["channels"]
-    users_col = db["users"] # For Stats
+    users_col = db["users"]
     print("✅ MongoDB Connected")
 except Exception as e:
     print(f"❌ MongoDB Error: {e}")
@@ -173,7 +169,7 @@ async def main_start(c, m):
         db_status = "✅ Connected"
         try: await db.command("ping")
         except: db_status = "❌ Disconnected"
-        await m.reply(f"👋 **Boss! v48.0 (Stats + Img Upload) Ready.**\n\n🗄 **DB:** `{db_status}`\n🆔 **ID:** `{DB_CHANNEL_ID}`")
+        await m.reply(f"👋 **Boss! v49.0 (Graph.org Uploader) Ready.**\n\n🗄 **DB:** `{db_status}`\n🆔 **ID:** `{DB_CHANNEL_ID}`")
 
 # 🔥 STATS COMMAND
 @app.on_message(filters.command("stats") & filters.user(OWNER_ID))
@@ -300,7 +296,7 @@ async def num_callback(c, cb):
             if os.path.exists(temp_path): os.remove(temp_path)
             await asyncio.sleep(0.5)
     except Exception as e: await c.send_message(uid, f"❌ Error: {e}")
-    # --- MEDIA HANDLER (IMAGE UPLOAD) ---
+        # --- MEDIA HANDLER (IMAGE UPLOAD) ---
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo) & filters.user(OWNER_ID))
 async def media_handler(c, m):
     uid = m.from_user.id
@@ -315,7 +311,7 @@ async def media_handler(c, m):
     if is_image:
         btn = InlineKeyboardMarkup([
             [InlineKeyboardButton("🖼 Set Thumbnail", callback_data="save_thumb"), InlineKeyboardButton("💧 Set Watermark", callback_data="save_wm")],
-            [InlineKeyboardButton("🌐 Generate Link (JPG)", callback_data="upload_img")]
+            [InlineKeyboardButton("🌐 Generate Link (Graph.org)", callback_data="upload_img")]
         ])
         await m.reply_text("📸 **Image Detected!**", reply_markup=btn, quote=True)
         return
@@ -341,29 +337,29 @@ async def media_handler(c, m):
         await status.edit(f"✅ **Stored!**\n\n📂 **File:** `{fname}`\n\n🔗 <b>Blog:</b> {final_link}\n\n🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}", disable_web_page_preview=True)
     except Exception as e: await status.edit(f"❌ Error: {e}")
 
-# 🔥 UPLOAD CALLBACK
+# 🔥 UPLOAD CALLBACK (Telegra.ph / Graph.org)
 @app.on_callback_query(filters.regex("^upload_img"))
 async def upload_to_cloud(c, cb):
-    await cb.message.edit("⏳ **Uploading to Cloud...**")
+    await cb.message.edit("⏳ **Uploading to Graph.org...**")
     try:
         reply = cb.message.reply_to_message
         if not reply or not reply.photo: return await cb.message.edit("❌ Photo not found!")
         path = await c.download_media(reply, file_name=f"downloads/upload_{cb.from_user.id}.jpg")
-        payload = {'key': IMG_API_KEY, 'action': 'upload', 'format': 'json'}
+        
         async with aiohttp.ClientSession() as session:
             with open(path, 'rb') as f:
                 data = aiohttp.FormData()
-                for k, v in payload.items(): data.add_field(k, v)
-                data.add_field('source', f, filename='image.jpg', content_type='image/jpeg')
-                async with session.post(IMG_API_URL, data=data) as resp:
+                data.add_field('file', f, filename='image.jpg', content_type='image/jpeg')
+                async with session.post('https://graph.org/upload', data=data) as resp:
                     result = await resp.json()
         os.remove(path)
-        if 'image' in result:
-            img_url = result['image']['url']
+        
+        if result and isinstance(result, list) and 'src' in result[0]:
+            img_url = "https://graph.org" + result[0]['src']
             await cb.message.edit(f"✅ **Upload Successful!**\n\n🔗 **Link:**\n`{img_url}`", disable_web_page_preview=True)
         else:
-            err = result.get('error', {}).get('message', 'Unknown Error')
-            await cb.message.edit(f"❌ Upload Failed: {err}")
+            await cb.message.edit("❌ Upload Failed: Graph.org returned error.")
+            
     except Exception as e: await cb.message.edit(f"❌ Error: {e}")
 
 @app.on_message(filters.private & filters.regex(r"^https?://") & filters.user(OWNER_ID))
@@ -544,4 +540,4 @@ async def start_services():
     await asyncio.Event().wait()
 
 if __name__ == "__main__": asyncio.get_event_loop().run_until_complete(start_services())
-        
+            

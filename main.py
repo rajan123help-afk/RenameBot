@@ -30,7 +30,7 @@ BLOGGER_URL = "https://filmyflip1.blogspot.com/p/download.html"
 FINAL_WEBSITE_URL = "https://filmyflip-hub.blogspot.com"
 CREDIT_NAME = "🦋 Filmy Flip Hub 🦋"
 
-# 🔥 ImgBB API Key (Fixed)
+# 🔥 ImgBB API Key
 IMG_API_KEY = "727ccce0985cf58d329ffb4d0005ea06"
 IMG_API_URL = "https://api.imgbb.com/1/upload"
 
@@ -41,6 +41,7 @@ try:
     settings_col = db["settings"]
     channels_col = db["channels"]
     users_col = db["users"]
+    rename_col = db["rename_rules"] # 🆕 Rename Rules Collection
     print("✅ MongoDB Connected")
 except Exception as e:
     print(f"❌ MongoDB Error: {e}")
@@ -151,6 +152,18 @@ async def get_real_filename(url):
     name = unquote(url.split("/")[-1].split("?")[0])
     return name.replace(".", " ").replace("_", " ")
 
+# 🔥 RENAME RULES LOGIC (NEW - THE MAGIC)
+async def apply_rename_rules(filename):
+    rules = await rename_col.find({}).to_list(length=None)
+    new_filename = filename
+    for rule in rules:
+        old_word = rule['old']
+        new_word = rule['new']
+        # Case Insensitive Replace
+        pattern = re.compile(re.escape(old_word), re.IGNORECASE)
+        new_filename = pattern.sub(new_word, new_filename)
+    return new_filename
+
 # 🔥 PROGRESS BAR
 async def progress(current, total, message, start_time, task_name):
     now = time.time()
@@ -181,6 +194,55 @@ async def get_stats(c, m):
     status = await m.reply("📊 **Counting Users...**")
     count = await users_col.count_documents({})
     await status.edit(f"👥 **Total Users:** `{count}`")
+
+# 🔥 ADD REPLACE RULES COMMANDS (NEW)
+@app.on_message(filters.command("addreplace") & filters.user(OWNER_ID))
+async def add_replace_handler(c, m):
+    try:
+        # User input: /addreplace Old Word | New Word
+        text = m.text.split(" ", 1)[1]
+        if "|" in text:
+            old_word, new_word = text.split("|", 1)
+            old_word = old_word.strip()
+            new_word = new_word.strip()
+        else:
+            old_word = text.strip()
+            new_word = ""
+
+        await rename_col.update_one(
+            {"old": old_word},
+            {"$set": {"new": new_word}},
+            upsert=True
+        )
+        await m.reply(f"✅ **Rule Added!**\n\n🔹 **Find:** `{old_word}`\n🔸 **Replace With:** `{new_word or '(Empty)'}`")
+    except IndexError:
+        await m.reply("❌ **Format:** `/addreplace Old Word | New Word`\nExample: `/addreplace mkvCinemas | FilmyFlip`")
+
+@app.on_message(filters.command("viewreplace") & filters.user(OWNER_ID))
+async def view_rules_handler(c, m):
+    rules = await rename_col.find({}).to_list(length=None)
+    if not rules:
+        return await m.reply("📂 **No Rules Found!**\nUse `/addreplace` to add one.")
+    
+    msg = "📝 **Your Rename Rules:**\n\n"
+    for rule in rules:
+        target = rule['new'] if rule['new'] else "(Remove)"
+        msg += f"🔹 `{rule['old']}` ➡️ `{target}`\n"
+    
+    msg += "\n🗑 Use `/delreplace word` to delete."
+    await m.reply(msg)
+
+@app.on_message(filters.command("delreplace") & filters.user(OWNER_ID))
+async def del_rule_handler(c, m):
+    try:
+        word = m.text.split(" ", 1)[1].strip()
+        result = await rename_col.delete_one({"old": word})
+        if result.deleted_count > 0:
+            await m.reply(f"🗑 **Deleted Rule:** `{word}`")
+        else:
+            await m.reply(f"❌ **Rule not found:** `{word}`")
+    except IndexError:
+        await m.reply("❌ Word to likho!\nExample: `/delreplace HdHub4u`")
 
 @app.on_message(filters.command("cancel") & filters.private & filters.user(OWNER_ID))
 async def cancel_task(c, m):
@@ -300,7 +362,7 @@ async def num_callback(c, cb):
             if os.path.exists(temp_path): os.remove(temp_path)
             await asyncio.sleep(0.5)
     except Exception as e: await c.send_message(uid, f"❌ Error: {e}")
-        # --- MEDIA HANDLER (IMAGE UPLOAD) ---
+    # --- MEDIA HANDLER (IMAGE UPLOAD + FILE STORE + AUTO RENAME) ---
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo) & filters.user(OWNER_ID))
 async def media_handler(c, m):
     uid = m.from_user.id
@@ -324,13 +386,22 @@ async def media_handler(c, m):
     try:
         media = m.document or m.video or m.audio
         fname = getattr(media, "file_name", "File")
+        
+        # 🔥 APPLY RENAME RULES (AUTO RENAME LOGIC)
+        # Yaha magic hoga: HdHub4u hat jayega, FilmyFlip aa jayega
+        fname = await apply_rename_rules(fname)
+
         fsize = humanbytes(getattr(media, "file_size", 0))
         dur = getattr(media, "duration", 0)
         new_cap = get_fancy_caption(fname, fsize, dur)
-        if m.video: db_msg = await c.send_video(DB_CHANNEL_ID, m.video.file_id, caption=new_cap)
-        else: db_msg = await c.send_document(DB_CHANNEL_ID, m.document.file_id, caption=new_cap)
+        
+        # Upload to DB Channel with NEW NAME
+        if m.video: db_msg = await c.send_video(DB_CHANNEL_ID, m.video.file_id, caption=new_cap, file_name=fname)
+        else: db_msg = await c.send_document(DB_CHANNEL_ID, m.document.file_id, caption=new_cap, file_name=fname)
+        
         try: await m.delete()
         except: pass
+        
         raw_data = f"link_{OWNER_ID}_{db_msg.id}"
         tg_code, blogger_code = get_link_codes(raw_data)
         bot_uname = "CloneBot"
@@ -408,7 +479,11 @@ async def dl_process(c, cb):
     if not data: return await cb.answer("❌ Task Expired!")
     await cb.message.edit("📥 **Initializing...**")
     url = data['url']; custom_name = data['new_name']; mode = "video" if "video" in cb.data else "doc"
-    clean_custom = custom_name.replace(".", " ").replace("_", " ")
+    
+    # 🔥 APPLY RENAME RULES ON CUSTOM NAME
+    clean_custom = await apply_rename_rules(custom_name)
+    clean_custom = clean_custom.replace(".", " ").replace("_", " ")
+
     orig_clean = data['orig_name']
     root, ext = os.path.splitext(orig_clean)
     if not ext or len(ext) > 5: ext = ".mkv"
@@ -485,8 +560,9 @@ async def save_img_callback(c, cb):
                 preview_path = f"{mode}/{uid}_preview.jpg"
                 img = Image.open(path).convert("RGB")
                 img.save(preview_path); apply_watermark(preview_path, wm_path)
+                # 🔥 PREVIEW FIX: Message delete line removed
                 prev_msg = await c.send_photo(uid, preview_path, caption="✅ **Thumbnail Set!** (Preview)")
-                os.remove(preview_path); await asyncio.sleep(5); await prev_msg.delete()
+                os.remove(preview_path) 
             else: msg = await c.send_message(uid, "✅ **Thumbnail Set!**"); await asyncio.sleep(3); await msg.delete()
         else: msg = await c.send_message(uid, "✅ **Watermark Saved!** (60% Size)"); await asyncio.sleep(3); await msg.delete()
     except Exception as e: await cb.message.edit(f"❌ Error: {e}")
@@ -551,7 +627,7 @@ async def start_clone_bot():
             
             btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Get File Again", url=f"https://t.me/{c.me.username}?start={payload}")]])
             get_again_msg = await m.reply("❌ **Time Over! File Deleted.**\n👇 Get again (Valid 1 Min).", reply_markup=btn)
-            await asyncio.sleep(60); await get_again_msg.delete()
+            await asyncio.sleep(6); await get_again_msg.delete()
             
             web_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🌐 Visit Website", url=FINAL_WEBSITE_URL)]])
             await m.reply(f"🚫 **Link Expired!**", reply_markup=web_btn)
@@ -570,4 +646,4 @@ async def start_services():
     await asyncio.Event().wait()
 
 if __name__ == "__main__": asyncio.get_event_loop().run_until_complete(start_services())
-        
+    

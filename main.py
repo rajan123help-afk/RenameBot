@@ -470,21 +470,17 @@ async def save_img_callback(c, cb):
 
 print("Part 3 Loaded Successfully...")
         # ==========================================
-# 🌟 PART 4: PHOTO POST SEARCHER (NEHA PRO) 🌟
+# 🌟 FINAL PART 4: PRO SEARCH & PM FIX 🌟
 # ==========================================
-
 user_msg_data = {}
 user_memory = {}
+import datetime
 
-# --- 🧠 Neha AI Chat + Typing Status ---
 async def get_gemini_reply(client, chat_id, user_id, prompt_text):
-    # ✍️ Typing Status dikhayega
     await client.send_chat_action(chat_id, enums.ChatAction.TYPING)
-    
     if user_id not in user_memory: user_memory[user_id] = []
     user_memory[user_id].append({"role": "user", "parts": [{"text": prompt_text}]})
     if len(user_memory[user_id]) > 10: user_memory[user_id] = user_memory[user_id][-10:]
-    
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
         data = {"systemInstruction": {"parts": [{"text": NEHA_PROMPT}]}, "contents": user_memory[user_id]}
@@ -494,22 +490,32 @@ async def get_gemini_reply(client, chat_id, user_id, prompt_text):
         reply_text = result['candidates'][0]['content']['parts'][0]['text']
         user_memory[user_id].append({"role": "model", "parts": [{"text": reply_text}]})
         return reply_text
-    except:
-        return "Yaar ruko, thoda check karne do... 😉"
+    except Exception as e:
+        print(f"Gemini Error: {e}")
+        return "Ruko yaar, check karke batati hoon... 😉"
+
+async def daily_posting_task():
+    await asyncio.sleep(60) 
+    while True:
+        try:
+            if clone2_app and clone2_app.is_initialized:
+                now = datetime.datetime.now()
+                msg = "Happy Sunday Guys! 🎉" if now.weekday() == 6 else "Hello dosto! 🌟"
+                msg += " Aaj ki updates check kar lo aur group share karo! ❤️"
+                await clone2_app.send_message(GROUP_ID, msg)
+            await asyncio.sleep(86400) 
+        except: await asyncio.sleep(3600)
 
 async def start_clone_bots():
     global clone1_app, clone2_app
-    
-    # 📦 CLONE 1: Delivery Bot (Setup as it is)
     d1 = await settings_col.find_one({"_id": "clone1_token"})
     if d1:
         try:
-            if clone1_app: await clone1_app.stop()
             clone1_app = Client("Clone1", api_id=API_ID, api_hash=API_HASH, bot_token=d1["token"])
             @clone1_app.on_message(filters.command("start") & filters.private)
             async def c1_start(c, m):
-                if len(m.command) < 2: return await m.reply(f"👋 Hello! Main Delivery Bot hoon.\n\n🔗 {FINAL_WEBSITE_URL}")
-                payload = m.command[1]
+                payload = m.command[1] if len(m.command) > 1 else None
+                if not payload: return await m.reply("Hi! Movie link ke liye group use karein.")
                 mid = extract_msg_id(decode_payload(payload))
                 if mid:
                     msg = await app.get_messages(DB_CHANNEL_ID, mid)
@@ -517,67 +523,85 @@ async def start_clone_bots():
             await clone1_app.start()
         except: pass
 
-    # 👩‍💼 CLONE 2: Neha (Pure Group Photo Searcher)
     d2 = await settings_col.find_one({"_id": "clone2_token"})
     if d2:
         try:
-            if clone2_app: await clone2_app.stop()
             clone2_app = Client("Clone2", api_id=API_ID, api_hash=API_HASH, bot_token=d2["token"])
             
+            @clone2_app.on_chat_join_request()
+            async def approve_join(c, r):
+                try: await c.approve_chat_join_request(r.chat.id, r.from_user.id)
+                except: pass
+            
             @clone2_app.on_message(filters.group & filters.text)
-            async def neha_photo_search(c, m):
+            async def neha_grp_handler(c, m):
                 bot_me = await c.get_me()
                 text = m.text.lower()
-                
-                # Triggers
-                movie_keywords = ["movie", "film", "series", "episode", "chahiye", "de do", "link"]
-                
-                if "neha" in text or f"@{bot_me.username.lower()}" in text or any(x in text for x in movie_keywords):
+                uid = m.from_user.id if m.from_user else m.chat.id
+
+                # Broader keywords check
+                keywords = ["movie", "film", "series", "link", "de do", "chahiye", "upload", "karo"]
+                if "neha" in text or f"@{bot_me.username.lower()}" in text or any(x in text for x in keywords):
                     
-                    # 1. Start Typing... Status
-                    await c.send_chat_action(m.chat.id, enums.ChatAction.TYPING)
-                    
-                    # 2. AI Chat Reply (Gemini 2.5 Flash)
-                    ai_reply = await get_gemini_reply(c, m.chat.id, m.from_user.id, m.text)
+                    # 1. AI Reply (Hamesha aayega)
+                    ai_reply = await get_gemini_reply(c, m.chat.id, uid, m.text)
                     if ai_reply: await m.reply(ai_reply)
 
-                    # 3. Clean Query for Search
+                    # 2. Extract Movie Name
                     query = m.text.replace(f"@{bot_me.username}", "").replace("neha", "").strip()
-                    for k in movie_keywords: query = query.replace(k, "")
+                    for k in keywords: query = query.replace(k, "")
                     query = query.strip()
-
-                    if len(query) < 2: return
-
-                    # --- 🔍 SEARCH IN GROUP (ONLY PHOTOS) ---
-                    # Ye sirf un messages ko dhoondhega jinme Poster (Photo) hai
-                    found = False
-                    async for msg in c.search_messages(m.chat.id, query=query, limit=1, filter=enums.MessagesFilter.PHOTO):
-                        if msg.id == m.id: continue
-                        
-                        await m.reply(f"🎬 **Ye dekho, mil gayi movie post!**\n👉 {msg.link}", reply_to_message_id=msg.id)
-                        found = True
-                        break
                     
-                    # --- 🚨 NOT FOUND -> PM BOSS ---
-                    if not found:
+                    if len(query) < 2: return
+                    print(f"🔍 Neha searching for: {query}")
+
+                    # 3. SMART SEARCH (Step by Step)
+                    found_msg = None
+                    # Pehle Photos mein dhoondho (Posters)
+                    async for msg in c.search_messages(m.chat.id, query=query, limit=5, filter=enums.MessagesFilter.PHOTO):
+                        if msg.id != m.id: found_msg = msg; break
+                    
+                    # Agar Photo nahi mili, toh kisi bhi message mein dhoondho
+                    if not found_msg:
+                        async for msg in c.search_messages(m.chat.id, query=query, limit=5):
+                            if msg.id != m.id: found_msg = msg; break
+
+                    if found_msg:
+                        await m.reply(f"✅ **Bhai, ye dekho mil gaya!**\n👉 {found_msg.link}", reply_to_message_id=found_msg.id)
+                    else:
+                        # 4. OWNER PM (Clone 2 hi bhejega taaki fail na ho)
+                        print(f"🚨 Not found: {query}. Alerting Boss...")
                         try:
-                            await app.send_message(int(OWNER_ID), f"🚨 **MISSING POST!**\n\n👤 **User:** {m.from_user.mention}\n💬 **Request:** `{m.text}`\n📍 **Group:** {m.chat.title}\n\nBoss, ye movie ki koi **Photo Post** group mein nahi mili. Agar aapne upload ki hai toh link check karo, warna upload kar do!")
-                        except: pass
+                            # Neha (Clone 2) se Boss ko PM
+                            await c.send_message(int(OWNER_ID), f"🚨 **BOSS ALERT!**\n\nMovie `{query}` group mein nahi mili.\nUser: {m.from_user.mention if m.from_user else 'Admin'}\n\nJaldi upload kar do!")
+                        except Exception as e:
+                            print(f"PM Error: {e}. Make sure you started NEHA bot in private!")
 
             @clone2_app.on_message(filters.private & filters.text & ~filters.command("start"))
             async def neha_pm(c, m):
-                r = await get_gemini_reply(c, m.from_user.id, m.from_user.id, m.text)
+                uid = m.from_user.id
+                today = str(datetime.datetime.now().date())
+                if uid not in user_msg_data or user_msg_data[uid]['date'] != today:
+                    user_msg_data[uid] = {'date': today, 'count': 0}
+                
+                if user_msg_data[uid]['count'] == 4:
+                    user_msg_data[uid]['count'] += 1
+                    return await m.reply(f"Yaar yahan kitni baatein karoge? Aao group mein chalte hain! 👇\n🔗 {FINAL_WEBSITE_URL}")
+                elif user_msg_data[uid]['count'] > 4: return 
+                
+                user_msg_data[uid]['count'] += 1
+                r = await get_gemini_reply(c, m.chat.id, uid, m.text)
                 if r: await m.reply(r)
 
             await clone2_app.start()
         except: pass
 
-# --- Runner ---
 async def start_services():
     await app.start()
     await start_clone_bots()
+    asyncio.create_task(daily_posting_task())
     app_web = web.Application()
-    app_web.add_routes([web.get("/", lambda q: web.Response(text="Neha Photo Scout is Live!"))])
+    app_web.add_routes([web.get("/", lambda q: web.Response(text="Running!"))])
     runner = web.AppRunner(app_web); await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", PORT).start()
     await asyncio.Event().wait()

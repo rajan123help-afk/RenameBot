@@ -281,7 +281,7 @@ async def set_db_channel(c, m):
 
 print("Part 2 Loaded Successfully...")
     # ==========================================
-# 🌟 PART 3: TMDB SEARCH & MEDIA HANDLER (MAIN BOT) 🌟
+# 🌟 PART 3: TMDB SEARCH & MEDIA HANDLER (MAIN BOT) [FIXED] 🌟
 # ==========================================
 
 # --- 🎬 TMDB SEARCH LOGIC ---
@@ -354,7 +354,6 @@ async def media_handler(c, m):
         media = m.document or m.video or m.audio
         fname = getattr(media, "file_name", "File")
         
-        # 🔥 Magic Auto Rename
         fname = await apply_rename_rules(fname)
         new_cap = get_fancy_caption(fname, humanbytes(getattr(media, "file_size", 0)), getattr(media, "duration", 0))
         
@@ -364,7 +363,6 @@ async def media_handler(c, m):
         
         tg_code, blogger_code = get_link_codes(f"link_{OWNER_ID}_{db_msg.id}")
         
-        # 🔥 Link sirf Clone 1 (Delivery Bot) ka generate hoga
         bot_uname = "CloneBot"
         try:
             if clone1_app and clone1_app.is_connected: bot_uname = (await clone1_app.get_me()).username
@@ -381,16 +379,30 @@ async def upload_to_cloud(c, cb):
         path = await c.download_media(cb.message.reply_to_message, file_name=f"downloads/imgbb_{int(time.time())}.jpg")
         async with aiohttp.ClientSession() as session:
             data = aiohttp.FormData(); data.add_field('key', IMG_API_KEY); data.add_field('image', open(path, 'rb'), filename='img.jpg', content_type='image/jpeg')
-            async with session.post(IMG_API_URL, data=data) as resp: result = await resp.json()
+            async with session.post("https://api.imgbb.com/1/upload", data=data) as resp: result = await resp.json()
         os.remove(path)
         await cb.message.edit(f"✅ **Link:** `{result['data']['url']}`" if 'data' in result else f"❌ Error: {result.get('error', {}).get('message')}")
     except Exception as e: await cb.message.edit(f"❌ Error: {e}")
 
 # --- 🔗 URL DOWNLOADER LOGIC ---
+async def get_real_filename(url):
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.head(url, allow_redirects=True) as resp:
+                if "Content-Disposition" in resp.headers:
+                    match = re.search(r'filename="?([^"]+)"?', resp.headers["Content-Disposition"])
+                    if match: return unquote(match.group(1))
+        return unquote(url.split("/")[-1].split("?")[0])
+    except: return "Downloaded_File.mkv"
+
 @app.on_message(filters.private & filters.regex(r"^https?://") & filters.user(OWNER_ID))
 async def url_handler(c, m):
-    url = m.text.strip(); try: await m.delete()
-    except: pass
+    url = m.text.strip()
+    try: 
+        await m.delete()
+    except: 
+        pass
+    
     status = await m.reply("🔗 **Fetching URL...**")
     orig_name = await get_real_filename(url)
     download_queue[m.from_user.id] = {"url": url, "orig_name": orig_name, "prompt_id": status.id}

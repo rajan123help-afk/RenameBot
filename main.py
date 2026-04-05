@@ -472,6 +472,8 @@ print("Part 3 Loaded Successfully...")
         # ==========================================
 # 🌟 UPDATED PART 4: STABLE CLONES & SERVER 🌟
 # ==========================================
+user_msg_data = {} # 👈 Ye line add karni hai
+user_memory = {}   # 👈 Ye bhi agar nahi hai toh
 
 async def start_clone_bots():
     global clone1_app, clone2_app

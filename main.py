@@ -470,39 +470,55 @@ async def save_img_callback(c, cb):
 
 print("Part 3 Loaded Successfully...")
         # ==========================================
-# 🌟 FINAL STABLE PART 4 (THE PERMANENT FIX) 🌟
+# 🌟 FINAL BOSS LEVEL PART 4 (GEMINI 2.5 FLASH EDITION) 🌟
 # ==========================================
 
-# --- 1. Sabse Pehle Memory Define Karo ---
+# --- 1. Global Memory (Error Fix) ---
 user_msg_data = {}
 user_memory = {}
 
-# --- 2. Phir Gemini Function Define Karo (Taki niche use ho sake) ---
+# --- 2. Gemini 2.5 Flash Logic ---
 async def get_gemini_reply(user_id, prompt_text):
     if user_id not in user_memory: 
         user_memory[user_id] = []
+    
     user_memory[user_id].append({"role": "user", "parts": [{"text": prompt_text}]})
+    
+    # Memory management: Sirf aakhiri 10 baatein yaad rakhega
     if len(user_memory[user_id]) > 10: 
         user_memory[user_id] = user_memory[user_id][-10:]
+        
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-        data = {"systemInstruction": {"parts": [{"text": NEHA_PROMPT}]}, "contents": user_memory[user_id]}
+        # 🔥 Gemini 2.5 Flash Endpoint
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+        
+        data = {
+            "systemInstruction": {"parts": [{"text": NEHA_PROMPT}]},
+            "contents": user_memory[user_id]
+        }
+        
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers={'Content-Type': 'application/json'}, json=data) as resp:
                 result = await resp.json()
+        
+        if 'error' in result:
+            print(f"❌ Gemini API Error: {result['error']['message']}")
+            return None
+
         reply_text = result['candidates'][0]['content']['parts'][0]['text']
         user_memory[user_id].append({"role": "model", "parts": [{"text": reply_text}]})
         return reply_text
+        
     except Exception as e:
-        print(f"Gemini Error: {e}")
+        print(f"❌ Gemini Python Error: {e}")
         if user_memory[user_id]: user_memory[user_id].pop()
-        return "Yaar abhi mood nahi hai baat karne ka, thodi der baad aana! 😉"
+        return None
 
-# --- 3. Ab Bots aur Unke Handlers ---
+# --- 3. Start Clones Logic ---
 async def start_clone_bots():
     global clone1_app, clone2_app
     
-    # 📦 CLONE 1 Setup
+    # 📦 CLONE 1: Fast Delivery Bot
     d1 = await settings_col.find_one({"_id": "clone1_token"})
     if d1:
         try:
@@ -513,28 +529,37 @@ async def start_clone_bots():
             
             @clone1_app.on_message(filters.command("start") & filters.private)
             async def c1_start(c, m):
-                if len(m.command) < 2: return await m.reply(f"👋 Hello! Main Delivery Bot hoon.\n\n🔗 {FINAL_WEBSITE_URL}")
+                if len(m.command) < 2: 
+                    return await m.reply(f"👋 **Hello!** Main Fast Delivery Bot hoon.\n\n🔗 {FINAL_WEBSITE_URL}")
+                
                 payload = m.command[1]
                 missing = []
+                # Force Subscribe Check
                 async for ch in channels_col.find():
                     try: await c.get_chat_member(ch["_id"], m.from_user.id)
                     except: missing.append(ch["link"])
+                
                 if missing:
                     btn = [[InlineKeyboardButton(f"📢 Join {i+1}", url=l)] for i, l in enumerate(missing)]
                     btn.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{c.me.username}?start={payload}")])
-                    return await m.reply("⚠️ Pehle join karo!", reply_markup=InlineKeyboardMarkup(btn))
+                    return await m.reply("⚠️ **Bhai, pehle join karo tabhi file milegi!**", reply_markup=InlineKeyboardMarkup(btn))
                 
-                mid = extract_msg_id(decode_payload(payload))
-                if mid:
-                    s = await m.reply("🔄 Processing...")
-                    msg = await app.get_messages(DB_CHANNEL_ID, mid)
-                    await c.copy_message(m.chat.id, DB_CHANNEL_ID, mid, caption=msg.caption)
-                    await s.delete()
+                # File Sending
+                try:
+                    mid = extract_msg_id(decode_payload(payload))
+                    if mid:
+                        temp = await m.reply("🔄 **Fetching...**")
+                        # Bot DB Channel se file copy karke bhejega
+                        await c.copy_message(m.chat.id, DB_CHANNEL_ID, mid)
+                        await temp.delete()
+                except: 
+                    await m.reply("❌ **File link purana ho gaya hai!**")
+            
             await clone1_app.start()
-            print("✅ Clone 1 Started")
-        except: pass
+            print("✅ Clone 1 (Delivery) Started!")
+        except Exception as e: print(f"❌ Clone 1 Fail: {e}")
 
-    # 👩‍💼 CLONE 2 (NEHA) Setup
+    # 👩‍💼 CLONE 2: Neha AI
     d2 = await settings_col.find_one({"_id": "clone2_token"})
     if d2:
         try:
@@ -554,39 +579,47 @@ async def start_clone_bots():
                 today = str(datetime.date.today())
                 if uid not in user_msg_data or user_msg_data[uid]['date'] != today: 
                     user_msg_data[uid] = {'date': today, 'count': 0}
-                if user_msg_data[uid]['count'] >= 4: 
-                    return await m.reply(f"Group mein aao! {FINAL_WEBSITE_URL}")
+                
+                if user_msg_data[uid]['count'] >= 5: 
+                    return await m.reply(f"Yaar ab group mein aao, wahan baatein karenge! 😉\n\n👉 {FINAL_WEBSITE_URL}")
+                
                 user_msg_data[uid]['count'] += 1
-                r = await get_gemini_reply(uid, m.text) # Ab ye error nahi dega!
-                if r: await m.reply(r)
+                r = await get_gemini_reply(uid, m.text)
+                await m.reply(r if r else "Yaar abhi mood nahi hai baat karne ka, thodi der baad aana! 😉")
 
             @clone2_app.on_message(filters.group & filters.text)
             async def neha_grp(c, m):
                 bot_me = await c.get_me()
                 is_mentioned = "neha" in m.text.lower() or f"@{bot_me.username.lower()}" in m.text.lower()
                 is_reply = m.reply_to_message and m.reply_to_message.from_user.id == bot_me.id
+                
                 if is_mentioned or is_reply:
                     r = await get_gemini_reply(m.chat.id, m.text)
                     if r: 
                         await m.reply(r)
                         if any(x in r.lower() for x in ["upload", "check", "wait"]):
-                            await app.send_message(OWNER_ID, f"🚨 **BOSS!**\n{m.from_user.mention} maang raha hai: `{m.text}`")
+                            try: await app.send_message(OWNER_ID, f"🚨 **BOSS ALERT!**\n{m.from_user.mention} movie maang raha hai: `{m.text}`")
+                            except: pass
             
             await clone2_app.start()
-            print("✅ Clone 2 Started")
-        except: pass
+            print("✅ Clone 2 (Neha) Started!")
+        except Exception as e: print(f"❌ Clone 2 Fail: {e}")
 
-# --- 4. Main Services Runner ---
+# --- 4. Render Server & Runner ---
 async def start_services():
     await app.start()
     await start_clone_bots()
+    
+    # 🌐 Standard Web Server for Render
     app_web = web.Application()
-    app_web.add_routes([web.get("/", lambda q: web.Response(text="Running!"))])
+    app_web.add_routes([web.get("/", lambda q: web.Response(text="Filmy Flip Hub 3-Bot System is Live!"))])
     runner = web.AppRunner(app_web)
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", PORT).start()
+    
+    print(f"🚀 All Services Live on Port {PORT}")
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
-    
+        

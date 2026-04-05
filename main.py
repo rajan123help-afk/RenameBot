@@ -470,15 +470,39 @@ async def save_img_callback(c, cb):
 
 print("Part 3 Loaded Successfully...")
         # ==========================================
-# 🌟 UPDATED PART 4: STABLE CLONES & SERVER 🌟
+# 🌟 FINAL STABLE PART 4 (THE PERMANENT FIX) 🌟
 # ==========================================
-user_msg_data = {} # 👈 Ye line add karni hai
-user_memory = {}   # 👈 Ye bhi agar nahi hai toh
 
+# --- 1. Sabse Pehle Memory Define Karo ---
+user_msg_data = {}
+user_memory = {}
+
+# --- 2. Phir Gemini Function Define Karo (Taki niche use ho sake) ---
+async def get_gemini_reply(user_id, prompt_text):
+    if user_id not in user_memory: 
+        user_memory[user_id] = []
+    user_memory[user_id].append({"role": "user", "parts": [{"text": prompt_text}]})
+    if len(user_memory[user_id]) > 10: 
+        user_memory[user_id] = user_memory[user_id][-10:]
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        data = {"systemInstruction": {"parts": [{"text": NEHA_PROMPT}]}, "contents": user_memory[user_id]}
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers={'Content-Type': 'application/json'}, json=data) as resp:
+                result = await resp.json()
+        reply_text = result['candidates'][0]['content']['parts'][0]['text']
+        user_memory[user_id].append({"role": "model", "parts": [{"text": reply_text}]})
+        return reply_text
+    except Exception as e:
+        print(f"Gemini Error: {e}")
+        if user_memory[user_id]: user_memory[user_id].pop()
+        return "Yaar abhi mood nahi hai baat karne ka, thodi der baad aana! 😉"
+
+# --- 3. Ab Bots aur Unke Handlers ---
 async def start_clone_bots():
     global clone1_app, clone2_app
     
-    # 📦 CLONE 1 SETUP
+    # 📦 CLONE 1 Setup
     d1 = await settings_col.find_one({"_id": "clone1_token"})
     if d1:
         try:
@@ -506,12 +530,11 @@ async def start_clone_bots():
                     msg = await app.get_messages(DB_CHANNEL_ID, mid)
                     await c.copy_message(m.chat.id, DB_CHANNEL_ID, mid, caption=msg.caption)
                     await s.delete()
-            
             await clone1_app.start()
             print("✅ Clone 1 Started")
-        except Exception as e: print(f"❌ Clone 1 Error: {e}")
+        except: pass
 
-    # 👩‍💼 CLONE 2 (NEHA) SETUP
+    # 👩‍💼 CLONE 2 (NEHA) Setup
     d2 = await settings_col.find_one({"_id": "clone2_token"})
     if d2:
         try:
@@ -529,15 +552,20 @@ async def start_clone_bots():
             async def neha_pm(c, m):
                 uid = m.from_user.id
                 today = str(datetime.date.today())
-                if uid not in user_msg_data or user_msg_data[uid]['date'] != today: user_msg_data[uid] = {'date': today, 'count': 0}
-                if user_msg_data[uid]['count'] >= 4: return await m.reply(f"Group mein aao! {FINAL_WEBSITE_URL}")
+                if uid not in user_msg_data or user_msg_data[uid]['date'] != today: 
+                    user_msg_data[uid] = {'date': today, 'count': 0}
+                if user_msg_data[uid]['count'] >= 4: 
+                    return await m.reply(f"Group mein aao! {FINAL_WEBSITE_URL}")
                 user_msg_data[uid]['count'] += 1
-                r = await get_gemini_reply(uid, m.text)
+                r = await get_gemini_reply(uid, m.text) # Ab ye error nahi dega!
                 if r: await m.reply(r)
 
             @clone2_app.on_message(filters.group & filters.text)
             async def neha_grp(c, m):
-                if "neha" in m.text.lower() or (m.reply_to_message and m.reply_to_message.from_user.id == (await c.get_me()).id):
+                bot_me = await c.get_me()
+                is_mentioned = "neha" in m.text.lower() or f"@{bot_me.username.lower()}" in m.text.lower()
+                is_reply = m.reply_to_message and m.reply_to_message.from_user.id == bot_me.id
+                if is_mentioned or is_reply:
                     r = await get_gemini_reply(m.chat.id, m.text)
                     if r: 
                         await m.reply(r)
@@ -546,12 +574,12 @@ async def start_clone_bots():
             
             await clone2_app.start()
             print("✅ Clone 2 Started")
-        except Exception as e: print(f"❌ Clone 2 Error: {e}")
+        except: pass
 
+# --- 4. Main Services Runner ---
 async def start_services():
     await app.start()
     await start_clone_bots()
-    # Fixed Web Server for Render
     app_web = web.Application()
     app_web.add_routes([web.get("/", lambda q: web.Response(text="Running!"))])
     runner = web.AppRunner(app_web)

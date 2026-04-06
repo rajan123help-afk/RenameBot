@@ -13,7 +13,7 @@ import asyncio
 import aiofiles
 import aiohttp
 import pyrogram
-import datetime
+from datetime import datetime
 from urllib.parse import quote, unquote
 from PIL import Image
 from hachoir.metadata import extractMetadata
@@ -23,16 +23,15 @@ from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from motor.motor_asyncio import AsyncIOMotorClient
 
-# --- ⚙️ ENVIRONMENT VARIABLES (FOR RENDER & GITHUB SECURITY) ---
-# GitHub par code safe rakhne ke liye hum sab kuch os.environ se lenge
+# --- ⚙️ ENVIRONMENT VARIABLES ---
 API_ID = int(os.environ.get("API_ID", "0"))
 API_HASH = os.environ.get("API_HASH", "")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "") # Main Bot Token
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "") 
 OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
 
 MONGO_URL = os.environ.get("MONGO_URL", "")
 DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", "0"))
-MAIN_GROUP_ID = int(os.environ.get("MAIN_GROUP_ID", "0")) # Yahan 'Neha' admin rahegi
+MAIN_GROUP_ID = int(os.environ.get("MAIN_GROUP_ID", "0")) 
 
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
@@ -41,22 +40,21 @@ IMG_API_KEY = os.environ.get("IMG_API_KEY", "727ccce0985cf58d329ffb4d0005ea06")
 BLOGGER_URL = os.environ.get("BLOGGER_URL", "https://filmyflip1.blogspot.com/p/download.html")
 FINAL_WEBSITE_URL = os.environ.get("FINAL_WEBSITE_URL", "https://filmyflip-hub.blogspot.com")
 CREDIT_NAME = os.environ.get("CREDIT_NAME", "🦋 Filmy Flip Hub 🦋")
-PORT = int(os.environ.get("PORT", 8080)) # Render ke liye zaroori
+PORT = int(os.environ.get("PORT", 8080)) 
 
 # --- 🧠 NEHA AI SYSTEM PROMPT ---
 NEHA_PROMPT = f'''
-Tumhara naam 'Neha' hai. Tum ek 21 saal ki real Indian ladki ho. Tum is Telegram group ki owner aur admin ho. 
-Tum koi AI, bot, ya virtual assistant NAHI ho.
+Tumhara naam 'Neha' hai. Tum ek 21 saal ki real Indian ladki ho.
+Tum is Telegram group ki owner aur admin ho. Tum koi AI, bot, ya virtual assistant NAHI ho.
 
 STRICT RULES:
 1. Tum AI, language model ya bot hone ka zikra nahi karogi.
 2. Agar koi bole "Tum bot ho", toh bolna: "Yaar main ek ladki hu, log faltu msg karke pareshan karte the isliye main username bot jaisa rakhi hu."
 3. Agar koi puche "Tum kaun ho?", SIRF TABHI bolna: "Main is Group ki owner hoon." 
-4. MOVIE REQUEST: Agar koi movie maange, toh direct file mat dena. Bolna: "Wait karo, main group mein check karke batati hu..." ya "Ruko upload kar rahi hu, isme time lagega... tab tak Filmy Flip Hub pe check kar lo."
+4. MOVIE REQUEST: Agar koi movie maange, toh bolna: "Wait karo, main group mein check karke batati hu... 😉"
 5. WARNING/BAN: Agar koi gaali de toh gusse mein bolna: "Tameez se baat karo warna group se ban kar dungi!"
 6. EXCUSES: Agar koi bahut saare sawaal puche toh bahana marna (jaise "Mummy bula rahi hai") aur chup ho jana.
-7. PROMOTION: Beech-beech mein naturally apne 'Filmy Flip Hub', Facebook aur Instagram ko follow karne ko bolna.
-8. Reply ekdum chhote, natural WhatsApp style (Hinglish) mein hone chahiye. Kisi command ka zikra mat karna.
+7. Reply ekdum chhote, natural WhatsApp style (Hinglish) mein hone chahiye.
 '''
 
 # --- 🗄️ DATABASE SETUP ---
@@ -67,16 +65,17 @@ try:
     channels_col = db["channels"]
     users_col = db["users"]
     rename_col = db["rename_rules"] 
-    memory_col = db["neha_memory"] # Neha ki yaadasht DB me save hogi
     print("✅ MongoDB Connected")
 except Exception as e:
     print(f"❌ MongoDB Error: {e}")
 
 # --- 🤖 BOT CLIENTS SETUP ---
 app = Client("MainBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=10, parse_mode=enums.ParseMode.HTML)
-clone1_app = None # Delivery Bot
-clone2_app = None # Neha AI Bot
+clone1_app = None 
+clone2_app = None 
 download_queue = {} 
+user_msg_data = {}
+user_memory = {}
 
 # --- 🛠️ HELPERS LOGIC ---
 def humanbytes(size):
@@ -172,9 +171,9 @@ async def progress(current, total, message, start_time, task_name):
         try: await message.edit(text, parse_mode=enums.ParseMode.HTML)
         except: pass
 
-print("Part 1 Loaded Successfully...")
+
 # ==========================================
-# 🌟 PART 2: CONTROL ROOM COMMANDS (MAIN BOT) 🌟
+# 🌟 PART 2: CONTROL ROOM COMMANDS 🌟
 # ==========================================
 
 @app.on_message(filters.command("start") & filters.private)
@@ -193,7 +192,6 @@ async def get_stats(c, m):
     count = await users_col.count_documents({})
     await status.edit(f"👥 **Total Users:** `{count}`")
 
-# --- 🤖 CLONE BOTS SETUP COMMANDS ---
 @app.on_message(filters.command("setclone1") & filters.user(OWNER_ID))
 async def set_clone1(c, m):
     if len(m.command) < 2: return await m.reply("Usage: `/setclone1 TOKEN` (File Delivery Bot)")
@@ -206,7 +204,6 @@ async def set_clone2(c, m):
     await settings_col.update_one({"_id": "clone2_token"}, {"$set": {"token": m.command[1]}}, upsert=True)
     await m.reply("♻️ **Clone 2 (Neha) Token Saved! Restarting...**"); await start_clone_bots()
 
-# --- 👻 THE PODCAST COMMAND (Ghost Mode) ---
 @app.on_message(filters.command("podcast") & filters.user(OWNER_ID))
 async def podcast_handler(c, m):
     if len(m.command) < 2: return await m.reply("Usage: `/podcast Your Message`")
@@ -216,32 +213,29 @@ async def podcast_handler(c, m):
             await clone2_app.send_message(MAIN_GROUP_ID, msg_text)
             await m.reply("✅ **Podcast Sent Successfully as Neha!**")
         else:
-            await m.reply("❌ **Neha AI (Clone 2) is not connected yet!** Use `/setclone2` first.")
-    except Exception as e:
-        await m.reply(f"❌ **Error sending podcast:** {e}")
+            await m.reply("❌ **Neha AI is not connected yet!**")
+    except Exception as e: await m.reply(f"❌ **Error:** {e}")
 
-# --- 📢 FORCE SUBSCRIBE COMMANDS ---
 @app.on_message(filters.command("addfs") & filters.user(OWNER_ID))
 async def add_fs(c, m):
     try:
         ch_id = int(m.command[1]); link = m.command[2]
         await channels_col.update_one({"_id": ch_id}, {"$set": {"link": link}}, upsert=True)
-        await m.reply(f"✅ **FS Added!**\n🆔 `{ch_id}`\n🔗 {link}")
-    except Exception as e: await m.reply(f"❌ Error: `/addfs ID Link`")
+        await m.reply(f"✅ **FS Added!**")
+    except: await m.reply(f"❌ Error: `/addfs ID Link`")
 
 @app.on_message(filters.command("delfs") & filters.user(OWNER_ID))
 async def del_fs(c, m):
     try: await channels_col.delete_one({"_id": int(m.command[1])}); await m.reply("🗑 Deleted FS.")
     except: pass
 
-# --- ✨ AUTO RENAME RULES COMMANDS ---
 @app.on_message(filters.command("addreplace") & filters.user(OWNER_ID))
 async def add_replace_handler(c, m):
     try:
         text = m.text.split(" ", 1)[1]
         old_word, new_word = text.split("|", 1) if "|" in text else (text.strip(), "")
         await rename_col.update_one({"old": old_word.strip()}, {"$set": {"new": new_word.strip()}}, upsert=True)
-        await m.reply(f"✅ **Rule Added!**\n🔹 **Find:** `{old_word.strip()}`\n🔸 **Replace:** `{new_word.strip() or '(Empty)'}`")
+        await m.reply(f"✅ **Rule Added!**")
     except: await m.reply("❌ **Format:** `/addreplace Old Word | New Word`")
 
 @app.on_message(filters.command("viewreplace") & filters.user(OWNER_ID))
@@ -250,17 +244,16 @@ async def view_rules_handler(c, m):
     if not rules: return await m.reply("📂 **No Rules Found!**")
     msg = "📝 **Your Rename Rules:**\n\n"
     for rule in rules: msg += f"🔹 `{rule['old']}` ➡️ `{rule['new'] or '(Remove)'}`\n"
-    await m.reply(msg + "\n🗑 Use `/delreplace word` to delete.")
+    await m.reply(msg)
 
 @app.on_message(filters.command("delreplace") & filters.user(OWNER_ID))
 async def del_rule_handler(c, m):
     try:
         word = m.text.split(" ", 1)[1].strip()
         res = await rename_col.delete_one({"old": word})
-        await m.reply(f"🗑 **Deleted:** `{word}`" if res.deleted_count else f"❌ **Not found:** `{word}`")
+        await m.reply(f"🗑 **Deleted:** `{word}`" if res.deleted_count else f"❌ **Not found**")
     except: await m.reply("❌ Word to likho!")
 
-# --- ⚙️ MISC COMMANDS ---
 @app.on_message(filters.command("cancel") & filters.private & filters.user(OWNER_ID))
 async def cancel_task(c, m):
     uid = m.from_user.id
@@ -270,21 +263,10 @@ async def cancel_task(c, m):
     msg = await m.reply("✅ **Cleaned!**")
     await asyncio.sleep(3); await msg.delete()
 
-@app.on_message(filters.command("setdb") & filters.user(OWNER_ID))
-async def set_db_channel(c, m):
-    try:
-        new_id = int(m.command[1])
-        await settings_col.update_one({"_id": "db_channel"}, {"$set": {"id": new_id}}, upsert=True)
-        global DB_CHANNEL_ID; DB_CHANNEL_ID = new_id
-        await m.reply(f"✅ **DB Channel Updated!**\n🆔 `{new_id}`")
-    except: await m.reply("❌ Error: `/setdb ID`")
 
-print("Part 2 Loaded Successfully...")
-    # ==========================================
-# 🌟 PART 3: TMDB SEARCH & MEDIA HANDLER (MAIN BOT) [FIXED] 🌟
 # ==========================================
-
-# --- 🎬 TMDB SEARCH LOGIC ---
+# 🌟 PART 3: TMDB & MEDIA HANDLER 🌟
+# ==========================================
 @app.on_message(filters.command(["search", "series"]) & filters.user(OWNER_ID))
 async def search_handler(c, m):
     if len(m.command) < 2: return await m.reply("❌ **Usage:** `/search Movie` or `/series Name S1`")
@@ -342,7 +324,6 @@ async def num_callback(c, cb):
             if os.path.exists(img_path): os.remove(img_path)
     except Exception as e: await c.send_message(uid, f"❌ Error: {e}")
 
-# --- 📁 FILE UPLOAD & AUTO-RENAME LOGIC ---
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo) & filters.user(OWNER_ID))
 async def media_handler(c, m):
     if m.photo or (m.document and m.document.mime_type and m.document.mime_type.startswith("image/")):
@@ -353,7 +334,6 @@ async def media_handler(c, m):
     try:
         media = m.document or m.video or m.audio
         fname = getattr(media, "file_name", "File")
-        
         fname = await apply_rename_rules(fname)
         new_cap = get_fancy_caption(fname, humanbytes(getattr(media, "file_size", 0)), getattr(media, "duration", 0))
         
@@ -362,7 +342,6 @@ async def media_handler(c, m):
         except: pass
         
         tg_code, blogger_code = get_link_codes(f"link_{OWNER_ID}_{db_msg.id}")
-        
         bot_uname = "CloneBot"
         try:
             if clone1_app and clone1_app.is_connected: bot_uname = (await clone1_app.get_me()).username
@@ -371,7 +350,6 @@ async def media_handler(c, m):
         await status.edit(f"✅ **Stored Successfully!**\n\n📂 **File:** `{fname}`\n🔗 <b>Blog:</b> {BLOGGER_URL}?data={quote(blogger_code)}\n🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}", disable_web_page_preview=True)
     except Exception as e: await status.edit(f"❌ Error: {e}")
 
-# --- ☁️ IMGBB UPLOAD ---
 @app.on_callback_query(filters.regex("^upload_img"))
 async def upload_to_cloud(c, cb):
     await cb.message.edit("⏳ **Uploading to ImgBB...**")
@@ -384,7 +362,6 @@ async def upload_to_cloud(c, cb):
         await cb.message.edit(f"✅ **Link:** `{result['data']['url']}`" if 'data' in result else f"❌ Error: {result.get('error', {}).get('message')}")
     except Exception as e: await cb.message.edit(f"❌ Error: {e}")
 
-# --- 🔗 URL DOWNLOADER LOGIC ---
 async def get_real_filename(url):
     try:
         async with aiohttp.ClientSession() as session:
@@ -398,11 +375,8 @@ async def get_real_filename(url):
 @app.on_message(filters.private & filters.regex(r"^https?://") & filters.user(OWNER_ID))
 async def url_handler(c, m):
     url = m.text.strip()
-    try: 
-        await m.delete()
-    except: 
-        pass
-    
+    try: await m.delete()
+    except: pass
     status = await m.reply("🔗 **Fetching URL...**")
     orig_name = await get_real_filename(url)
     download_queue[m.from_user.id] = {"url": url, "orig_name": orig_name, "prompt_id": status.id}
@@ -468,44 +442,48 @@ async def save_img_callback(c, cb):
         await asyncio.sleep(3); await msg.delete()
     except Exception as e: await cb.message.edit(f"❌ Error: {e}")
 
-print("Part 3 Loaded Successfully...")
-        # ==========================================
-# 🌟 FINAL PART 4: THE FIX (NO SPAM) 🌟
 # ==========================================
-user_msg_data = {}
-user_memory = {}
-import datetime
+# 🌟 PART 4: AI, SEARCH, CLONES & POSTING 🌟
+# ==========================================
 
 async def get_gemini_reply(client, chat_id, user_id, prompt_text):
     await client.send_chat_action(chat_id, enums.ChatAction.TYPING)
     if user_id not in user_memory: user_memory[user_id] = []
+    
+    # 🚨 THE FIX: Limit memory to prevent token explosion
     user_memory[user_id].append({"role": "user", "parts": [{"text": prompt_text}]})
-    if len(user_memory[user_id]) > 10: user_memory[user_id] = user_memory[user_id][-10:]
+    if len(user_memory[user_id]) > 6: user_memory[user_id] = user_memory[user_id][-6:]
+    
     try:
-        # Maine API ko 1.5-flash par fix kar diya hai taaki error na aaye
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
         data = {"systemInstruction": {"parts": [{"text": NEHA_PROMPT}]}, "contents": user_memory[user_id]}
+        
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers={'Content-Type': 'application/json'}, json=data) as resp:
+                if resp.status != 200:
+                    user_memory[user_id] = [] # 🚨 CRASH-PROOF: Empty memory if API errors
+                    return "Yaar mera dimaag kharab ho raha hai (API Error), thodi der baad aana! 😫"
                 result = await resp.json()
+                
         reply_text = result['candidates'][0]['content']['parts'][0]['text']
         user_memory[user_id].append({"role": "model", "parts": [{"text": reply_text}]})
         return reply_text
     except Exception as e:
-        print(f"API Error: {e}")
-        return "Ruko yaar, check karke batati hoon... 😉"
+        print(f"Code Error: {e}")
+        user_memory[user_id] = [] # 🚨 CRASH-PROOF: Empty memory if Network errors
+        return "Bhai server down chal raha hai, main baad mein batati hoon... 😔"
 
 async def daily_posting_task():
     await asyncio.sleep(60) 
     while True:
         try:
             if clone2_app and clone2_app.is_initialized:
-                now = datetime.datetime.now()
+                now = datetime.now()
                 if now.weekday() == 6:
-                    msg = "Happy Sunday Guys! 🎉 Aaj chhutti hai, dosto ke sath movie plan karo aur group share karo! 🍿"
+                    msg = f"Happy Sunday Guys! 🎉 Aaj chhutti hai, dosto ke sath movie plan karo aur group share karo! 👇\n{FINAL_WEBSITE_URL}"
                 else:
-                    msg = "Hello dosto! 🌟 Aaj ki movies upload ho gayi hain. Thoda support karo aur group share karo! 😉"
-                await clone2_app.send_message(GROUP_ID, msg)
+                    msg = f"Hello dosto! 🌟 Aaj ki movies upload ho gayi hain. Thoda support karo aur group share karo! 😉\n{FINAL_WEBSITE_URL}"
+                await clone2_app.send_message(MAIN_GROUP_ID, msg)
             await asyncio.sleep(86400) 
         except: await asyncio.sleep(3600)
 
@@ -518,15 +496,15 @@ async def start_clone_bots():
             @clone1_app.on_message(filters.command("start") & filters.private)
             async def c1_start(c, m):
                 payload = m.command[1] if len(m.command) > 1 else None
-                if not payload: return await m.reply("Hi! Movie link ke liye group use karein.")
+                if not payload: 
+                    return await m.reply(f"👋 Hello! Main Delivery Bot hoon.\nGroup link: {FINAL_WEBSITE_URL}")
                 
-                # File sending logic
                 mid = extract_msg_id(decode_payload(payload))
                 if mid:
                     msg = await app.get_messages(DB_CHANNEL_ID, mid)
                     await c.copy_message(m.chat.id, DB_CHANNEL_ID, mid, caption=msg.caption)
             await clone1_app.start()
-        except Exception as e: print(f"Clone 1 Error: {e}")
+        except: pass
 
     d2 = await settings_col.find_one({"_id": "clone2_token"})
     if d2:
@@ -537,6 +515,13 @@ async def start_clone_bots():
             async def approve_join(c, r):
                 try: await c.approve_chat_join_request(r.chat.id, r.from_user.id)
                 except: pass
+
+            @clone2_app.on_message(filters.command("start") & filters.private)
+            async def neha_start_pm(c, m):
+                uid = m.from_user.id
+                user_memory[uid] = [] # 🚨 Dimaag reset command!
+                if uid in user_msg_data: user_msg_data[uid]['count'] = 0
+                await m.reply("Hi! Main Neha hoon. Group mein aana hai ya koi movie chahiye? 😉")
             
             @clone2_app.on_message(filters.group & filters.text)
             async def neha_grp_handler(c, m):
@@ -572,7 +557,7 @@ async def start_clone_bots():
             @clone2_app.on_message(filters.private & filters.text & ~filters.command("start"))
             async def neha_pm(c, m):
                 uid = m.from_user.id
-                today = str(datetime.datetime.now().date())
+                today = str(datetime.now().date())
                 if uid not in user_msg_data or user_msg_data[uid]['date'] != today:
                     user_msg_data[uid] = {'date': today, 'count': 0}
                 
@@ -587,19 +572,26 @@ async def start_clone_bots():
                 if r: await m.reply(r)
 
             await clone2_app.start()
-        except Exception as e: print(f"Clone 2 Error: {e}")
+        except: pass
+
+
+# ==========================================
+# 🌟 MAIN EXECUTION 🌟
+# ==========================================
 
 async def start_services():
     await app.start()
+    print("✅ Main Bot Started")
+    
     await start_clone_bots()
     asyncio.create_task(daily_posting_task())
+    
     app_web = web.Application()
-    app_web.add_routes([web.get("/", lambda q: web.Response(text="Running!"))])
+    app_web.add_routes([web.get("/", lambda q: web.Response(text="Filmy Flip Hub Bots Running!"))])
     runner = web.AppRunner(app_web); await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", PORT).start()
-    await asyncio.Event().wait()
+    
+    await pyrogram.idle()
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
-    
-            

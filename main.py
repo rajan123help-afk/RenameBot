@@ -457,8 +457,8 @@ async def get_gemini_reply(client, chat_id, user_id, prompt_text):
     if len(user_memory[user_id]) > 6: user_memory[user_id] = user_memory[user_id][-6:]
     
     try:
-        # 🔥 Gemini 2.5 Flash Model 🔥
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        # 🔥 Gemini 2.0 Flash Model (Google ka Naya Free Model) 🔥
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
         data = {"systemInstruction": {"parts": [{"text": NEHA_PROMPT}]}, "contents": user_memory[user_id]}
         
         async with aiohttp.ClientSession() as session:
@@ -466,7 +466,7 @@ async def get_gemini_reply(client, chat_id, user_id, prompt_text):
                 if resp.status != 200:
                     # 🚨 Boss ko DM mein exact error bhejne ka logic
                     error_msg = await resp.text() 
-                    try: await app.send_message(int(OWNER_ID), f"🚨 **GOOGLE API ERROR (1.5 Flash):**\n\n`{error_msg}`")
+                    try: await app.send_message(int(OWNER_ID), f"🚨 **GOOGLE API ERROR (2.0 Flash):**\n\n`{error_msg}`")
                     except Exception as e: print(f"Owner PM Error: {e}")
                     
                     user_memory[user_id] = [] # Memory saaf

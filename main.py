@@ -441,16 +441,18 @@ async def save_img_callback(c, cb):
         msg = await c.send_message(uid, f"✅ **{'Thumbnail' if mode=='thumbnails' else 'Watermark'} Saved!**")
         await asyncio.sleep(3); await msg.delete()
     except Exception as e: await cb.message.edit(f"❌ Error: {e}")
-
 # ==========================================
 # 🌟 PART 4: AI, SEARCH, CLONES & POSTING 🌟
 # ==========================================
+user_msg_data = {}
+user_memory = {}
+import datetime
 
 async def get_gemini_reply(client, chat_id, user_id, prompt_text):
     await client.send_chat_action(chat_id, enums.ChatAction.TYPING)
     if user_id not in user_memory: user_memory[user_id] = []
     
-    # 🚨 THE FIX: Limit memory to prevent token explosion
+    # 🚨 Memory Limit
     user_memory[user_id].append({"role": "user", "parts": [{"text": prompt_text}]})
     if len(user_memory[user_id]) > 6: user_memory[user_id] = user_memory[user_id][-6:]
     
@@ -461,8 +463,14 @@ async def get_gemini_reply(client, chat_id, user_id, prompt_text):
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers={'Content-Type': 'application/json'}, json=data) as resp:
                 if resp.status != 200:
-                    user_memory[user_id] = [] # 🚨 CRASH-PROOF: Empty memory if API errors
+                    # 🚨 Boss ko DM mein exact error bhejne ka logic
+                    error_msg = await resp.text() 
+                    try: await app.send_message(int(OWNER_ID), f"🚨 **GOOGLE API ERROR:**\n\n`{error_msg}`")
+                    except Exception as e: print(f"Owner PM Error: {e}")
+                    
+                    user_memory[user_id] = [] # Memory saaf
                     return "Yaar mera dimaag kharab ho raha hai (API Error), thodi der baad aana! 😫"
+                
                 result = await resp.json()
                 
         reply_text = result['candidates'][0]['content']['parts'][0]['text']
@@ -470,7 +478,7 @@ async def get_gemini_reply(client, chat_id, user_id, prompt_text):
         return reply_text
     except Exception as e:
         print(f"Code Error: {e}")
-        user_memory[user_id] = [] # 🚨 CRASH-PROOF: Empty memory if Network errors
+        user_memory[user_id] = [] 
         return "Bhai server down chal raha hai, main baad mein batati hoon... 😔"
 
 async def daily_posting_task():
@@ -478,7 +486,7 @@ async def daily_posting_task():
     while True:
         try:
             if clone2_app and clone2_app.is_initialized:
-                now = datetime.now()
+                now = datetime.datetime.now()
                 if now.weekday() == 6:
                     msg = f"Happy Sunday Guys! 🎉 Aaj chhutti hai, dosto ke sath movie plan karo aur group share karo! 👇\n{FINAL_WEBSITE_URL}"
                 else:
@@ -489,6 +497,8 @@ async def daily_posting_task():
 
 async def start_clone_bots():
     global clone1_app, clone2_app
+    
+    # --- CLONE 1: DELIVERY ---
     d1 = await settings_col.find_one({"_id": "clone1_token"})
     if d1:
         try:
@@ -501,11 +511,14 @@ async def start_clone_bots():
                 
                 mid = extract_msg_id(decode_payload(payload))
                 if mid:
-                    msg = await app.get_messages(DB_CHANNEL_ID, mid)
-                    await c.copy_message(m.chat.id, DB_CHANNEL_ID, mid, caption=msg.caption)
+                    try:
+                        msg = await app.get_messages(DB_CHANNEL_ID, mid)
+                        await c.copy_message(m.chat.id, DB_CHANNEL_ID, mid, caption=msg.caption)
+                    except: await m.reply("❌ File Not Found!")
             await clone1_app.start()
         except: pass
 
+    # --- CLONE 2: NEHA AI ---
     d2 = await settings_col.find_one({"_id": "clone2_token"})
     if d2:
         try:
@@ -519,7 +532,7 @@ async def start_clone_bots():
             @clone2_app.on_message(filters.command("start") & filters.private)
             async def neha_start_pm(c, m):
                 uid = m.from_user.id
-                user_memory[uid] = [] # 🚨 Dimaag reset command!
+                user_memory[uid] = [] # Memory reset command!
                 if uid in user_msg_data: user_msg_data[uid]['count'] = 0
                 await m.reply("Hi! Main Neha hoon. Group mein aana hai ya koi movie chahiye? 😉")
             
@@ -551,13 +564,13 @@ async def start_clone_bots():
                     if found_msg:
                         await m.reply(f"✅ **Mil gaya! Ye dekho:**\n👉 {found_msg.link}", reply_to_message_id=found_msg.id)
                     else:
-                        try: await c.send_message(int(OWNER_ID), f"🚨 **BOSS ALERT!** `{query}` group mein nahi hai. Upload kar do!")
+                        try: await app.send_message(int(OWNER_ID), f"🚨 **BOSS ALERT!** `{query}` group mein nahi hai. Upload kar do!")
                         except: pass
 
             @clone2_app.on_message(filters.private & filters.text & ~filters.command("start"))
             async def neha_pm(c, m):
                 uid = m.from_user.id
-                today = str(datetime.now().date())
+                today = str(datetime.datetime.now().date())
                 if uid not in user_msg_data or user_msg_data[uid]['date'] != today:
                     user_msg_data[uid] = {'date': today, 'count': 0}
                 
@@ -595,3 +608,4 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
+    

@@ -457,16 +457,16 @@ async def get_gemini_reply(client, chat_id, user_id, prompt_text):
     if len(user_memory[user_id]) > 6: user_memory[user_id] = user_memory[user_id][-6:]
     
     try:
-        # 🔥 MASTER ALIAS LAGA DIYA: 'gemini-pro' (Ye kabhi 404 nahi dega aur Free rahega) 🔥
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
+        # 🔥 Yahan FLASH-LITE-LATEST laga diya hai (Free Quota ke liye) 🔥
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key={GEMINI_API_KEY}"
         data = {"systemInstruction": {"parts": [{"text": NEHA_PROMPT}]}, "contents": user_memory[user_id]}
         
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers={'Content-Type': 'application/json'}, json=data) as resp:
                 if resp.status != 200:
-                    # Boss ko DM mein exact error bhejne ka logic
+                    # 🚨 Boss ko DM mein exact error bhejne ka logic
                     error_msg = await resp.text() 
-                    try: await app.send_message(int(OWNER_ID), f"🚨 **GOOGLE API ERROR (Gemini Pro):**\n\n`{error_msg}`")
+                    try: await app.send_message(int(OWNER_ID), f"🚨 **GOOGLE API ERROR (Flash Lite):**\n\n`{error_msg}`")
                     except Exception as e: print(f"Owner PM Error: {e}")
                     
                     user_memory[user_id] = [] # Memory saaf
@@ -609,3 +609,4 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
+                 

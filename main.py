@@ -347,17 +347,15 @@ async def media_handler(c, m):
         fname = getattr(media, "file_name", "File")
         fname = await apply_rename_rules(fname)
         
-        # 🔥 AUTO-BRANDING PROTECTOR (File Uploads) 🔥
+        # 🔥 SMART CLEAN BRANDING (File Uploads) 🔥
         name_without_ext, ext = os.path.splitext(fname)
-        if not name_without_ext.strip().startswith("["):
-            # Ye line shuru se purana naam hatayegi bina error diye
-            name_without_ext = re.sub(r'^filmy\s*flip\s*hub\s*', '', name_without_ext.strip(), flags=re.IGNORECASE)
-            name_without_ext = f"[Filmy Flip Hub] {name_without_ext}"
-            
-        if not re.search(r'filmy\s*flip\s*hub$', name_without_ext.strip(), flags=re.IGNORECASE):
-            name_without_ext = f"{name_without_ext.strip()} Filmy Flip Hub"
-            
-        fname = f"{name_without_ext}{ext}"
+        # Purane saare "Filmy Flip Hub" ko kachre ki tarah saaf karo
+        clean_name = re.sub(r'(?i)[\[\(\{]?\s*filmy\s*flip\s*hub\s*[\]\)\}]?', '', name_without_ext)
+        clean_name = re.sub(r'\s+', ' ', clean_name).strip()
+        if clean_name.startswith("-") or clean_name.startswith("_"): clean_name = clean_name[1:].strip()
+        
+        # Sirf ek baar shuru mein izzat se lagao
+        fname = f"[Filmy Flip Hub] {clean_name}{ext}"
         # 🔥 ------------------------------------- 🔥
         
         new_cap = get_fancy_caption(fname, humanbytes(getattr(media, "file_size", 0)), getattr(media, "duration", 0))
@@ -426,13 +424,11 @@ async def dl_process(c, cb):
     
     clean_custom = (await apply_rename_rules(data['new_name'])).replace(".", " ").replace("_", " ")
     
-    # 🔥 AUTO-BRANDING PROTECTOR (URL Downloads) 🔥
-    if not clean_custom.strip().startswith("["):
-        clean_custom = re.sub(r'^filmy\s*flip\s*hub\s*', '', clean_custom.strip(), flags=re.IGNORECASE)
-        clean_custom = f"[Filmy Flip Hub] {clean_custom}"
-        
-    if not re.search(r'filmy\s*flip\s*hub$', clean_custom.strip(), flags=re.IGNORECASE):
-        clean_custom = f"{clean_custom.strip()} Filmy Flip Hub"
+    # 🔥 SMART CLEAN BRANDING (URL Downloads) 🔥
+    clean_name = re.sub(r'(?i)[\[\(\{]?\s*filmy\s*flip\s*hub\s*[\]\)\}]?', '', clean_custom)
+    clean_name = re.sub(r'\s+', ' ', clean_name).strip()
+    if clean_name.startswith("-") or clean_name.startswith("_"): clean_name = clean_name[1:].strip()
+    clean_custom = f"[Filmy Flip Hub] {clean_name}"
     # 🔥 -------------------------------------- 🔥
 
     ext = os.path.splitext(data['orig_name'])[1]

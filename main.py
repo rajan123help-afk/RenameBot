@@ -479,6 +479,8 @@ async def save_img_callback(c, cb):
 import datetime
 import asyncio
 import aiohttp
+import os
+import re
 from pyrogram import enums, filters, Client
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiohttp import web
@@ -504,7 +506,7 @@ async def get_gemini_reply(client, chat_id, user_id, prompt_text):
         return reply_text
     except Exception: return "Bhai server down chal raha hai... 😔"
 
-# 🕒 AUTO-POST SCHEDULER (Indian Time)
+# 🕒 AUTO-POST SCHEDULER
 async def daily_posting_task():
     days_hindi = {"Monday": "Somvaar", "Tuesday": "Mangalvaar", "Wednesday": "Budhvaar", "Thursday": "Veervaar", "Friday": "Shukravaar", "Saturday": "Shanivaar", "Sunday": "Ravivaar"}
     last_morning_date = None
@@ -528,7 +530,7 @@ async def daily_posting_task():
 async def start_clone_bots():
     global clone1_app, clone2_app
     
-    # --- CLONE 1: DELIVERY BOT (WITH SMART VIP CAPTION) ---
+    # --- CLONE 1: DELIVERY BOT ---
     d1 = await settings_col.find_one({"_id": "clone1_token"})
     if d1:
         try:
@@ -543,19 +545,28 @@ async def start_clone_bots():
                 if mid:
                     try:
                         msg = await app.get_messages(DB_CHANNEL_ID, mid)
+                        media = msg.document or msg.video or msg.audio
                         
-                        # 🔥 SMART CAPTION READER 🔥
-                        raw_caption = msg.caption if msg.caption else "🎬 Your Movie File!"
-                        
-                        if "<blockquote>" in raw_caption:
-                            final_cap = f"{raw_caption}\n\n<blockquote>⏳ Note: Yeh file 5 Minute mein delete ho jayegi! ⚠️</blockquote>"
+                        if media:
+                            # 1. File ki details nikalo
+                            fname = getattr(media, "file_name", "Movie File")
+                            fsize = humanbytes(getattr(media, "file_size", 0))
+                            dur = getattr(media, "duration", 0)
+                            
+                            # 2. 🔥 Kachra Saaf Karo (Purani DB files ke liye bhi) 🔥
+                            name_without_ext, ext = os.path.splitext(fname)
+                            clean_name = re.sub(r'(?i)[\[\(\{]?\s*filmy\s*flip\s*hub\s*[\]\)\}]?', '', name_without_ext)
+                            clean_name = re.sub(r'\s+', ' ', clean_name).strip()
+                            if clean_name.startswith("-") or clean_name.startswith("_"): clean_name = clean_name[1:].strip()
+                            
+                            # 3. Ekdum fresh aur saaf naam lagao
+                            fname = f"[Filmy Flip Hub] {clean_name}{ext}"
+                            
+                            # 4. Fresh VIP Caption banao jisme Website Link 100% kaam karega
+                            fresh_cap = get_fancy_caption(fname, fsize, dur)
+                            final_cap = f"{fresh_cap}\n\n<blockquote>⏳ Note: Yeh file 5 Minute mein delete ho jayegi! ⚠️</blockquote>"
                         else:
-                            vip_blocks = []
-                            for chunk in raw_caption.split('\n\n'):
-                                if chunk.strip(): 
-                                    vip_blocks.append(f"<blockquote>{chunk.strip()}</blockquote>")
-                            vip_caption = "\n\n".join(vip_blocks)
-                            final_cap = f"{vip_caption}\n\n<blockquote>⏳ Note: Yeh file 5 Minute mein delete ho jayegi! ⚠️</blockquote>"
+                            final_cap = "<blockquote>🎬 Your VIP Movie File!</blockquote>\n\n<blockquote>⏳ Note: Yeh file 5 Minute mein delete ho jayegi! ⚠️</blockquote>"
 
                         sent_msg = await c.copy_message(
                             m.chat.id, 
@@ -584,7 +595,6 @@ async def start_clone_bots():
         try:
             clone2_app = Client("Clone2", api_id=API_ID, api_hash=API_HASH, bot_token=d2["token"])
             
-            # 🖼️ AUTO-COMMENT ON PHOTO POSTS
             @clone2_app.on_message(filters.group & filters.photo)
             async def neha_photo_comment(c, m):
                 try:
@@ -670,4 +680,4 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
-
+    

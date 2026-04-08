@@ -345,14 +345,20 @@ async def media_handler(c, m):
     try:
         media = m.document or m.video or m.audio
         
-        # 🔥 Sirf original naam lega 🔥
-        fname = getattr(media, "file_name", "File")
-        fname = await apply_rename_rules(fname)
+        # 🔥 AAPKA RULE: Exact Original Caption use karo!
+        raw_text = m.caption if m.caption else getattr(media, "file_name", "Movie_File")
         
-        # Seedha Part 1 ke function me bhejega jo sirf .mkv aur dot hatata hai
-        new_cap = get_fancy_caption(fname, humanbytes(getattr(media, "file_size", 0)), getattr(media, "duration", 0))
+        clean_text = await apply_rename_rules(raw_text)
+        import re
+        # Sirf mkv, mp4 hatao
+        clean_text = re.sub(r'\.(mkv|mp4|avi|webm|zip|rar)', '', clean_text, flags=re.IGNORECASE)
+        # Dot (.) ko hata kar space dalo
+        clean_text = clean_text.replace(".", " ")
         
-        db_msg = await c.send_video(DB_CHANNEL_ID, m.video.file_id, caption=new_cap, file_name=fname) if m.video else await c.send_document(DB_CHANNEL_ID, m.document.file_id, caption=new_cap, file_name=fname)
+        actual_file_name = getattr(media, "file_name", "file.mkv")
+        
+        # Seedha Original Caption hi DB me jayega, kuch extra add nahi hoga!
+        db_msg = await c.send_video(DB_CHANNEL_ID, m.video.file_id, caption=clean_text, file_name=actual_file_name) if m.video else await c.send_document(DB_CHANNEL_ID, m.document.file_id, caption=clean_text, file_name=actual_file_name)
         try: await m.delete()
         except: pass
         
@@ -362,7 +368,7 @@ async def media_handler(c, m):
             if clone1_app and clone1_app.is_connected: bot_uname = (await clone1_app.get_me()).username
         except: pass
         
-        await status.edit(f"✅ **Stored Successfully!**\n\n📂 **File:** `{fname}`\n🔗 <b>Blog:</b> {BLOGGER_URL}?data={quote(blogger_code)}\n🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}", disable_web_page_preview=True)
+        await status.edit(f"✅ **Stored Successfully!**\n\n📂 **Original Name Saved!**\n🔗 <b>Blog:</b> {BLOGGER_URL}?data={quote(blogger_code)}\n🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}", disable_web_page_preview=True)
     except Exception as e: await status.edit(f"❌ Error: {e}")
 
 @app.on_callback_query(filters.regex("^upload_img"))
@@ -414,10 +420,15 @@ async def dl_process(c, cb):
     if not data: return await cb.answer("❌ Task Expired!")
     await cb.message.edit("📥 **Downloading...**")
     
-    # 🔥 Sirf original naam lega 🔥
-    clean_custom = (await apply_rename_rules(data['new_name'])).replace(".", " ").replace("_", " ")
+    # URL upload mein bhi sirf clean string DB me jayegi
+    raw_text = data['new_name']
+    clean_text = await apply_rename_rules(raw_text)
+    import re
+    clean_text = re.sub(r'\.(mkv|mp4|avi|webm|zip|rar)', '', clean_text, flags=re.IGNORECASE)
+    clean_text = clean_text.replace(".", " ")
+    
     ext = os.path.splitext(data['orig_name'])[1]
-    final_filename = f"{clean_custom}{ext if ext and len(ext)<=5 else '.mkv'}"
+    final_filename = f"{clean_text.replace(' ', '_')}{ext if ext and len(ext)<=5 else '.mkv'}"
     internal_path = f"downloads/{uid}_{final_filename}"
     
     try:
@@ -432,16 +443,16 @@ async def dl_process(c, cb):
                         if time.time() - start > 5: await progress(dl, total, cb.message, start, f"📥 DL: {final_filename}")
         
         await cb.message.edit("⚙️ **Processing...**")
-        duration, fsize = get_duration(internal_path), humanbytes(os.path.getsize(internal_path))
-        cap = get_fancy_caption(final_filename, fsize, duration)
+        duration = get_duration(internal_path)
         thumb_path = apply_watermark(f"thumbnails/{uid}.jpg", f"watermarks/{uid}.png") if os.path.exists(f"thumbnails/{uid}.jpg") and os.path.exists(f"watermarks/{uid}.png") else (f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None)
         
         start = time.time()
-        db_msg = await c.send_video(DB_CHANNEL_ID, internal_path, caption=cap, duration=duration, thumb=thumb_path, file_name=final_filename, progress=progress, progress_args=(cb.message, start, f"📤 UP: {final_filename}")) if "video" in cb.data else await c.send_document(DB_CHANNEL_ID, internal_path, caption=cap, thumb=thumb_path, file_name=final_filename, progress=progress, progress_args=(cb.message, start, f"📤 UP: {final_filename}"))
+        # Clean Original caption is stored!
+        db_msg = await c.send_video(DB_CHANNEL_ID, internal_path, caption=clean_text, duration=duration, thumb=thumb_path, file_name=final_filename, progress=progress, progress_args=(cb.message, start, f"📤 UP: {final_filename}")) if "video" in cb.data else await c.send_document(DB_CHANNEL_ID, internal_path, caption=clean_text, thumb=thumb_path, file_name=final_filename, progress=progress, progress_args=(cb.message, start, f"📤 UP: {final_filename}"))
         
         tg_code, blogger_code = get_link_codes(f"link_{OWNER_ID}_{db_msg.id}")
         bot_uname = (await clone1_app.get_me()).username if clone1_app and clone1_app.is_connected else "CloneBot"
-        await cb.message.edit(f"✅ **Stored!**\n📂 **File:** `{final_filename}`\n🔗 <b>Blog:</b> {BLOGGER_URL}?data={quote(blogger_code)}\n🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}", disable_web_page_preview=True)
+        await cb.message.edit(f"✅ **Stored!**\n📂 **Original Name Saved!**\n🔗 <b>Blog:</b> {BLOGGER_URL}?data={quote(blogger_code)}\n🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}", disable_web_page_preview=True)
         os.remove(internal_path); del download_queue[uid]
     except Exception as e: await cb.message.edit(f"❌ Error: {str(e)}")
 
@@ -532,19 +543,43 @@ async def start_clone_bots():
                         msg = await app.get_messages(DB_CHANNEL_ID, mid)
                         media = msg.document or msg.video or msg.audio
                         
+                        raw_caption = msg.caption if msg.caption else getattr(media, "file_name", "Movie File")
+                        
+                        vip_blocks = []
+                        for line in raw_caption.split('\n'):
+                            line_lower = line.lower()
+                            # Purane original footers hata rahe hain taaki double-double na ho jaye!
+                            if line.strip() and "powered by" not in line_lower and "file size" not in line_lower and "duration" not in line_lower and "note:" not in line_lower:
+                                vip_blocks.append(f"<blockquote>{line.strip()}</blockquote>")
+                        
+                        final_cap = "\n\n".join(vip_blocks)
+                        
                         if media:
-                            # Original naam uthayega (Bina kisi ched-chad ke)
-                            fname = getattr(media, "file_name", "Movie File")
-                            fsize_str = humanbytes(getattr(media, "file_size", 0))
+                            # Direct values nikal kar format kar rahe hain
+                            fsize = getattr(media, "file_size", 0)
+                            fsize_str = "0 B"
+                            if fsize > 0:
+                                for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+                                    if fsize < 1024:
+                                        fsize_str = f"{fsize:.2f} {unit}"
+                                        break
+                                    fsize /= 1024
+                            
                             dur = getattr(media, "duration", 0)
+                            dur_str = ""
+                            if dur > 0:
+                                m_dur, s_dur = divmod(int(dur), 60)
+                                h_dur, m_dur = divmod(m_dur, 60)
+                                dur_str = f"{h_dur}h {m_dur}m {s_dur}s" if h_dur else f"{m_dur}m {s_dur}s"
                             
-                            # Seedha Part 1 ke function me bhejo (Ye automatically mkv, dot hatayega aur link lagayega)
-                            fresh_cap = get_fancy_caption(fname, fsize_str, dur)
-                            
-                            # Aakhiri mein bas timer lagana hai
-                            final_cap = f"{fresh_cap}\n\n<blockquote>⏳ Note: Yeh file 5 Minute mein delete ho jayegi! ⚠️</blockquote>"
-                        else:
-                            final_cap = "<blockquote>🎬 Your VIP Movie File!</blockquote>\n\n<blockquote>⏳ Note: Yeh file 5 Minute mein delete ho jayegi! ⚠️</blockquote>"
+                            if fsize_str and fsize_str != "0 B":
+                                final_cap += f"\n\n<blockquote>File Size ♻️ ➥ {fsize_str}</blockquote>"
+                            if dur_str:
+                                final_cap += f"\n\n<blockquote>Duration ⏰ ➥ {dur_str}</blockquote>"
+                        
+                        # Ye raha aapki website ka chamkta hua Link!
+                        final_cap += f"\n\n<blockquote>Powered By ➥ 🦋 <a href='{FINAL_WEBSITE_URL}'>Filmy Flip Hub</a> 🦋 ❞</blockquote>"
+                        final_cap += f"\n\n<blockquote>⏳ Note: Yeh file 5 Minute mein delete ho jayegi! ⚠️</blockquote>"
 
                         sent_msg = await c.copy_message(
                             m.chat.id, 

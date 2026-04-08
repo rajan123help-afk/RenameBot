@@ -344,20 +344,12 @@ async def media_handler(c, m):
     status = await m.reply("⚙️ **Processing...**")
     try:
         media = m.document or m.video or m.audio
+        
+        # 🔥 Sirf original naam lega 🔥
         fname = getattr(media, "file_name", "File")
         fname = await apply_rename_rules(fname)
         
-        # 🔥 SMART CLEAN BRANDING (File Uploads) 🔥
-        name_without_ext, ext = os.path.splitext(fname)
-        # Purane saare "Filmy Flip Hub" ko kachre ki tarah saaf karo
-        clean_name = re.sub(r'(?i)[\[\(\{]?\s*filmy\s*flip\s*hub\s*[\]\)\}]?', '', name_without_ext)
-        clean_name = re.sub(r'\s+', ' ', clean_name).strip()
-        if clean_name.startswith("-") or clean_name.startswith("_"): clean_name = clean_name[1:].strip()
-        
-        # Sirf ek baar shuru mein izzat se lagao
-        fname = f"[Filmy Flip Hub] {clean_name}{ext}"
-        # 🔥 ------------------------------------- 🔥
-        
+        # Seedha Part 1 ke function me bhejega jo sirf .mkv aur dot hatata hai
         new_cap = get_fancy_caption(fname, humanbytes(getattr(media, "file_size", 0)), getattr(media, "duration", 0))
         
         db_msg = await c.send_video(DB_CHANNEL_ID, m.video.file_id, caption=new_cap, file_name=fname) if m.video else await c.send_document(DB_CHANNEL_ID, m.document.file_id, caption=new_cap, file_name=fname)
@@ -422,15 +414,8 @@ async def dl_process(c, cb):
     if not data: return await cb.answer("❌ Task Expired!")
     await cb.message.edit("📥 **Downloading...**")
     
+    # 🔥 Sirf original naam lega 🔥
     clean_custom = (await apply_rename_rules(data['new_name'])).replace(".", " ").replace("_", " ")
-    
-    # 🔥 SMART CLEAN BRANDING (URL Downloads) 🔥
-    clean_name = re.sub(r'(?i)[\[\(\{]?\s*filmy\s*flip\s*hub\s*[\]\)\}]?', '', clean_custom)
-    clean_name = re.sub(r'\s+', ' ', clean_name).strip()
-    if clean_name.startswith("-") or clean_name.startswith("_"): clean_name = clean_name[1:].strip()
-    clean_custom = f"[Filmy Flip Hub] {clean_name}"
-    # 🔥 -------------------------------------- 🔥
-
     ext = os.path.splitext(data['orig_name'])[1]
     final_filename = f"{clean_custom}{ext if ext and len(ext)<=5 else '.mkv'}"
     internal_path = f"downloads/{uid}_{final_filename}"
@@ -472,7 +457,7 @@ async def save_img_callback(c, cb):
         msg = await c.send_message(uid, f"✅ **{'Thumbnail' if mode=='thumbnails' else 'Watermark'} Saved!**")
         await asyncio.sleep(3); await msg.delete()
     except Exception as e: await cb.message.edit(f"❌ Error: {e}")
-
+                                   
 # ==========================================
 # 🌟 PART 4: AI, SEARCH, CLONES & POSTING 🌟
 # ==========================================
@@ -548,22 +533,15 @@ async def start_clone_bots():
                         media = msg.document or msg.video or msg.audio
                         
                         if media:
-                            # 1. File ki details nikalo
+                            # Original naam uthayega (Bina kisi ched-chad ke)
                             fname = getattr(media, "file_name", "Movie File")
-                            fsize = humanbytes(getattr(media, "file_size", 0))
+                            fsize_str = humanbytes(getattr(media, "file_size", 0))
                             dur = getattr(media, "duration", 0)
                             
-                            # 2. 🔥 Kachra Saaf Karo (Purani DB files ke liye bhi) 🔥
-                            name_without_ext, ext = os.path.splitext(fname)
-                            clean_name = re.sub(r'(?i)[\[\(\{]?\s*filmy\s*flip\s*hub\s*[\]\)\}]?', '', name_without_ext)
-                            clean_name = re.sub(r'\s+', ' ', clean_name).strip()
-                            if clean_name.startswith("-") or clean_name.startswith("_"): clean_name = clean_name[1:].strip()
+                            # Seedha Part 1 ke function me bhejo (Ye automatically mkv, dot hatayega aur link lagayega)
+                            fresh_cap = get_fancy_caption(fname, fsize_str, dur)
                             
-                            # 3. Ekdum fresh aur saaf naam lagao
-                            fname = f"[Filmy Flip Hub] {clean_name}{ext}"
-                            
-                            # 4. Fresh VIP Caption banao jisme Website Link 100% kaam karega
-                            fresh_cap = get_fancy_caption(fname, fsize, dur)
+                            # Aakhiri mein bas timer lagana hai
                             final_cap = f"{fresh_cap}\n\n<blockquote>⏳ Note: Yeh file 5 Minute mein delete ho jayegi! ⚠️</blockquote>"
                         else:
                             final_cap = "<blockquote>🎬 Your VIP Movie File!</blockquote>\n\n<blockquote>⏳ Note: Yeh file 5 Minute mein delete ho jayegi! ⚠️</blockquote>"
@@ -680,4 +658,4 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
-    
+

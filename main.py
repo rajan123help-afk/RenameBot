@@ -121,17 +121,29 @@ def get_media_info(name):
     return None, None
 
 def get_fancy_caption(filename, filesize, duration):
-    clean_name = filename.replace(".", " ").replace("_", " ")
-    safe_name = html.escape(clean_name)
-    caption = f"<b>{safe_name}</b>\n\n"
+    # 1. Sabse pehle .mkv, .mp4, .zip aadi ko hamesha ke liye GAYAB karna
+    clean_name = re.sub(r'\.(mkv|mp4|avi|webm|zip|rar)$', '', filename, flags=re.IGNORECASE)
+    
+    # 2. Baki dots aur underscore ko space banana (Aapke Brackets ekdum SAFE rahenge!)
+    clean_name = clean_name.replace(".", " ").replace("_", " ")
+    safe_name = html.escape(clean_name.strip())
+    
+    # 3. VIP BLOCKQUOTE DESIGN START 🔥
+    caption = f"<blockquote>{safe_name}</blockquote>\n\n"
+    
     s, e = get_media_info(filename)
-    if s: caption += f"💿 <b>Season ➥ {s.zfill(2)}</b>\n"
-    if e: caption += f"📺 <b>Episode ➥ {e.zfill(2)}</b>\n"
-    if s or e: caption += "\n"
-    caption += f"<blockquote><code>File Size ♻️ ➥ {filesize}</code></blockquote>\n\n"
+    if s and e: 
+        caption += f"<blockquote>💿 Season ➥ {s.zfill(2)} | 📺 Episode ➥ {e.zfill(2)}</blockquote>\n\n"
+    elif s:
+         caption += f"<blockquote>💿 Season ➥ {s.zfill(2)}</blockquote>\n\n"
+         
+    caption += f"<blockquote>File Size ♻️ ➥ {filesize}</blockquote>\n\n"
+    
     dur_str = get_duration_str(duration)
-    if dur_str: caption += f"<blockquote><code>Duration ⏰ ➥ {dur_str}</code></blockquote>\n\n"
-    caption += f"<blockquote><b>Powered By ➥ {CREDIT_NAME} ❞</b></blockquote>"
+    if dur_str: 
+        caption += f"<blockquote>Duration ⏰ ➥ {dur_str}</blockquote>\n\n"
+        
+    caption += f"<blockquote>Powered By ➥ {CREDIT_NAME} ❞</blockquote>"
     return caption
 
 def apply_watermark(base_path, wm_path):
@@ -170,8 +182,7 @@ async def progress(current, total, message, start_time, task_name):
         text = f"<b>{task_name}</b>\n\n<b>[{bar}] {round(percentage, 1)}%</b>\n<b>📦 Done:</b> {humanbytes(current)} / {humanbytes(total)}\n<b>⚡ Speed:</b> {humanbytes(speed)}/s\n<b>⏳ ETA:</b> {eta}"
         try: await message.edit(text, parse_mode=enums.ParseMode.HTML)
         except: pass
-
-
+        
 # ==========================================
 # 🌟 PART 2: CONTROL ROOM COMMANDS 🌟
 # ==========================================
@@ -452,9 +463,6 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiohttp import web
 import pyrogram
 
-user_msg_data = {}
-user_memory = {}
-
 # 🔥 AAPKA ASLI GROUP LINK 🔥
 REAL_GROUP_LINK = "https://t.me/+COWqvDXiQUkxOWE9"
 
@@ -499,7 +507,7 @@ async def daily_posting_task():
 async def start_clone_bots():
     global clone1_app, clone2_app
     
-    # --- CLONE 1: DELIVERY BOT (WITH VIP BLOCKS) ---
+    # --- CLONE 1: DELIVERY BOT (WITH SMART VIP CAPTION) ---
     d1 = await settings_col.find_one({"_id": "clone1_token"})
     if d1:
         try:
@@ -515,17 +523,18 @@ async def start_clone_bots():
                     try:
                         msg = await app.get_messages(DB_CHANNEL_ID, mid)
                         
-                        # 🔥 VIP CAPTION MAGIC START 🔥
+                        # 🔥 SMART CAPTION READER 🔥
                         raw_caption = msg.caption if msg.caption else "🎬 Your Movie File!"
-                        vip_blocks = []
-                        # Caption ko khali lines par tod kar har hisse ko dabbe mein pack karenge
-                        for chunk in raw_caption.split('\n\n'):
-                            if chunk.strip(): 
-                                vip_blocks.append(f"<blockquote>{chunk.strip()}</blockquote>")
                         
-                        vip_caption = "\n\n".join(vip_blocks)
-                        final_cap = f"{vip_caption}\n\n<blockquote>⏳ Note: Yeh file 5 Minute mein delete ho jayegi! ⚠️</blockquote>"
-                        # 🔥 VIP CAPTION MAGIC END 🔥
+                        if "<blockquote>" in raw_caption:
+                            final_cap = f"{raw_caption}\n\n<blockquote>⏳ Note: Yeh file 5 Minute mein delete ho jayegi! ⚠️</blockquote>"
+                        else:
+                            vip_blocks = []
+                            for chunk in raw_caption.split('\n\n'):
+                                if chunk.strip(): 
+                                    vip_blocks.append(f"<blockquote>{chunk.strip()}</blockquote>")
+                            vip_caption = "\n\n".join(vip_blocks)
+                            final_cap = f"{vip_caption}\n\n<blockquote>⏳ Note: Yeh file 5 Minute mein delete ho jayegi! ⚠️</blockquote>"
 
                         sent_msg = await c.copy_message(
                             m.chat.id, 
@@ -558,7 +567,7 @@ async def start_clone_bots():
             @clone2_app.on_message(filters.group & filters.photo)
             async def neha_photo_comment(c, m):
                 try:
-                    await asyncio.sleep(2) # Thoda natural delay
+                    await asyncio.sleep(2)
                     await m.reply("Wow! 😍 Ye movie toh bahut mast lag rahi hai. Kis kis ko iska link chahiye? Jaldi batao! 👇✨", quote=True)
                 except: pass
 
@@ -594,11 +603,9 @@ async def start_clone_bots():
                                     found_msg, is_from_db = msg, True; break
                         except: pass
                         
-                        # Website Button Setup
                         site_btn = InlineKeyboardMarkup([[InlineKeyboardButton("📥 More Movies Here", url=FINAL_WEBSITE_URL)]])
                         
                         if found_msg:
-                            # Movie Found Message (Secret Source)
                             success_text = "ye lo bro tumhara favourite movie injoy Kro or movies ke niche click kr sakte ho 😉🎬"
                             if is_from_db:
                                 await m.reply(success_text, reply_markup=site_btn)
@@ -606,7 +613,6 @@ async def start_clone_bots():
                             else:
                                 await m.reply(f"{success_text}\n👉 {found_msg.link}", reply_to_message_id=found_msg.id, reply_markup=site_btn)
                         else:
-                            # No Movie Found Message
                             await m.reply("Abhi upload ho raha hai isme time lagega jab Tak yha or movies hai dekh sakte ho 😉🍿", reply_markup=site_btn)
                             try: await c.send_message(int(OWNER_ID), f"🚨 **BOSS ALERT!**\n\n`{query}` nahi mili. Upload kardo!")
                             except: pass
@@ -643,4 +649,4 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
-    
+

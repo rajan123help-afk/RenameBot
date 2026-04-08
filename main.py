@@ -449,6 +449,8 @@ import asyncio
 import aiohttp
 from pyrogram import enums, filters, Client
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiohttp import web
+import pyrogram
 
 user_msg_data = {}
 user_memory = {}
@@ -491,13 +493,13 @@ async def daily_posting_task():
                     msg = f"🌆 **Good Evening!** 🌆\nAaj ki movies upload ho gayi hain! Enjoy karo. 👇\n{FINAL_WEBSITE_URL}"
                     await clone2_app.send_message(MAIN_GROUP_ID, msg)
                     last_evening_date = now.date()
-            await asyncio.sleep(600)
-        except: await asyncio.sleep(60)
+        except: pass
+        await asyncio.sleep(600)
 
 async def start_clone_bots():
     global clone1_app, clone2_app
     
-    # --- CLONE 1: DELIVERY ---
+    # --- CLONE 1: DELIVERY BOT (WITH VIP BLOCKS) ---
     d1 = await settings_col.find_one({"_id": "clone1_token"})
     if d1:
         try:
@@ -507,11 +509,32 @@ async def start_clone_bots():
                 btn = InlineKeyboardMarkup([[InlineKeyboardButton("🚀 Join Now", url=REAL_GROUP_LINK)], [InlineKeyboardButton("📥 Download New", url=FINAL_WEBSITE_URL)]])
                 payload = m.command[1] if len(m.command) > 1 else None
                 if not payload: return await m.reply("👋 **Hello! Main Delivery Bot hoon.** 🎬", reply_markup=btn)
+                
                 mid = extract_msg_id(decode_payload(payload))
                 if mid:
                     try:
                         msg = await app.get_messages(DB_CHANNEL_ID, mid)
-                        sent_msg = await c.copy_message(m.chat.id, DB_CHANNEL_ID, mid, caption=f"{msg.caption}\n\n⏳ **Note:** Yeh file **5 Minute** mein delete ho jayegi! ⚠️")
+                        
+                        # 🔥 VIP CAPTION MAGIC START 🔥
+                        raw_caption = msg.caption if msg.caption else "🎬 Your Movie File!"
+                        vip_blocks = []
+                        # Caption ko khali lines par tod kar har hisse ko dabbe mein pack karenge
+                        for chunk in raw_caption.split('\n\n'):
+                            if chunk.strip(): 
+                                vip_blocks.append(f"<blockquote>{chunk.strip()}</blockquote>")
+                        
+                        vip_caption = "\n\n".join(vip_blocks)
+                        final_cap = f"{vip_caption}\n\n<blockquote>⏳ Note: Yeh file 5 Minute mein delete ho jayegi! ⚠️</blockquote>"
+                        # 🔥 VIP CAPTION MAGIC END 🔥
+
+                        sent_msg = await c.copy_message(
+                            m.chat.id, 
+                            DB_CHANNEL_ID, 
+                            mid, 
+                            caption=final_cap,
+                            parse_mode=enums.ParseMode.HTML
+                        )
+                        
                         async def auto_del(msg_to_del, cid):
                             await asyncio.sleep(300)
                             try:
@@ -519,7 +542,9 @@ async def start_clone_bots():
                                 await c.send_message(cid, "⚠️ **File Delete ho chuki hai!** 🕒\nNayi movies ke liye niche click karein! 👇", reply_markup=btn)
                             except: pass
                         asyncio.create_task(auto_del(sent_msg, m.chat.id))
-                    except: await m.reply("❌ **File Not Found!**")
+                    except Exception as e: 
+                        print(f"Delivery Error: {e}")
+                        await m.reply("❌ **File Not Found!**")
             await clone1_app.start()
         except: pass
 
@@ -618,3 +643,4 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
+    

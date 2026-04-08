@@ -143,7 +143,8 @@ def get_fancy_caption(filename, filesize, duration):
     if dur_str: 
         caption += f"<blockquote>Duration ⏰ ➥ {dur_str}</blockquote>\n\n"
         
-    caption += f"<blockquote>Powered By ➥ {CREDIT_NAME} ❞</blockquote>"
+    # 🔥 YAHAN WEBSITE KA CLICKABLE LINK LAGA DIYA HAI 🔥
+    caption += f"<blockquote>Powered By ➥ 🦋 <a href='{FINAL_WEBSITE_URL}'>Filmy Flip Hub</a> 🦋 ❞</blockquote>"
     return caption
 
 def apply_watermark(base_path, wm_path):
@@ -182,7 +183,7 @@ async def progress(current, total, message, start_time, task_name):
         text = f"<b>{task_name}</b>\n\n<b>[{bar}] {round(percentage, 1)}%</b>\n<b>📦 Done:</b> {humanbytes(current)} / {humanbytes(total)}\n<b>⚡ Speed:</b> {humanbytes(speed)}/s\n<b>⏳ ETA:</b> {eta}"
         try: await message.edit(text, parse_mode=enums.ParseMode.HTML)
         except: pass
-        
+               
 # ==========================================
 # 🌟 PART 2: CONTROL ROOM COMMANDS 🌟
 # ==========================================
@@ -284,10 +285,10 @@ async def search_handler(c, m):
     stype = "tv" if "series" in m.command[0] else "movie"
     season_num = 0
     if stype == "tv":
-        match = re.search(r"(?i)\s*(?:s|season)\s*(\d+)$", raw_query)
+        match = re.search(r"\s*(?:s|season)\s*(\d+)$", raw_query, flags=re.IGNORECASE)
         if match:
             season_num = int(match.group(1))
-            raw_query = re.sub(r"(?i)\s*(?:s|season)\s*(\d+)$", "", raw_query).strip()
+            raw_query = re.sub(r"\s*(?:s|season)\s*(\d+)$", "", raw_query, flags=re.IGNORECASE).strip()
     status = await m.reply(f"🔎 **Searching:** `{raw_query}`...")
     try:
         url = f"https://api.themoviedb.org/3/search/{stype}?api_key={TMDB_API_KEY}&query={quote(raw_query)}"
@@ -349,10 +350,11 @@ async def media_handler(c, m):
         # 🔥 AUTO-BRANDING PROTECTOR (File Uploads) 🔥
         name_without_ext, ext = os.path.splitext(fname)
         if not name_without_ext.strip().startswith("["):
-            name_without_ext = re.sub(r'^(?i)filmy\s*flip\s*hub\s*', '', name_without_ext.strip())
+            # Ye line shuru se purana naam hatayegi bina error diye
+            name_without_ext = re.sub(r'^filmy\s*flip\s*hub\s*', '', name_without_ext.strip(), flags=re.IGNORECASE)
             name_without_ext = f"[Filmy Flip Hub] {name_without_ext}"
             
-        if not re.search(r'(?i)filmy\s*flip\s*hub$', name_without_ext.strip()):
+        if not re.search(r'filmy\s*flip\s*hub$', name_without_ext.strip(), flags=re.IGNORECASE):
             name_without_ext = f"{name_without_ext.strip()} Filmy Flip Hub"
             
         fname = f"{name_without_ext}{ext}"
@@ -426,10 +428,10 @@ async def dl_process(c, cb):
     
     # 🔥 AUTO-BRANDING PROTECTOR (URL Downloads) 🔥
     if not clean_custom.strip().startswith("["):
-        clean_custom = re.sub(r'^(?i)filmy\s*flip\s*hub\s*', '', clean_custom.strip())
+        clean_custom = re.sub(r'^filmy\s*flip\s*hub\s*', '', clean_custom.strip(), flags=re.IGNORECASE)
         clean_custom = f"[Filmy Flip Hub] {clean_custom}"
         
-    if not re.search(r'(?i)filmy\s*flip\s*hub$', clean_custom.strip()):
+    if not re.search(r'filmy\s*flip\s*hub$', clean_custom.strip(), flags=re.IGNORECASE):
         clean_custom = f"{clean_custom.strip()} Filmy Flip Hub"
     # 🔥 -------------------------------------- 🔥
 

@@ -274,7 +274,6 @@ async def cancel_task(c, m):
     msg = await m.reply("✅ **Cleaned!**")
     await asyncio.sleep(3); await msg.delete()
 
-
 # ==========================================
 # 🌟 PART 3: TMDB & MEDIA HANDLER 🌟
 # ==========================================
@@ -346,6 +345,19 @@ async def media_handler(c, m):
         media = m.document or m.video or m.audio
         fname = getattr(media, "file_name", "File")
         fname = await apply_rename_rules(fname)
+        
+        # 🔥 AUTO-BRANDING PROTECTOR (File Uploads) 🔥
+        name_without_ext, ext = os.path.splitext(fname)
+        if not name_without_ext.strip().startswith("["):
+            name_without_ext = re.sub(r'^(?i)filmy\s*flip\s*hub\s*', '', name_without_ext.strip())
+            name_without_ext = f"[Filmy Flip Hub] {name_without_ext}"
+            
+        if not re.search(r'(?i)filmy\s*flip\s*hub$', name_without_ext.strip()):
+            name_without_ext = f"{name_without_ext.strip()} Filmy Flip Hub"
+            
+        fname = f"{name_without_ext}{ext}"
+        # 🔥 ------------------------------------- 🔥
+        
         new_cap = get_fancy_caption(fname, humanbytes(getattr(media, "file_size", 0)), getattr(media, "duration", 0))
         
         db_msg = await c.send_video(DB_CHANNEL_ID, m.video.file_id, caption=new_cap, file_name=fname) if m.video else await c.send_document(DB_CHANNEL_ID, m.document.file_id, caption=new_cap, file_name=fname)
@@ -411,6 +423,16 @@ async def dl_process(c, cb):
     await cb.message.edit("📥 **Downloading...**")
     
     clean_custom = (await apply_rename_rules(data['new_name'])).replace(".", " ").replace("_", " ")
+    
+    # 🔥 AUTO-BRANDING PROTECTOR (URL Downloads) 🔥
+    if not clean_custom.strip().startswith("["):
+        clean_custom = re.sub(r'^(?i)filmy\s*flip\s*hub\s*', '', clean_custom.strip())
+        clean_custom = f"[Filmy Flip Hub] {clean_custom}"
+        
+    if not re.search(r'(?i)filmy\s*flip\s*hub$', clean_custom.strip()):
+        clean_custom = f"{clean_custom.strip()} Filmy Flip Hub"
+    # 🔥 -------------------------------------- 🔥
+
     ext = os.path.splitext(data['orig_name'])[1]
     final_filename = f"{clean_custom}{ext if ext and len(ext)<=5 else '.mkv'}"
     internal_path = f"downloads/{uid}_{final_filename}"
@@ -452,6 +474,7 @@ async def save_img_callback(c, cb):
         msg = await c.send_message(uid, f"✅ **{'Thumbnail' if mode=='thumbnails' else 'Watermark'} Saved!**")
         await asyncio.sleep(3); await msg.delete()
     except Exception as e: await cb.message.edit(f"❌ Error: {e}")
+
 # ==========================================
 # 🌟 PART 4: AI, SEARCH, CLONES & POSTING 🌟
 # ==========================================

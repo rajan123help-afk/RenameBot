@@ -128,12 +128,13 @@ def get_fancy_caption(filename, filesize, duration):
     clean_name = clean_name.replace(".", " ").replace("_", " ")
     safe_name = html.escape(clean_name.strip())
     
-    # 3. VIP BLOCKQUOTE DESIGN START 🔥
-    caption = f"<blockquote>{safe_name}</blockquote>\n\n"
+    # 3. VIP DESIGN START 🔥 (Title Bold bina Box ke)
+    caption = f"<b>{safe_name}</b>\n\n"
     
     s, e = get_media_info(filename)
     if s and e: 
-        caption += f"<blockquote>💿 Season ➥ {s.zfill(2)} | 📺 Episode ➥ {e.zfill(2)}</blockquote>\n\n"
+        caption += f"<blockquote>💿 Season ➥ {s.zfill(2)}</blockquote>\n\n"
+        caption += f"<blockquote>📺 Episode ➥ {e.zfill(2)}</blockquote>\n\n"
     elif s:
          caption += f"<blockquote>💿 Season ➥ {s.zfill(2)}</blockquote>\n\n"
          
@@ -143,7 +144,6 @@ def get_fancy_caption(filename, filesize, duration):
     if dur_str: 
         caption += f"<blockquote>Duration ⏰ ➥ {dur_str}</blockquote>\n\n"
         
-    # 🔥 YAHAN WEBSITE KA CLICKABLE LINK LAGA DIYA HAI 🔥
     caption += f"<blockquote>Powered By ➥ 🦋 <a href='{FINAL_WEBSITE_URL}'>Filmy Flip Hub</a> 🦋 ❞</blockquote>"
     return caption
 
@@ -183,7 +183,8 @@ async def progress(current, total, message, start_time, task_name):
         text = f"<b>{task_name}</b>\n\n<b>[{bar}] {round(percentage, 1)}%</b>\n<b>📦 Done:</b> {humanbytes(current)} / {humanbytes(total)}\n<b>⚡ Speed:</b> {humanbytes(speed)}/s\n<b>⏳ ETA:</b> {eta}"
         try: await message.edit(text, parse_mode=enums.ParseMode.HTML)
         except: pass
-               
+
+
 # ==========================================
 # 🌟 PART 2: CONTROL ROOM COMMANDS 🌟
 # ==========================================
@@ -275,6 +276,7 @@ async def cancel_task(c, m):
     msg = await m.reply("✅ **Cleaned!**")
     await asyncio.sleep(3); await msg.delete()
 
+
 # ==========================================
 # 🌟 PART 3: TMDB & MEDIA HANDLER 🌟
 # ==========================================
@@ -353,12 +355,10 @@ async def media_handler(c, m):
             
         fname = await apply_rename_rules(base_name)
         
-        # 🔥 YAHAN PART 1 KA FANCY CAPTION BULA RAHE HAIN (S/E aayega isse) 🔥
+        # 🔥 VIP CAPTION GEN 🔥
         new_cap = get_fancy_caption(fname, humanbytes(getattr(media, "file_size", 0)), getattr(media, "duration", 0))
-        
         actual_file_name = getattr(media, "file_name", "file.mkv")
         
-        # Seedha VIP blockquote wala caption DB me save hoga
         db_msg = await c.send_video(DB_CHANNEL_ID, m.video.file_id, caption=new_cap, file_name=actual_file_name) if m.video else await c.send_document(DB_CHANNEL_ID, m.document.file_id, caption=new_cap, file_name=actual_file_name)
         try: await m.delete()
         except: pass
@@ -440,7 +440,6 @@ async def dl_process(c, cb):
         await cb.message.edit("⚙️ **Processing...**")
         duration, fsize = get_duration(internal_path), humanbytes(os.path.getsize(internal_path))
         
-        # URL Download me bhi Fancy Caption bulaya (S/E aayega isse)
         new_cap = get_fancy_caption(clean_custom, fsize, duration)
         thumb_path = apply_watermark(f"thumbnails/{uid}.jpg", f"watermarks/{uid}.png") if os.path.exists(f"thumbnails/{uid}.jpg") and os.path.exists(f"watermarks/{uid}.png") else (f"thumbnails/{uid}.jpg" if os.path.exists(f"thumbnails/{uid}.jpg") else None)
         
@@ -465,7 +464,8 @@ async def save_img_callback(c, cb):
         msg = await c.send_message(uid, f"✅ **{'Thumbnail' if mode=='thumbnails' else 'Watermark'} Saved!**")
         await asyncio.sleep(3); await msg.delete()
     except Exception as e: await cb.message.edit(f"❌ Error: {e}")
-        
+
+
 # ==========================================
 # 🌟 PART 4: AI, SEARCH, CLONES & POSTING 🌟
 # ==========================================
@@ -539,14 +539,11 @@ async def start_clone_bots():
                     try:
                         msg = await app.get_messages(DB_CHANNEL_ID, mid)
                         
-                        # 🔥 AB DELIVERY BOT KUCH GENERATE NAHI KAREGA 🔥
-                        # Seedha DB channel ka VIP caption (jisme Season/Episode bhi hai) uthayega aur Timer lagayega
                         if msg.caption:
                             raw_cap = msg.caption.html
-                            if "<blockquote>" in raw_cap:
+                            if "<blockquote>" in raw_cap or "<b>" in raw_cap:
                                 final_cap = f"{raw_cap}\n\n<blockquote>⏳ Note: Yeh file 5 Minute mein delete ho jayegi! ⚠️</blockquote>"
                             else:
-                                # Purani files ke liye simple fallback
                                 vip_blocks = []
                                 for chunk in msg.caption.split('\n\n'):
                                     if chunk.strip(): vip_blocks.append(f"<blockquote>{chunk.strip()}</blockquote>")

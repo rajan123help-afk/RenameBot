@@ -186,7 +186,6 @@ async def progress(current, total, message, start_time, task_name):
             await message.edit(text, parse_mode=enums.ParseMode.HTML)
         except: 
             pass
-
 # ==========================================
 # 🌟 PART 2: CONTROL ROOM COMMANDS 🌟
 # ==========================================
@@ -227,6 +226,40 @@ async def set_clone2(c, m):
     await settings_col.update_one({"_id": "clone2_token"}, {"$set": {"token": m.command[1]}}, upsert=True)
     await m.reply("♻️ **Clone 2 Token Saved!**")
     await start_clone_bots()
+
+# 🔥 FAIL-SAFE PODCAST COMMAND 🔥
+@app.on_message(filters.command("podcast") & filters.user(OWNER_ID))
+async def podcast_handler(c, m):
+    try:
+        msg_text = m.text.split(" ", 1)[1].strip()
+        if not msg_text:
+            raise ValueError("Empty Message")
+    except:
+        return await m.reply("❌ **Usage:** `/podcast Tumhara Message Yahan Likho`")
+    
+    status = await m.reply("⏳ **Sending Podcast...**")
+    
+    try:
+        d2 = await settings_col.find_one({"_id": "clone2_token"})
+        
+        if d2 and d2.get("token"):
+            token = d2["token"]
+            url = f"https://api.telegram.org/bot{token}/sendMessage"
+            payload = {"chat_id": MAIN_GROUP_ID, "text": msg_text}
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload) as resp:
+                    if resp.status == 200:
+                        await status.edit("✅ **Podcast Sent Successfully as Neha!** 😎")
+                    else:
+                        err = await resp.json()
+                        await status.edit(f"❌ **Neha API Error:** `{err}`")
+        else: 
+            await c.send_message(MAIN_GROUP_ID, msg_text)
+            await status.edit("⚠️ **Neha ka token nahi mila, isliye Master Bot ne bhej diya!** ✅")
+            
+    except Exception as e: 
+        await status.edit(f"❌ **Error:** `{e}`\n\n📌 Check karo ki `MAIN_GROUP_ID` sahi set hai ya nahi!")
 
 @app.on_message(filters.command("addreplace") & filters.user(OWNER_ID))
 async def add_replace_handler(c, m):
@@ -281,7 +314,7 @@ async def cancel_task(c, m):
     msg = await m.reply("✅ **Cleaned & Cancelled!**")
     await asyncio.sleep(3)
     await msg.delete()
-
+    
 # ==========================================
 # 🌟 PART 3: TMDB & MEDIA HANDLER 🌟
 # ==========================================

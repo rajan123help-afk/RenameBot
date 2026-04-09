@@ -64,7 +64,7 @@ app = Client("MainBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, w
 clone1_app = None 
 clone2_app = None 
 download_queue = {} 
-batch_session = {} # 🔥 BATCH COMMAND KE LIYE NAYA SESSION
+batch_session = {} 
 user_msg_data = {}
 user_memory = {}
 
@@ -238,7 +238,6 @@ async def cancel_task(c, m):
     except: pass
     msg = await m.reply("✅ **Cleaned & Cancelled!**")
     await asyncio.sleep(3); await msg.delete()
-
 # ==========================================
 # 🌟 PART 3: TMDB & MEDIA HANDLER 🌟
 # ==========================================
@@ -259,6 +258,199 @@ async def search_handler(c, m):
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp: data = await resp.json()
         results = data.get('results')
+        # ==========================================
+# 🌟 PART 4: AI, SEARCH, CLONES & POSTING 🌟
+# ==========================================
+REAL_GROUP_LINK = "https://t.me/+COWqvDXiQUkxOWE9"
+
+async def get_gemini_reply(client, chat_id, user_id, prompt_text):
+    await client.send_chat_action(chat_id, enums.ChatAction.TYPING)
+    if user_id not in user_memory: user_memory[user_id] = []
+    user_memory[user_id].append({"role": "user", "parts": [{"text": prompt_text}]})
+    if len(user_memory[user_id]) > 6: user_memory[user_id] = user_memory[user_id][-6:]
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key={GEMINI_API_KEY}"
+        data = {"systemInstruction": {"parts": [{"text": NEHA_PROMPT}]}, "contents": user_memory[user_id]}
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers={'Content-Type': 'application/json'}, json=data) as resp:
+                if resp.status != 200: return "Yaar mera dimaag kharab ho raha hai, thodi der baad aana! 😫"
+                result = await resp.json()
+        reply_text = result['candidates'][0]['content']['parts'][0]['text']
+        user_memory[user_id].append({"role": "model", "parts": [{"text": reply_text}]})
+        return reply_text
+    except Exception: return "Bhai server down chal raha hai... 😔"
+
+async def daily_posting_task():
+    days_hindi = {"Monday": "Somvaar", "Tuesday": "Mangalvaar", "Wednesday": "Budhvaar", "Thursday": "Veervaar", "Friday": "Shukravaar", "Saturday": "Shanivaar", "Sunday": "Ravivaar"}
+    last_morning_date, last_evening_date = None, None
+    ist_timezone = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+    while True:
+        try:
+            if clone2_app and clone2_app.is_initialized:
+                now = datetime.datetime.now(ist_timezone)
+                if now.hour == 9 and last_morning_date != now.date():
+                    await clone2_app.send_message(MAIN_GROUP_ID, f"✨ **Good Morning Filmy Family!** ✨\nAaj **{days_hindi.get(now.strftime('%A'), now.strftime('%A'))}** hai! 🔥\n👇\n{FINAL_WEBSITE_URL}")
+                    last_morning_date = now.date()
+                if now.hour == 19 and last_evening_date != now.date():
+                    await clone2_app.send_message(MAIN_GROUP_ID, f"🌆 **Good Evening!** 🌆\nAaj ki movies upload ho gayi hain! Enjoy karo. 👇\n{FINAL_WEBSITE_URL}")
+                    last_evening_date = now.date()
+        except: pass
+        await asyncio.sleep(600)
+
+async def start_clone_bots():
+    global clone1_app, clone2_app
+    
+    d1 = await settings_col.find_one({"_id": "clone1_token"})
+    if d1:
+        try:
+            clone1_app = Client("Clone1", api_id=API_ID, api_hash=API_HASH, bot_token=d1["token"])
+            @clone1_app.on_message(filters.command("start") & filters.private)
+            async def c1_start(c, m):
+                btn = InlineKeyboardMarkup([[InlineKeyboardButton("🚀 Join Now", url=REAL_GROUP_LINK)], [InlineKeyboardButton("📥 Download New", url=FINAL_WEBSITE_URL)]])
+                payload = m.command[1] if len(m.command) > 1 else None
+                if not payload: return await m.reply("👋 **Hello! Main Delivery Bot hoon.** 🎬", reply_markup=btn)
+                
+                decoded_payload = decode_payload(payload)
+                if not decoded_payload: return await m.reply("❌ Invalid Link")
+                
+                if decoded_payload.startswith("batch_"):
+                    try:
+                        _, oid, start_id, end_id = decoded_payload.split("_")
+                        start_id, end_id = int(start_id), int(end_id)
+                        sent_msgs = []
+                        await m.reply("⏳ **Sending Files... Please Wait...**")
+                        
+                        for i in range(start_id, end_id + 1):
+                            msg = await app.get_messages(DB_CHANNEL_ID, i)
+                            if msg and not msg.empty and (msg.document or msg.video or msg.audio):
+                                raw_cap = msg.caption.html if msg.caption else ""
+                                if "<blockquote>" in raw_cap or "<b>" in raw_cap:
+                                    final_cap = f"{raw_cap}\n\n<blockquote>⏳ Note: Yeh file 5 Minute mein delete ho jayegi! ⚠️</blockquote>"
+                                else:
+                                    vip_blocks = [f"<blockquote>{chunk.strip()}</blockquote>" for chunk in raw_cap.split('\n\n') if chunk.strip()]
+                                    final_cap = "\n\n".join(vip_blocks) + "\n\n<blockquote>⏳ Note: Yeh file 5 Minute mein delete ho jayegi! ⚠️</blockquote>"
+                                
+                                s_msg = await c.copy_message(m.chat.id, DB_CHANNEL_ID, i, caption=final_cap, parse_mode=enums.ParseMode.HTML)
+                                sent_msgs.append(s_msg)
+                                await asyncio.sleep(0.5)
+                        
+                        async def auto_del_batch(msgs, cid):
+                            await asyncio.sleep(300)
+                            for m_del in msgs:
+                                try: await m_del.delete()
+                                except: pass
+                            try: await c.send_message(cid, "⚠️ **Files Delete ho chuki hain!** 🕒\nNayi movies ke liye niche click karein! 👇", reply_markup=btn)
+                            except: pass
+                        asyncio.create_task(auto_del_batch(sent_msgs, m.chat.id))
+                    except Exception as e:
+                        print(e)
+                        await m.reply("❌ **Batch Not Found!**")
+                
+                else:
+                    mid = extract_msg_id(decoded_payload)
+                    if mid:
+                        try:
+                            msg = await app.get_messages(DB_CHANNEL_ID, mid)
+                            if msg.caption:
+                                raw_cap = msg.caption.html
+                                if "<blockquote>" in raw_cap or "<b>" in raw_cap: final_cap = f"{raw_cap}\n\n<blockquote>⏳ Note: Yeh file 5 Minute mein delete ho jayegi! ⚠️</blockquote>"
+                                else:
+                                    vip_blocks = [f"<blockquote>{chunk.strip()}</blockquote>" for chunk in raw_cap.split('\n\n') if chunk.strip()]
+                                    final_cap = "\n\n".join(vip_blocks) + "\n\n<blockquote>⏳ Note: Yeh file 5 Minute mein delete ho jayegi! ⚠️</blockquote>"
+                            else: final_cap = "<blockquote>🎬 VIP Movie File</blockquote>\n\n<blockquote>⏳ Note: Yeh file 5 Minute mein delete ho jayegi! ⚠️</blockquote>"
+
+                            sent_msg = await c.copy_message(m.chat.id, DB_CHANNEL_ID, mid, caption=final_cap, parse_mode=enums.ParseMode.HTML)
+                            
+                            async def auto_del(msg_to_del, cid):
+                                await asyncio.sleep(300)
+                                try: await msg_to_del.delete(); await c.send_message(cid, "⚠️ **File Delete ho chuki hai!** 🕒\nNayi movies ke liye niche click karein! 👇", reply_markup=btn)
+                                except: pass
+                            asyncio.create_task(auto_del(sent_msg, m.chat.id))
+                        except Exception as e: await m.reply("❌ **File Not Found!**")
+
+            await clone1_app.start()
+        except: pass
+
+    d2 = await settings_col.find_one({"_id": "clone2_token"})
+    if d2:
+        try:
+            clone2_app = Client("Clone2", api_id=API_ID, api_hash=API_HASH, bot_token=d2["token"])
+            @clone2_app.on_message(filters.group & filters.photo)
+            async def neha_photo_comment(c, m):
+                try: await asyncio.sleep(2); await m.reply("Wow! 😍 Ye movie toh bahut mast lag rahi hai. Kis kis ko iska link chahiye? Jaldi batao! 👇✨", quote=True)
+                except: pass
+
+            @clone2_app.on_message(filters.command("start") & filters.private)
+            async def neha_start_pm(c, m): await m.reply(f"Hi! Main Neha hoon. 😉\n\n👉 **Join Group:** {REAL_GROUP_LINK}")
+
+            @clone2_app.on_message(filters.group & filters.text)
+            async def neha_grp_handler(c, m):
+                bot_me = await c.get_me()
+                text, words, uid = m.text.lower(), m.text.lower().split(), (m.from_user.id if m.from_user else m.chat.id)
+                remove_list = {"movie", "movies", "film", "series", "link", "de", "do", "chahiye", "upload", "dedo", "dena", "bhej", "bhejo", "kaha", "kahan", "kidhar", "hi", "hello", "hey", "suno", "oye", "oyee", "ka", "ki", "ke", "hai", "koi", "yar", "yaar", "please", "pls", "bhai", "mujhe", "mera", "meri", "download", "neha", f"@{bot_me.username.lower()}"}
+                demand_words = {"movie", "film", "series", "link", "chahiye", "dedo", "dena", "bhej"}
+                
+                is_mentioned = "neha" in text or f"@{bot_me.username.lower()}" in text
+                is_reply_to_bot = bool(m.reply_to_message and m.reply_to_message.from_user and m.reply_to_message.from_user.id == bot_me.id)
+                has_demand = any(x in words for x in demand_words)
+
+                if is_mentioned or is_reply_to_bot or (not bool(m.reply_to_message and m.reply_to_message.from_user and m.reply_to_message.from_user.id != bot_me.id) and has_demand):
+                    ai_reply = await get_gemini_reply(c, m.chat.id, uid, m.text)
+                    if ai_reply: await m.reply(ai_reply, quote=True)
+                    
+                    if has_demand or (is_mentioned and len(words) > 1):
+                        query = " ".join([w for w in words if w not in remove_list])
+                        if len(query) < 2: return 
+                        
+                        found_msg, is_from_db = None, False
+                        try:
+                            async for msg in c.search_messages(m.chat.id, query=query, limit=50, filter=enums.MessagesFilter.PHOTO):
+                                if msg.id != m.id: found_msg = msg; break
+                            if not found_msg:
+                                async for msg in app.search_messages(DB_CHANNEL_ID, query=query, limit=50):
+                                    found_msg, is_from_db = msg, True; break
+                        except: pass
+                        
+                        site_btn = InlineKeyboardMarkup([[InlineKeyboardButton("📥 More Movies Here", url=FINAL_WEBSITE_URL)]])
+                        if found_msg:
+                            success_text = "ye lo bro tumhara favourite movie injoy Kro or movies ke niche click kr sakte ho 😉🎬"
+                            if is_from_db: await m.reply(success_text, reply_markup=site_btn); await app.copy_message(m.chat.id, DB_CHANNEL_ID, found_msg.id)
+                            else: await m.reply(f"{success_text}\n👉 {found_msg.link}", reply_to_message_id=found_msg.id, reply_markup=site_btn)
+                        else:
+                            await m.reply("Abhi upload ho raha hai isme time lagega jab Tak yha or movies hai dekh sakte ho 😉🍿", reply_markup=site_btn)
+                            try: await c.send_message(int(OWNER_ID), f"🚨 **BOSS ALERT!**\n\n`{query}` nahi mili. Upload kardo!")
+                            except: pass
+
+            @clone2_app.on_message(filters.private & filters.text & ~filters.command("start"))
+            async def neha_pm(c, m):
+                uid = m.from_user.id
+                if str(uid) == str(OWNER_ID):
+                    r = await get_gemini_reply(c, m.chat.id, uid, m.text)
+                    if r: await m.reply(r)
+                    return
+                if uid not in user_msg_data: user_msg_data[uid] = {'last_time': None, 'is_waiting': False}
+                if user_msg_data[uid].get('last_time') and (datetime.datetime.now() - user_msg_data[uid]['last_time']).total_seconds() < 86400: return
+                if user_msg_data[uid]['is_waiting']: return
+                user_msg_data[uid]['is_waiting'] = True
+                await asyncio.sleep(300) 
+                try: await m.reply(f"Yaar, main abhi thoda kaam kar rahi hoon! 😊\n🔗 {REAL_GROUP_LINK}"); user_msg_data[uid]['last_time'] = datetime.datetime.now()
+                except: pass
+                finally: user_msg_data[uid]['is_waiting'] = False
+            await clone2_app.start()
+        except: pass
+
+async def start_services():
+    await app.start()
+    await start_clone_bots()
+    asyncio.create_task(daily_posting_task())
+    app_web = web.Application()
+    app_web.add_routes([web.get("/", lambda q: web.Response(text="Running!"))])
+    runner = web.AppRunner(app_web); await runner.setup()
+    await web.TCPSite(runner, "0.0.0.0", PORT).start()
+    await pyrogram.idle()
+
+if __name__ == "__main__":
+    asyncio.get_event_loop().run_until_complete(start_services())
         if not results: return await status.edit("❌ **Not Found!**")
         mid = results[0]['id']
         title = results[0].get('name') if stype == 'tv' else results[0].get('title')
@@ -303,11 +495,8 @@ async def num_callback(c, cb):
 async def media_handler(c, m):
     uid = m.from_user.id
     
-    # 🔥 PRO FORWARD BATCH SYSTEM 🔥
     if uid in batch_session:
         step = batch_session[uid].get("step")
-        
-        # Checking if it's forwarded
         if not m.forward_from_chat:
             return await m.reply("❌ **Error:** Please file ko us channel se **FORWARD** karo! Direct upload mat karo.")
             
@@ -326,9 +515,8 @@ async def media_handler(c, m):
             if chat_id != saved_chat_id:
                 return await m.reply("❌ **Error:** Dono files same channel se forward honi chahiye! `/batch` wapas start karo.")
                 
-            del batch_session[uid] # Session clear
+            del batch_session[uid] 
             
-            # Agar user ne upar se niche forward kiya ho, toh ID seedhi kar do
             if start_id > end_id:
                 start_id, end_id = end_id, start_id
                 
@@ -352,7 +540,7 @@ async def media_handler(c, m):
                             
                             if not first_db_id: first_db_id = db_msg.id
                             last_db_id = db_msg.id
-                            await asyncio.sleep(1) # Delay ban bachne ke liye
+                            await asyncio.sleep(1)
                     except Exception as e: print(f"Batch Item Error: {e}")
                 
                 if first_db_id and last_db_id:
@@ -366,8 +554,6 @@ async def media_handler(c, m):
                 await status.edit(f"❌ Error: {e}")
         return
 
-    # NORMAL SINGLE FILE UPLOAD LOGIC
-      # NORMAL SINGLE FILE UPLOAD LOGIC
     if m.photo or (m.document and m.document.mime_type and m.document.mime_type.startswith("image/")):
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🖼 Set Thumbnail", callback_data="save_thumb"), InlineKeyboardButton("💧 Set Watermark", callback_data="save_wm")], [InlineKeyboardButton("🌐 Generate Link (ImgBB)", callback_data="upload_img")]])
         return await m.reply_text("📸 **Image Detected!**", reply_markup=btn, quote=True)
@@ -486,199 +672,4 @@ async def save_img_callback(c, cb):
         msg = await c.send_message(uid, f"✅ **{'Thumbnail' if mode=='thumbnails' else 'Watermark'} Saved!**")
         await asyncio.sleep(3); await msg.delete()
     except Exception as e: await cb.message.edit(f"❌ Error: {e}")
-
-# ==========================================
-# 🌟 PART 4: AI, SEARCH, CLONES & POSTING 🌟
-# ==========================================
-REAL_GROUP_LINK = "https://t.me/+COWqvDXiQUkxOWE9"
-
-async def get_gemini_reply(client, chat_id, user_id, prompt_text):
-    await client.send_chat_action(chat_id, enums.ChatAction.TYPING)
-    if user_id not in user_memory: user_memory[user_id] = []
-    user_memory[user_id].append({"role": "user", "parts": [{"text": prompt_text}]})
-    if len(user_memory[user_id]) > 6: user_memory[user_id] = user_memory[user_id][-6:]
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key={GEMINI_API_KEY}"
-        data = {"systemInstruction": {"parts": [{"text": NEHA_PROMPT}]}, "contents": user_memory[user_id]}
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers={'Content-Type': 'application/json'}, json=data) as resp:
-                if resp.status != 200: return "Yaar mera dimaag kharab ho raha hai, thodi der baad aana! 😫"
-                result = await resp.json()
-        reply_text = result['candidates'][0]['content']['parts'][0]['text']
-        user_memory[user_id].append({"role": "model", "parts": [{"text": reply_text}]})
-        return reply_text
-    except Exception: return "Bhai server down chal raha hai... 😔"
-
-async def daily_posting_task():
-    days_hindi = {"Monday": "Somvaar", "Tuesday": "Mangalvaar", "Wednesday": "Budhvaar", "Thursday": "Veervaar", "Friday": "Shukravaar", "Saturday": "Shanivaar", "Sunday": "Ravivaar"}
-    last_morning_date, last_evening_date = None, None
-    ist_timezone = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
-    while True:
-        try:
-            if clone2_app and clone2_app.is_initialized:
-                now = datetime.datetime.now(ist_timezone)
-                if now.hour == 9 and last_morning_date != now.date():
-                    await clone2_app.send_message(MAIN_GROUP_ID, f"✨ **Good Morning Filmy Family!** ✨\nAaj **{days_hindi.get(now.strftime('%A'), now.strftime('%A'))}** hai! 🔥\n👇\n{FINAL_WEBSITE_URL}")
-                    last_morning_date = now.date()
-                if now.hour == 19 and last_evening_date != now.date():
-                    await clone2_app.send_message(MAIN_GROUP_ID, f"🌆 **Good Evening!** 🌆\nAaj ki movies upload ho gayi hain! Enjoy karo. 👇\n{FINAL_WEBSITE_URL}")
-                    last_evening_date = now.date()
-        except: pass
-        await asyncio.sleep(600)
-
-async def start_clone_bots():
-    global clone1_app, clone2_app
-    
-    d1 = await settings_col.find_one({"_id": "clone1_token"})
-    if d1:
-        try:
-            clone1_app = Client("Clone1", api_id=API_ID, api_hash=API_HASH, bot_token=d1["token"])
-            @clone1_app.on_message(filters.command("start") & filters.private)
-            async def c1_start(c, m):
-                btn = InlineKeyboardMarkup([[InlineKeyboardButton("🚀 Join Now", url=REAL_GROUP_LINK)], [InlineKeyboardButton("📥 Download New", url=FINAL_WEBSITE_URL)]])
-                payload = m.command[1] if len(m.command) > 1 else None
-                if not payload: return await m.reply("👋 **Hello! Main Delivery Bot hoon.** 🎬", reply_markup=btn)
-                
-                decoded_payload = decode_payload(payload)
-                if not decoded_payload: return await m.reply("❌ Invalid Link")
-                
-                # 🔥 BATCH LINK DELIVERY LOGIC 🔥
-                if decoded_payload.startswith("batch_"):
-                    try:
-                        _, oid, start_id, end_id = decoded_payload.split("_")
-                        start_id, end_id = int(start_id), int(end_id)
-                        sent_msgs = []
-                        await m.reply("⏳ **Sending Files... Please Wait...**")
-                        
-                        for i in range(start_id, end_id + 1):
-                            msg = await app.get_messages(DB_CHANNEL_ID, i)
-                            if msg and not msg.empty and (msg.document or msg.video or msg.audio):
-                                raw_cap = msg.caption.html if msg.caption else ""
-                                if "<blockquote>" in raw_cap or "<b>" in raw_cap:
-                                    final_cap = f"{raw_cap}\n\n<blockquote>⏳ Note: Yeh file 5 Minute mein delete ho jayegi! ⚠️</blockquote>"
-                                else:
-                                    vip_blocks = [f"<blockquote>{chunk.strip()}</blockquote>" for chunk in raw_cap.split('\n\n') if chunk.strip()]
-                                    final_cap = "\n\n".join(vip_blocks) + "\n\n<blockquote>⏳ Note: Yeh file 5 Minute mein delete ho jayegi! ⚠️</blockquote>"
-                                
-                                s_msg = await c.copy_message(m.chat.id, DB_CHANNEL_ID, i, caption=final_cap, parse_mode=enums.ParseMode.HTML)
-                                sent_msgs.append(s_msg)
-                                await asyncio.sleep(0.5)
-                        
-                        async def auto_del_batch(msgs, cid):
-                            await asyncio.sleep(300)
-                            for m_del in msgs:
-                                try: await m_del.delete()
-                                except: pass
-                            try: await c.send_message(cid, "⚠️ **Files Delete ho chuki hain!** 🕒\nNayi movies ke liye niche click karein! 👇", reply_markup=btn)
-                            except: pass
-                        asyncio.create_task(auto_del_batch(sent_msgs, m.chat.id))
-                    except Exception as e:
-                        print(e)
-                        await m.reply("❌ **Batch Not Found or Expired!**")
-                
-                # NORMAL SINGLE LINK LOGIC
-                else:
-                    mid = extract_msg_id(decoded_payload)
-                    if mid:
-                        try:
-                            msg = await app.get_messages(DB_CHANNEL_ID, mid)
-                            if msg.caption:
-                                raw_cap = msg.caption.html
-                                if "<blockquote>" in raw_cap or "<b>" in raw_cap: final_cap = f"{raw_cap}\n\n<blockquote>⏳ Note: Yeh file 5 Minute mein delete ho jayegi! ⚠️</blockquote>"
-                                else:
-                                    vip_blocks = [f"<blockquote>{chunk.strip()}</blockquote>" for chunk in raw_cap.split('\n\n') if chunk.strip()]
-                                    final_cap = "\n\n".join(vip_blocks) + "\n\n<blockquote>⏳ Note: Yeh file 5 Minute mein delete ho jayegi! ⚠️</blockquote>"
-                            else: final_cap = "<blockquote>🎬 VIP Movie File</blockquote>\n\n<blockquote>⏳ Note: Yeh file 5 Minute mein delete ho jayegi! ⚠️</blockquote>"
-
-                            sent_msg = await c.copy_message(m.chat.id, DB_CHANNEL_ID, mid, caption=final_cap, parse_mode=enums.ParseMode.HTML)
-                            
-                            async def auto_del(msg_to_del, cid):
-                                await asyncio.sleep(300)
-                                try: await msg_to_del.delete(); await c.send_message(cid, "⚠️ **File Delete ho chuki hai!** 🕒\nNayi movies ke liye niche click karein! 👇", reply_markup=btn)
-                                except: pass
-                            asyncio.create_task(auto_del(sent_msg, m.chat.id))
-                        except Exception as e: await m.reply("❌ **File Not Found!**")
-
-            await clone1_app.start()
-        except: pass
-
-    d2 = await settings_col.find_one({"_id": "clone2_token"})
-    if d2:
-        try:
-            clone2_app = Client("Clone2", api_id=API_ID, api_hash=API_HASH, bot_token=d2["token"])
-            @clone2_app.on_message(filters.group & filters.photo)
-            async def neha_photo_comment(c, m):
-                try: await asyncio.sleep(2); await m.reply("Wow! 😍 Ye movie toh bahut mast lag rahi hai. Kis kis ko iska link chahiye? Jaldi batao! 👇✨", quote=True)
-                except: pass
-
-            @clone2_app.on_message(filters.command("start") & filters.private)
-            async def neha_start_pm(c, m): await m.reply(f"Hi! Main Neha hoon. 😉\n\n👉 **Join Group:** {REAL_GROUP_LINK}")
-
-             @clone2_app.on_message(filters.group & filters.text)
-            async def neha_grp_handler(c, m):
-                bot_me = await c.get_me()
-                text, words, uid = m.text.lower(), m.text.lower().split(), (m.from_user.id if m.from_user else m.chat.id)
-                remove_list = {"movie", "movies", "film", "series", "link", "de", "do", "chahiye", "upload", "dedo", "dena", "bhej", "bhejo", "kaha", "kahan", "kidhar", "hi", "hello", "hey", "suno", "oye", "oyee", "ka", "ki", "ke", "hai", "koi", "yar", "yaar", "please", "pls", "bhai", "mujhe", "mera", "meri", "download", "neha", f"@{bot_me.username.lower()}"}
-                demand_words = {"movie", "film", "series", "link", "chahiye", "dedo", "dena", "bhej"}
-                
-                is_mentioned = "neha" in text or f"@{bot_me.username.lower()}" in text
-                is_reply_to_bot = bool(m.reply_to_message and m.reply_to_message.from_user and m.reply_to_message.from_user.id == bot_me.id)
-                has_demand = any(x in words for x in demand_words)
-
-                if is_mentioned or is_reply_to_bot or (not bool(m.reply_to_message and m.reply_to_message.from_user and m.reply_to_message.from_user.id != bot_me.id) and has_demand):
-                    ai_reply = await get_gemini_reply(c, m.chat.id, uid, m.text)
-                    if ai_reply: await m.reply(ai_reply, quote=True)
-                    
-                    if has_demand or (is_mentioned and len(words) > 1):
-                        query = " ".join([w for w in words if w not in remove_list])
-                        if len(query) < 2: return 
-                        
-                        found_msg, is_from_db = None, False
-                        try:
-                            async for msg in c.search_messages(m.chat.id, query=query, limit=50, filter=enums.MessagesFilter.PHOTO):
-                                if msg.id != m.id: found_msg = msg; break
-                            if not found_msg:
-                                async for msg in app.search_messages(DB_CHANNEL_ID, query=query, limit=50):
-                                    found_msg, is_from_db = msg, True; break
-                        except: pass
-                        
-                        site_btn = InlineKeyboardMarkup([[InlineKeyboardButton("📥 More Movies Here", url=FINAL_WEBSITE_URL)]])
-                        if found_msg:
-                            success_text = "ye lo bro tumhara favourite movie injoy Kro or movies ke niche click kr sakte ho 😉🎬"
-                            if is_from_db: await m.reply(success_text, reply_markup=site_btn); await app.copy_message(m.chat.id, DB_CHANNEL_ID, found_msg.id)
-                            else: await m.reply(f"{success_text}\n👉 {found_msg.link}", reply_to_message_id=found_msg.id, reply_markup=site_btn)
-                        else:
-                            await m.reply("Abhi upload ho raha hai isme time lagega jab Tak yha or movies hai dekh sakte ho 😉🍿", reply_markup=site_btn)
-                            try: await c.send_message(int(OWNER_ID), f"🚨 **BOSS ALERT!**\n\n`{query}` nahi mili. Upload kardo!")
-                            except: pass
-
-            @clone2_app.on_message(filters.private & filters.text & ~filters.command("start"))
-            async def neha_pm(c, m):
-                uid = m.from_user.id
-                if str(uid) == str(OWNER_ID):
-                    r = await get_gemini_reply(c, m.chat.id, uid, m.text)
-                    if r: await m.reply(r)
-                    return
-                if uid not in user_msg_data: user_msg_data[uid] = {'last_time': None, 'is_waiting': False}
-                if user_msg_data[uid].get('last_time') and (datetime.datetime.now() - user_msg_data[uid]['last_time']).total_seconds() < 86400: return
-                if user_msg_data[uid]['is_waiting']: return
-                user_msg_data[uid]['is_waiting'] = True
-                await asyncio.sleep(300) 
-                try: await m.reply(f"Yaar, main abhi thoda kaam kar rahi hoon! 😊\n🔗 {REAL_GROUP_LINK}"); user_msg_data[uid]['last_time'] = datetime.datetime.now()
-                except: pass
-                finally: user_msg_data[uid]['is_waiting'] = False
-            await clone2_app.start()
-        except: pass
-
-async def start_services():
-    await app.start()
-    await start_clone_bots()
-    asyncio.create_task(daily_posting_task())
-    app_web = web.Application()
-    app_web.add_routes([web.get("/", lambda q: web.Response(text="Running!"))])
-    runner = web.AppRunner(app_web); await runner.setup()
-    await web.TCPSite(runner, "0.0.0.0", PORT).start()
-    await pyrogram.idle()
-
-if __name__ == "__main__":
-    asyncio.get_event_loop().run_until_complete(start_services())
+        

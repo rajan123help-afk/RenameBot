@@ -52,7 +52,7 @@ try:
     mongo = AsyncIOMotorClient(MONGO_URL)
     db = mongo["FilmyFlipStore"]
     settings_col = db["settings"]
-    channels_col = db["channels"]
+    channels_col = db["channels"] # For Force Subscribe
     users_col = db["users"]
     rename_col = db["rename_rules"] 
     print("✅ MongoDB Connected")
@@ -70,31 +70,23 @@ user_memory = {}
 
 # --- 🛠️ HELPERS LOGIC ---
 def humanbytes(size):
-    if not size: 
-        return "0 B"
+    if not size: return "0 B"
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-        if size < 1024: 
-            return f"{size:.2f} {unit}"
+        if size < 1024: return f"{size:.2f} {unit}"
         size /= 1024
 
 def get_duration(filepath):
     try:
         metadata = extractMetadata(createParser(filepath))
-        if metadata.has("duration"): 
-            return metadata.get('duration').seconds
-    except: 
-        pass
+        if metadata.has("duration"): return metadata.get('duration').seconds
+    except: pass
     return 0
 
 def get_duration_str(duration):
-    if not duration: 
-        return None
-    m, s = divmod(int(duration), 60)
-    h, m = divmod(m, 60)
-    if h:
-        return f"{h}h {m}m {s}s"
-    else:
-        return f"{m}m {s}s"
+    if not duration: return None
+    m, s = divmod(int(duration), 60); h, m = divmod(m, 60)
+    if h: return f"{h}h {m}m {s}s"
+    return f"{m}m {s}s"
 
 def get_link_codes(string_data):
     b64_str = base64.b64encode(string_data.encode("utf-8")).decode("utf-8")
@@ -106,26 +98,20 @@ def decode_payload(s):
     try:
         s = s.strip() + "=" * ((4 - len(s.strip()) % 4) % 4)
         return base64.b64decode(s).decode("utf-8")
-    except: 
-        return None
+    except: return None
 
 def extract_msg_id(payload):
     try: 
-        if "_" in payload:
-            return int(payload.split("_")[-1])
-        else:
-            return int(payload)
-    except: 
-        return None
+        if "_" in payload: return int(payload.split("_")[-1])
+        return int(payload)
+    except: return None
 
 def get_media_info(name):
     clean_name = name.replace(".", " ").replace("_", " ").replace("-", " ")
     match1 = re.search(r"(?i)(?:s|season)\s*[\.]?\s*(\d{1,2})\s*[\.]?\s*(?:e|ep|episode)\s*[\.]?\s*(\d{1,3})", clean_name)
-    if match1: 
-        return match1.group(1), match1.group(2)
+    if match1: return match1.group(1), match1.group(2)
     match2 = re.search(r"(\d{1,2})x(\d{1,3})", clean_name)
-    if match2: 
-        return match2.group(1), match2.group(2)
+    if match2: return match2.group(1), match2.group(2)
     return None, None
 
 def get_fancy_caption(filename, filesize, duration):
@@ -135,15 +121,12 @@ def get_fancy_caption(filename, filesize, duration):
     
     caption = f"<b>{safe_name}</b>\n\n"
     s, e = get_media_info(filename)
-    if s and e: 
-        caption += f"<blockquote>💿 Season ➥ {s.zfill(2)}</blockquote>\n\n<blockquote>📺 Episode ➥ {e.zfill(2)}</blockquote>\n\n"
-    elif s:
-         caption += f"<blockquote>💿 Season ➥ {s.zfill(2)}</blockquote>\n\n"
+    if s and e: caption += f"<blockquote>💿 Season ➥ {s.zfill(2)}</blockquote>\n\n<blockquote>📺 Episode ➥ {e.zfill(2)}</blockquote>\n\n"
+    elif s: caption += f"<blockquote>💿 Season ➥ {s.zfill(2)}</blockquote>\n\n"
          
     caption += f"<blockquote>File Size ♻️ ➥ {filesize}</blockquote>\n\n"
     dur_str = get_duration_str(duration)
-    if dur_str: 
-        caption += f"<blockquote>Duration ⏰ ➥ {dur_str}</blockquote>\n\n"
+    if dur_str: caption += f"<blockquote>Duration ⏰ ➥ {dur_str}</blockquote>\n\n"
     caption += f"<blockquote>Powered By ➥ 🦋 <a href='{FINAL_WEBSITE_URL}'>Filmy Flip Hub</a> 🦋 ❞</blockquote>"
     return caption
 
@@ -161,8 +144,7 @@ def apply_watermark(base_path, wm_path):
         base.paste(wm, (x, y), wm)
         base.convert("RGB").save(base_path, "JPEG")
         return base_path
-    except: 
-        return base_path
+    except: return base_path
 
 async def apply_rename_rules(filename):
     rules = await rename_col.find({}).to_list(length=None)
@@ -182,27 +164,21 @@ async def progress(current, total, message, start_time, task_name):
         bar = "🟢" * filled + "⚪" * (10 - filled)
         eta = get_duration_str(round((total - current) / speed)) if speed > 0 else "0s"
         text = f"<b>{task_name}</b>\n\n<b>[{bar}] {round(percentage, 1)}%</b>\n<b>📦 Done:</b> {humanbytes(current)} / {humanbytes(total)}\n<b>⚡ Speed:</b> {humanbytes(speed)}/s\n<b>⏳ ETA:</b> {eta}"
-        try: 
-            await message.edit(text, parse_mode=enums.ParseMode.HTML)
-        except: 
-            pass
+        try: await message.edit(text, parse_mode=enums.ParseMode.HTML)
+        except: pass
+
 # ==========================================
 # 🌟 PART 2: CONTROL ROOM COMMANDS 🌟
 # ==========================================
 
 @app.on_message(filters.command("start") & filters.private)
 async def main_start(c, m):
-    try: 
-        await users_col.update_one({"_id": m.from_user.id}, {"$set": {"id": m.from_user.id}}, upsert=True)
-    except: 
-        pass
-        
+    try: await users_col.update_one({"_id": m.from_user.id}, {"$set": {"id": m.from_user.id}}, upsert=True)
+    except: pass
     if m.from_user.id == OWNER_ID:
         db_status = "✅ Connected"
-        try: 
-            await db.command("ping")
-        except: 
-            db_status = "❌ Disconnected"
+        try: await db.command("ping")
+        except: db_status = "❌ Disconnected"
         await m.reply(f"👋 **Boss! Centralized Master Bot Ready.**\n\n🗄 **DB:** `{db_status}`\n🆔 **DB ID:** `{DB_CHANNEL_ID}`")
 
 @app.on_message(filters.command("stats") & filters.user(OWNER_ID))
@@ -213,53 +189,63 @@ async def get_stats(c, m):
 
 @app.on_message(filters.command("setclone1") & filters.user(OWNER_ID))
 async def set_clone1(c, m):
-    if len(m.command) < 2: 
-        return await m.reply("Usage: `/setclone1 TOKEN`")
+    if len(m.command) < 2: return await m.reply("Usage: `/setclone1 TOKEN`")
     await settings_col.update_one({"_id": "clone1_token"}, {"$set": {"token": m.command[1]}}, upsert=True)
-    await m.reply("♻️ **Clone 1 Token Saved!**")
-    await start_clone_bots()
+    await m.reply("♻️ **Clone 1 Token Saved!**"); await start_clone_bots()
 
 @app.on_message(filters.command("setclone2") & filters.user(OWNER_ID))
 async def set_clone2(c, m):
-    if len(m.command) < 2: 
-        return await m.reply("Usage: `/setclone2 TOKEN`")
+    if len(m.command) < 2: return await m.reply("Usage: `/setclone2 TOKEN`")
     await settings_col.update_one({"_id": "clone2_token"}, {"$set": {"token": m.command[1]}}, upsert=True)
-    await m.reply("♻️ **Clone 2 Token Saved!**")
-    await start_clone_bots()
+    await m.reply("♻️ **Clone 2 Token Saved!**"); await start_clone_bots()
 
-# 🔥 FAIL-SAFE PODCAST COMMAND 🔥
 @app.on_message(filters.command("podcast") & filters.user(OWNER_ID))
 async def podcast_handler(c, m):
     try:
         msg_text = m.text.split(" ", 1)[1].strip()
-        if not msg_text:
-            raise ValueError("Empty Message")
-    except:
-        return await m.reply("❌ **Usage:** `/podcast Tumhara Message Yahan Likho`")
+        if not msg_text: raise ValueError("Empty")
+    except: return await m.reply("❌ **Usage:** `/podcast Tumhara Message`")
     
     status = await m.reply("⏳ **Sending Podcast...**")
-    
     try:
         d2 = await settings_col.find_one({"_id": "clone2_token"})
-        
         if d2 and d2.get("token"):
             token = d2["token"]
             url = f"https://api.telegram.org/bot{token}/sendMessage"
             payload = {"chat_id": MAIN_GROUP_ID, "text": msg_text}
-            
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=payload) as resp:
-                    if resp.status == 200:
-                        await status.edit("✅ **Podcast Sent Successfully as Neha!** 😎")
-                    else:
-                        err = await resp.json()
-                        await status.edit(f"❌ **Neha API Error:** `{err}`")
+                    if resp.status == 200: await status.edit("✅ **Podcast Sent Successfully as Neha!** 😎")
+                    else: await status.edit(f"❌ **Neha API Error:** `{await resp.json()}`")
         else: 
             await c.send_message(MAIN_GROUP_ID, msg_text)
             await status.edit("⚠️ **Neha ka token nahi mila, isliye Master Bot ne bhej diya!** ✅")
-            
-    except Exception as e: 
-        await status.edit(f"❌ **Error:** `{e}`\n\n📌 Check karo ki `MAIN_GROUP_ID` sahi set hai ya nahi!")
+    except Exception as e: await status.edit(f"❌ **Error:** `{e}`")
+
+# 🔥 FS COMMANDS 🔥
+@app.on_message(filters.command("addfs") & filters.user(OWNER_ID))
+async def add_fs(c, m):
+    try:
+        ch_id = int(m.command[1])
+        link = m.command[2]
+        await channels_col.update_one({"_id": ch_id}, {"$set": {"link": link}}, upsert=True)
+        await m.reply(f"✅ **FS Added!**\nID: `{ch_id}`")
+    except: await m.reply("❌ Format: `/addfs -100XXXXX https://t.me/link`")
+
+@app.on_message(filters.command("delfs") & filters.user(OWNER_ID))
+async def del_fs(c, m):
+    try: 
+        await channels_col.delete_one({"_id": int(m.command[1])})
+        await m.reply("🗑 **FS Deleted!**")
+    except: await m.reply("❌ Format: `/delfs ID`")
+
+@app.on_message(filters.command("viewfs") & filters.user(OWNER_ID))
+async def view_fs(c, m):
+    channels = await channels_col.find({}).to_list(length=None)
+    if not channels: return await m.reply("📂 No FS channels found.")
+    msg = "📢 **FS Channels:**\n\n"
+    for ch in channels: msg += f"🔹 ID: `{ch['_id']}`\n🔗 Link: {ch['link']}\n\n"
+    await m.reply(msg)
 
 @app.on_message(filters.command("addreplace") & filters.user(OWNER_ID))
 async def add_replace_handler(c, m):
@@ -268,17 +254,14 @@ async def add_replace_handler(c, m):
         old_word, new_word = text.split("|", 1) if "|" in text else (text.strip(), "")
         await rename_col.update_one({"old": old_word.strip()}, {"$set": {"new": new_word.strip()}}, upsert=True)
         await m.reply(f"✅ **Rule Added!**")
-    except: 
-        await m.reply("❌ **Format:** `/addreplace Old Word | New Word`")
+    except: await m.reply("❌ **Format:** `/addreplace Old Word | New Word`")
 
 @app.on_message(filters.command("viewreplace") & filters.user(OWNER_ID))
 async def view_rules_handler(c, m):
     rules = await rename_col.find({}).to_list(length=None)
-    if not rules: 
-        return await m.reply("📂 **No Rules Found!**")
+    if not rules: return await m.reply("📂 **No Rules Found!**")
     msg = "📝 **Your Rename Rules:**\n\n"
-    for rule in rules: 
-        msg += f"🔹 `{rule['old']}` ➡️ `{rule['new'] or '(Remove)'}`\n"
+    for rule in rules: msg += f"🔹 `{rule['old']}` ➡️ `{rule['new'] or '(Remove)'}`\n"
     await m.reply(msg)
 
 @app.on_message(filters.command("delreplace") & filters.user(OWNER_ID))
@@ -286,14 +269,10 @@ async def del_rule_handler(c, m):
     try:
         word = m.text.split(" ", 1)[1].strip()
         res = await rename_col.delete_one({"old": word})
-        if res.deleted_count:
-            await m.reply(f"🗑 **Deleted:** `{word}`")
-        else:
-            await m.reply(f"❌ **Not found**")
-    except: 
-        await m.reply("❌ Word to likho!")
+        if res.deleted_count: await m.reply(f"🗑 **Deleted:** `{word}`")
+        else: await m.reply(f"❌ **Not found**")
+    except: await m.reply("❌ Word to likho!")
 
-# 🔥 PRO BATCH COMMAND START 🔥
 @app.on_message(filters.command("batch") & filters.private & filters.user(OWNER_ID))
 async def batch_cmd(c, m):
     batch_session[m.from_user.id] = {"step": 1}
@@ -302,19 +281,13 @@ async def batch_cmd(c, m):
 @app.on_message(filters.command("cancel") & filters.private & filters.user(OWNER_ID))
 async def cancel_task(c, m):
     uid = m.from_user.id
-    if uid in download_queue: 
-        del download_queue[uid]
-    if uid in batch_session: 
-        del batch_session[uid]
-    try: 
-        shutil.rmtree("downloads")
-        os.makedirs("downloads", exist_ok=True)
-    except: 
-        pass
+    if uid in download_queue: del download_queue[uid]
+    if uid in batch_session: del batch_session[uid]
+    try: shutil.rmtree("downloads"); os.makedirs("downloads", exist_ok=True)
+    except: pass
     msg = await m.reply("✅ **Cleaned & Cancelled!**")
-    await asyncio.sleep(3)
-    await msg.delete()
-    
+    await asyncio.sleep(3); await msg.delete()
+
 # ==========================================
 # 🌟 PART 3: TMDB & MEDIA HANDLER 🌟
 # ==========================================
@@ -453,7 +426,14 @@ async def media_handler(c, m):
                     if clone1_app and clone1_app.is_connected: 
                         me = await clone1_app.get_me()
                         bot_uname = me.username
-                    await status.edit(f"✅ **BATCH COMPLETE! ({end_id - start_id + 1} Files Saved)**\n\n🔗 <b>Blog:</b> {BLOGGER_URL}?data={quote(blogger_code)}\n🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}", disable_web_page_preview=True)
+                    
+                    # Batch Success Box
+                    success_text = (
+                        f"✅ **BATCH COMPLETE! ({end_id - start_id + 1} Files Saved)**\n\n"
+                        f"🔗 **Blog Link:**\n<blockquote>{BLOGGER_URL}?data={quote(blogger_code)}</blockquote>\n\n"
+                        f"🤖 **Direct Link:**\n<blockquote>https://t.me/{bot_uname}?start={tg_code}</blockquote>"
+                    )
+                    await status.edit(success_text, disable_web_page_preview=True)
                 else:
                     await status.edit("❌ **Error!** Files nahi mili. Dhyan rakhein Bot us private channel me ADMIN hona chahiye.")
             except Exception as e:
@@ -495,7 +475,15 @@ async def media_handler(c, m):
         except: 
             pass
         
-        await status.edit(f"✅ **Stored Successfully!**\n\n📂 **File:** `{fname}`\n🔗 <b>Blog:</b> {BLOGGER_URL}?data={quote(blogger_code)}\n🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}", disable_web_page_preview=True)
+        # 🔥 VIP SUCCESS MESSAGE FORMAT 🔥
+        clean_fname = re.sub(r'\.(mkv|mp4|avi|webm|zip|rar)$', '', fname, flags=re.IGNORECASE)
+        success_text = (
+            f"🗂 **File No. {db_msg.id}**\n\n"
+            f"📂 **File:** `{clean_fname}`\n\n"
+            f"🔗 **Blog Link:**\n<blockquote>{BLOGGER_URL}?data={quote(blogger_code)}</blockquote>\n\n"
+            f"🤖 **Direct Link:**\n<blockquote>https://t.me/{bot_uname}?start={tg_code}</blockquote>"
+        )
+        await status.edit(success_text, disable_web_page_preview=True)
     except Exception as e: 
         await status.edit(f"❌ Error: {e}")
 
@@ -610,7 +598,15 @@ async def dl_process(c, cb):
             me = await clone1_app.get_me()
             bot_uname = me.username
             
-        await cb.message.edit(f"✅ **Stored!**\n📂 **File:** `{final_filename}`\n🔗 <b>Blog:</b> {BLOGGER_URL}?data={quote(blogger_code)}\n🤖 <b>Direct:</b> https://t.me/{bot_uname}?start={tg_code}", disable_web_page_preview=True)
+        # 🔥 VIP SUCCESS MESSAGE FORMAT 🔥
+        clean_fname = re.sub(r'\.(mkv|mp4|avi|webm|zip|rar)$', '', final_filename, flags=re.IGNORECASE)
+        success_text = (
+            f"🗂 **File No. {db_msg.id}**\n\n"
+            f"📂 **File:** `{clean_fname}`\n\n"
+            f"🔗 **Blog Link:**\n<blockquote>{BLOGGER_URL}?data={quote(blogger_code)}</blockquote>\n\n"
+            f"🤖 **Direct Link:**\n<blockquote>https://t.me/{bot_uname}?start={tg_code}</blockquote>"
+        )
+        await cb.message.edit(success_text, disable_web_page_preview=True)
         os.remove(internal_path)
         del download_queue[uid]
     except Exception as e: 
@@ -631,7 +627,7 @@ async def save_img_callback(c, cb):
         await msg.delete()
     except Exception as e: 
         await cb.message.edit(f"❌ Error: {e}")
-       # ==========================================
+        # ==========================================
 # 🌟 PART 4: AI, SEARCH, CLONES & POSTING 🌟
 # ==========================================
 REAL_GROUP_LINK = "https://t.me/+COWqvDXiQUkxOWE9"
@@ -644,7 +640,7 @@ async def get_gemini_reply(client, chat_id, user_id, prompt_text):
     if len(user_memory[user_id]) > 6: 
         user_memory[user_id] = user_memory[user_id][-6:]
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key={GEMINI_API_KEY}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
         data = {"systemInstruction": {"parts": [{"text": NEHA_PROMPT}]}, "contents": user_memory[user_id]}
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers={'Content-Type': 'application/json'}, json=data) as resp:
@@ -679,14 +675,53 @@ async def daily_posting_task():
 async def start_clone_bots():
     global clone1_app, clone2_app
     
+    # --- CLONE 1: DELIVERY BOT ---
     d1 = await settings_col.find_one({"_id": "clone1_token"})
     if d1:
         try:
             clone1_app = Client("Clone1", api_id=API_ID, api_hash=API_HASH, bot_token=d1["token"])
+            
+            # 🔥 AUTO-APPROVE JOIN REQUEST 🔥
+            @clone1_app.on_chat_join_request()
+            async def auto_approve(c, req):
+                try:
+                    await c.approve_chat_join_request(req.chat.id, req.from_user.id)
+                    await c.send_message(req.from_user.id, "✅ **Request Approved!**\nAb aap wapas jaakar apni movie download kar sakte ho. 🎬")
+                except: 
+                    pass
+            
             @clone1_app.on_message(filters.command("start") & filters.private)
             async def c1_start(c, m):
+                # 🔥 FS CHECK 🔥
+                user_id = m.from_user.id
+                fs_channels = await channels_col.find({}).to_list(length=None)
+                not_joined = []
+                
+                if fs_channels:
+                    for ch in fs_channels:
+                        try:
+                            member = await c.get_chat_member(ch["_id"], user_id)
+                            if member.status in [enums.ChatMemberStatus.LEFT, enums.ChatMemberStatus.BANNED]:
+                                not_joined.append(ch)
+                        except: 
+                            not_joined.append(ch)
+                            
+                if not_joined:
+                    buttons = []
+                    for i, ch in enumerate(not_joined): 
+                        buttons.append([InlineKeyboardButton(f"📢 Join Channel {i+1}", url=ch["link"])])
+                    
+                    payload = m.command[1] if len(m.command) > 1 else ""
+                    if payload:
+                        bot_uname = (await c.get_me()).username
+                        buttons.append([InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{bot_uname}?start={payload}")])
+                    
+                    return await m.reply("⚠️ **Pehle in channels ko join karo, tabhi file milegi!** 👇", reply_markup=InlineKeyboardMarkup(buttons))
+                
+                # --- START NORMAL DELIVERY ---
                 btn = InlineKeyboardMarkup([[InlineKeyboardButton("🚀 Join Now", url=REAL_GROUP_LINK)], [InlineKeyboardButton("📥 Download New", url=FINAL_WEBSITE_URL)]])
                 payload = m.command[1] if len(m.command) > 1 else None
+                
                 if not payload: 
                     return await m.reply("👋 **Hello! Main Delivery Bot hoon.** 🎬", reply_markup=btn)
                 
@@ -763,10 +798,12 @@ async def start_clone_bots():
         except: 
             pass
 
+    # --- CLONE 2: NEHA AI ---
     d2 = await settings_col.find_one({"_id": "clone2_token"})
     if d2:
         try:
             clone2_app = Client("Clone2", api_id=API_ID, api_hash=API_HASH, bot_token=d2["token"])
+            
             @clone2_app.on_message(filters.group & filters.photo)
             async def neha_photo_comment(c, m):
                 try: 
@@ -835,11 +872,23 @@ async def start_clone_bots():
             @clone2_app.on_message(filters.private & filters.text & ~filters.command("start"))
             async def neha_pm(c, m):
                 uid = m.from_user.id
+                
                 if str(uid) == str(OWNER_ID):
+                    if m.text.lower().startswith("bolo:"):
+                        msg_to_send = m.text[5:].strip() 
+                        if msg_to_send:
+                            try:
+                                await c.send_message(MAIN_GROUP_ID, msg_to_send)
+                                await m.reply("✅ **Group me bhej diya Boss!** 😎")
+                            except Exception as e:
+                                await m.reply(f"❌ Error: {e}")
+                        return
+                    
                     r = await get_gemini_reply(c, m.chat.id, uid, m.text)
                     if r: 
                         await m.reply(r)
                     return
+                
                 if uid not in user_msg_data: 
                     user_msg_data[uid] = {'last_time': None, 'is_waiting': False}
                 if user_msg_data[uid].get('last_time') and (datetime.datetime.now() - user_msg_data[uid]['last_time']).total_seconds() < 86400: 
@@ -871,5 +920,5 @@ async def start_services():
     await pyrogram.idle()
 
 if __name__ == "__main__":
-    asyncio.get_event_loop().run_until_complete(start_services()) 
-
+    asyncio.get_event_loop().run_until_complete(start_services())
+                

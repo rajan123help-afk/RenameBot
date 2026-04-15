@@ -627,30 +627,52 @@ async def save_img_callback(c, cb):
         await msg.delete()
     except Exception as e: 
         await cb.message.edit(f"❌ Error: {e}")
-        # ==========================================
+# ==========================================
 # 🌟 PART 4: AI, SEARCH, CLONES & POSTING 🌟
 # ==========================================
 REAL_GROUP_LINK = "https://t.me/+COWqvDXiQUkxOWE9"
 
 async def get_gemini_reply(client, chat_id, user_id, prompt_text):
     await client.send_chat_action(chat_id, enums.ChatAction.TYPING)
+    
     if user_id not in user_memory: 
         user_memory[user_id] = []
-    user_memory[user_id].append({"role": "user", "parts": [{"text": prompt_text}]})
-    if len(user_memory[user_id]) > 6: 
-        user_memory[user_id] = user_memory[user_id][-6:]
+
+    # 🔥 SAFE MEMORY TRICK: Original memory ko chhedne se pehle ek copy banayenge
+    temp_memory = user_memory[user_id].copy()
+    temp_memory.append({"role": "user", "parts": [{"text": prompt_text}]})
+    
+    # Memory limit (last 6 messages)
+    if len(temp_memory) > 6: 
+        temp_memory = temp_memory[-6:]
+
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-        data = {"systemInstruction": {"parts": [{"text": NEHA_PROMPT}]}, "contents": user_memory[user_id]}
+        data = {
+            "systemInstruction": {"parts": [{"text": NEHA_PROMPT}]}, 
+            "contents": temp_memory
+        }
+        
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers={'Content-Type': 'application/json'}, json=data) as resp:
                 if resp.status != 200: 
+                    # Render Logs mein error likhega, par memory kharab nahi karega
+                    err_msg = await resp.text()
+                    print(f"\n🚨 GEMINI API ERROR: {err_msg}\n")
                     return "Yaar mera dimaag kharab ho raha hai, thodi der baad aana! 😫"
+                
                 result = await resp.json()
+        
+        # 🔥 AGAR SAB SAHI RAHA, TABHI ASLI MEMORY UPDATE KARENGE 🔥
         reply_text = result['candidates'][0]['content']['parts'][0]['text']
-        user_memory[user_id].append({"role": "model", "parts": [{"text": reply_text}]})
+        
+        user_memory[user_id] = temp_memory # User ka message ab permanent save hua
+        user_memory[user_id].append({"role": "model", "parts": [{"text": reply_text}]}) # Bot ka reply save hua
+        
         return reply_text
-    except Exception: 
+        
+    except Exception as e: 
+        print(f"\n🚨 GEMINI CRASH: {e}\n")
         return "Bhai server down chal raha hai... 😔"
 
 async def daily_posting_task():
@@ -692,7 +714,7 @@ async def start_clone_bots():
             
             @clone1_app.on_message(filters.command("start") & filters.private)
             async def c1_start(c, m):
-                # 🔥 FS CHECK 🔥
+                # 🔥 FS CHECK PRO 🔥
                 user_id = m.from_user.id
                 fs_channels = await channels_col.find({}).to_list(length=None)
                 not_joined = []
@@ -701,9 +723,11 @@ async def start_clone_bots():
                     for ch in fs_channels:
                         try:
                             member = await c.get_chat_member(ch["_id"], user_id)
-                            if member.status in [enums.ChatMemberStatus.LEFT, enums.ChatMemberStatus.BANNED]:
+                            # Agar user leave kar chuka hai, ban hai, ya nikal diya gaya hai
+                            if member.status in [enums.ChatMemberStatus.LEFT, enums.ChatMemberStatus.BANNED, enums.ChatMemberStatus.RESTRICTED]:
                                 not_joined.append(ch)
-                        except: 
+                        except Exception as e: 
+                            # Agar user channel me nahi hai (UserNotParticipant error)
                             not_joined.append(ch)
                             
                 if not_joined:
@@ -921,4 +945,3 @@ async def start_services():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(start_services())
-                

@@ -649,7 +649,8 @@ async def get_gemini_reply(client, chat_id, user_id, prompt_text):
             temp_memory = temp_memory[1:]
 
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        url = url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+        
         data = {
             "systemInstruction": {"parts": [{"text": NEHA_PROMPT}]}, 
             "contents": temp_memory

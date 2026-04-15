@@ -649,8 +649,8 @@ async def get_gemini_reply(client, chat_id, user_id, prompt_text):
             temp_memory = temp_memory[1:]
 
     try:
-        url = url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
-        
+        # Naya fast aur latest model set kar diya gaya hai
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
         data = {
             "systemInstruction": {"parts": [{"text": NEHA_PROMPT}]}, 
             "contents": temp_memory
@@ -663,7 +663,7 @@ async def get_gemini_reply(client, chat_id, user_id, prompt_text):
                     
                     # 🔥 BOSS MODE ERROR TRACKER 🔥
                     if str(user_id) == str(OWNER_ID):
-                        return f"⚠️ **BOSS, API MEIN ERROR HAI:**\n`{err_msg}`\n\n👉 *Isko padho, Google bata raha hai ki API key galat hai ya kya problem hai!*"
+                        return f"⚠️ **BOSS, API MEIN ERROR HAI:**\n`{err_msg}`"
                     
                     # Dusre users ke liye normal bahana
                     return "Yaar mera dimaag kharab ho raha hai, thodi der baad aana! 😫"
@@ -684,19 +684,38 @@ async def get_gemini_reply(client, chat_id, user_id, prompt_text):
         return "Bhai server down chal raha hai... 😔"
 
 async def daily_posting_task():
+    import random
     days_hindi = {"Monday": "Somvaar", "Tuesday": "Mangalvaar", "Wednesday": "Budhvaar", "Thursday": "Veervaar", "Friday": "Shukravaar", "Saturday": "Shanivaar", "Sunday": "Ravivaar"}
     last_morning_date = None
     last_evening_date = None
     ist_timezone = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+    
     while True:
         try:
             if clone2_app and clone2_app.is_initialized:
                 now = datetime.datetime.now(ist_timezone)
+                aaj_ka_din = days_hindi.get(now.strftime('%A'), now.strftime('%A'))
+                
+                # 🌞 SUBAH KA POST (9 AM)
                 if now.hour == 9 and last_morning_date != now.date():
-                    await clone2_app.send_message(MAIN_GROUP_ID, f"✨ **Good Morning Filmy Family!** ✨\nAaj **{days_hindi.get(now.strftime('%A'), now.strftime('%A'))}** hai! 🔥\n👇\n{FINAL_WEBSITE_URL}")
+                    morning_msgs = [
+                        f"✨ **Good Morning Filmy Family!** ✨\nAaj **{aaj_ka_din}** hai! 🔥 Nayi movies ka din shuru ho gaya hai. 👇\n{FINAL_WEBSITE_URL}",
+                        f"🌅 **Subah Bakhair Dosto!**\nUth jao! Aaj **{aaj_ka_din}** ke din kuch naya dekhein? Link check karo 👇\n{FINAL_WEBSITE_URL}",
+                        f"☕ **Good Morning!**\nAaj **{aaj_ka_din}** hai. Kis kis ka aaj movie marathon ka plan hai? Jaldi se apni fav movies download karlo! 👇\n{FINAL_WEBSITE_URL}",
+                        f"🌞 **Naya Din, Nayi Movies!**\nHappy **{aaj_ka_din}** sabhi ko! Aaj ka kya plan hai boss? Movies dekho aur chill karo! 👇\n{FINAL_WEBSITE_URL}"
+                    ]
+                    await clone2_app.send_message(MAIN_GROUP_ID, random.choice(morning_msgs), disable_web_page_preview=True)
                     last_morning_date = now.date()
+                    
+                # 🌆 SHAAM KA POST (7 PM)
                 if now.hour == 19 and last_evening_date != now.date():
-                    await clone2_app.send_message(MAIN_GROUP_ID, f"🌆 **Good Evening!** 🌆\nAaj ki movies upload ho gayi hain! Enjoy karo. 👇\n{FINAL_WEBSITE_URL}")
+                    evening_msgs = [
+                        f"🌆 **Good Evening!** 🌆\nAaj ki nayi movies upload ho gayi hain! Site par jaakar check karo aur enjoy karo. 👇\n{FINAL_WEBSITE_URL}",
+                        f"🌙 **Shaam ho gayi dosto!**\nDin bhar ka kaam khatam? Ab relax karo aur nayi movies dekho. Link yahan hai 👇\n{FINAL_WEBSITE_URL}",
+                        f"🍿 **Popcorn Time!**\nGood Evening! Aaj raat kaun si movie dekhne wale ho? Download link me nayi updates hain: 👇\n{FINAL_WEBSITE_URL}",
+                        f"✨ **Evening Update!**\nSaari latest movies update kar di gayi hain. Jaldi jao aur apni pasand ki movie download karo! 👇\n{FINAL_WEBSITE_URL}"
+                    ]
+                    await clone2_app.send_message(MAIN_GROUP_ID, random.choice(evening_msgs), disable_web_page_preview=True)
                     last_evening_date = now.date()
         except: 
             pass
@@ -836,12 +855,39 @@ async def start_clone_bots():
         try:
             clone2_app = Client("Clone2", api_id=API_ID, api_hash=API_HASH, bot_token=d2["token"])
             
+            # 🔥 SMART PHOTO COMMENT SYSTEM 🔥
             @clone2_app.on_message(filters.group & filters.photo)
             async def neha_photo_comment(c, m):
                 try: 
                     await asyncio.sleep(2)
-                    await m.reply("Wow! 😍 Ye movie toh bahut mast lag rahi hai. Kis kis ko iska link chahiye? Jaldi batao! 👇✨", quote=True)
-                except: 
+                    
+                    movie_name = ""
+                    if m.caption:
+                        raw_name = m.caption.split('\n')[0]
+                        movie_name = raw_name.replace("File No.", "").replace("File:", "").replace("<b>", "").replace("</b>", "").replace("📂", "").replace("🗂", "").strip()
+                        movie_name = movie_name[:35]
+                    
+                    import random
+                    comments = [
+                        "Wow! 😍 Ye movie toh bahut mast lag rahi hai. Upar link par click karo, jaldi se download karo aur batao kaisi lagi! 🍿✨",
+                        "Arre waah! Ye wali toh meri favorite hai. ❤️ Link toh diya hua hai, fatatafat dekho aur apna review do yahan! 👇",
+                        "Bhai log, kya mast print aaya hai iska! 🔥 Link pe click karke enjoy karo aur yahan batao maza aaya ya nahi? 😎",
+                        "Ye lo nayi dhamaka movie aagayi! 💥 Jaldi se link open karo, download karo aur batao kaisi hai! 👇",
+                        "Kya baat hai! Ye movie toh hit hai boss. 😎 Upar link se dekho aur aakar batao kaisa laga print! 🎬",
+                        "Is movie ka toh sab wait kar rahe the na? 😍 Link mil gaya hai, ab jaldi dekho aur yahan batao kaisi lagi! 👇"
+                    ]
+                    
+                    if movie_name and len(movie_name) > 2:
+                        comments.extend([
+                            f"Finally '{movie_name}' aagayi! 😍 Upar wale link se download karo aur batao kaisi hai! 👇",
+                            f"Kya movie hai yaar '{movie_name}'! 🔥 Jaldi se link pe click karke enjoy karo aur group me review do! 🍿",
+                            f"Main toh chali '{movie_name}' dekhne! 😎 Aap log bhi upar diye link se dekho aur batao kaisi lagi! ✨",
+                            f"Bhai '{movie_name}' ka print ekdum makhan hai! 🍿 Upar link diya hai, check karo aur apna review batao! 👇"
+                        ])
+                    
+                    selected_comment = random.choice(comments)
+                    await m.reply(selected_comment, quote=True)
+                except Exception as e: 
                     pass
 
             @clone2_app.on_message(filters.command("start") & filters.private)

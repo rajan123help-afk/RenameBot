@@ -642,9 +642,11 @@ async def get_gemini_reply(client, chat_id, user_id, prompt_text):
     temp_memory = user_memory[user_id].copy()
     temp_memory.append({"role": "user", "parts": [{"text": prompt_text}]})
     
-    # Memory limit (last 6 messages)
+    # Memory fix: Hamesha 'user' role se shuru hona chahiye aur limit me rehna chahiye
     if len(temp_memory) > 6: 
         temp_memory = temp_memory[-6:]
+        if temp_memory[0]["role"] == "model":
+            temp_memory = temp_memory[1:]
 
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
@@ -656,9 +658,13 @@ async def get_gemini_reply(client, chat_id, user_id, prompt_text):
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers={'Content-Type': 'application/json'}, json=data) as resp:
                 if resp.status != 200: 
-                    # Render Logs mein error likhega, par memory kharab nahi karega
                     err_msg = await resp.text()
-                    print(f"\n🚨 GEMINI API ERROR: {err_msg}\n")
+                    
+                    # 🔥 BOSS MODE ERROR TRACKER 🔥
+                    if str(user_id) == str(OWNER_ID):
+                        return f"⚠️ **BOSS, API MEIN ERROR HAI:**\n`{err_msg}`\n\n👉 *Isko padho, Google bata raha hai ki API key galat hai ya kya problem hai!*"
+                    
+                    # Dusre users ke liye normal bahana
                     return "Yaar mera dimaag kharab ho raha hai, thodi der baad aana! 😫"
                 
                 result = await resp.json()
@@ -672,7 +678,8 @@ async def get_gemini_reply(client, chat_id, user_id, prompt_text):
         return reply_text
         
     except Exception as e: 
-        print(f"\n🚨 GEMINI CRASH: {e}\n")
+        if str(user_id) == str(OWNER_ID):
+            return f"⚠️ **CODE CRASH ERROR:**\n`{e}`"
         return "Bhai server down chal raha hai... 😔"
 
 async def daily_posting_task():

@@ -630,6 +630,12 @@ async def save_img_callback(c, cb):
 # ==========================================
 # 🌟 PART 4: AI, SEARCH, CLONES & POSTING 🌟
 # ==========================================
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+import datetime
+import asyncio
+import aiohttp
+import random
+
 REAL_GROUP_LINK = "https://t.me/+COWqvDXiQUkxOWE9"
 
 async def get_gemini_reply(client, chat_id, user_id, prompt_text):
@@ -638,18 +644,15 @@ async def get_gemini_reply(client, chat_id, user_id, prompt_text):
     if user_id not in user_memory: 
         user_memory[user_id] = []
 
-    # 🔥 SAFE MEMORY TRICK: Original memory ko chhedne se pehle ek copy banayenge
     temp_memory = user_memory[user_id].copy()
     temp_memory.append({"role": "user", "parts": [{"text": prompt_text}]})
     
-    # Memory fix: Hamesha 'user' role se shuru hona chahiye aur limit me rehna chahiye
     if len(temp_memory) > 6: 
         temp_memory = temp_memory[-6:]
         if temp_memory[0]["role"] == "model":
             temp_memory = temp_memory[1:]
 
     try:
-        # Naya fast aur latest model set kar diya gaya hai
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
         data = {
             "systemInstruction": {"parts": [{"text": NEHA_PROMPT}]}, 
@@ -660,21 +663,16 @@ async def get_gemini_reply(client, chat_id, user_id, prompt_text):
             async with session.post(url, headers={'Content-Type': 'application/json'}, json=data) as resp:
                 if resp.status != 200: 
                     err_msg = await resp.text()
-                    
-                    # 🔥 BOSS MODE ERROR TRACKER 🔥
                     if str(user_id) == str(OWNER_ID):
                         return f"⚠️ **BOSS, API MEIN ERROR HAI:**\n`{err_msg}`"
-                    
-                    # Dusre users ke liye normal bahana
                     return "Yaar mera dimaag kharab ho raha hai, thodi der baad aana! 😫"
                 
                 result = await resp.json()
         
-        # 🔥 AGAR SAB SAHI RAHA, TABHI ASLI MEMORY UPDATE KARENGE 🔥
         reply_text = result['candidates'][0]['content']['parts'][0]['text']
         
-        user_memory[user_id] = temp_memory # User ka message ab permanent save hua
-        user_memory[user_id].append({"role": "model", "parts": [{"text": reply_text}]}) # Bot ka reply save hua
+        user_memory[user_id] = temp_memory
+        user_memory[user_id].append({"role": "model", "parts": [{"text": reply_text}]})
         
         return reply_text
         
@@ -683,8 +681,8 @@ async def get_gemini_reply(client, chat_id, user_id, prompt_text):
             return f"⚠️ **CODE CRASH ERROR:**\n`{e}`"
         return "Bhai server down chal raha hai... 😔"
 
+
 async def daily_posting_task():
-    import random
     days_hindi = {"Monday": "Somvaar", "Tuesday": "Mangalvaar", "Wednesday": "Budhvaar", "Thursday": "Veervaar", "Friday": "Shukravaar", "Saturday": "Shanivaar", "Sunday": "Ravivaar"}
     last_morning_date = None
     last_evening_date = None
@@ -721,10 +719,13 @@ async def daily_posting_task():
             pass
         await asyncio.sleep(600)
 
+
 async def start_clone_bots():
     global clone1_app, clone2_app
     
+    # ==========================================
     # --- CLONE 1: DELIVERY BOT ---
+    # ==========================================
     d1 = await settings_col.find_one({"_id": "clone1_token"})
     if d1:
         try:
@@ -750,11 +751,9 @@ async def start_clone_bots():
                     for ch in fs_channels:
                         try:
                             member = await c.get_chat_member(ch["_id"], user_id)
-                            # Agar user leave kar chuka hai, ban hai, ya nikal diya gaya hai
                             if member.status in [enums.ChatMemberStatus.LEFT, enums.ChatMemberStatus.BANNED, enums.ChatMemberStatus.RESTRICTED]:
                                 not_joined.append(ch)
                         except Exception as e: 
-                            # Agar user channel me nahi hai (UserNotParticipant error)
                             not_joined.append(ch)
                             
                 if not_joined:
@@ -769,8 +768,15 @@ async def start_clone_bots():
                     
                     return await m.reply("⚠️ **Pehle in channels ko join karo, tabhi file milegi!** 👇", reply_markup=InlineKeyboardMarkup(buttons))
                 
-                # --- START NORMAL DELIVERY ---
-                btn = InlineKeyboardMarkup([[InlineKeyboardButton("🚀 Join Now", url=REAL_GROUP_LINK)], [InlineKeyboardButton("📥 Download New", url=FINAL_WEBSITE_URL)]])
+                # --- START NORMAL DELIVERY + MINI APP BUTTONS ---
+                btn = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🚀 Join Now", url=REAL_GROUP_LINK)],
+                    [
+                        InlineKeyboardButton("📱 Download New", web_app=WebAppInfo(url=FINAL_WEBSITE_URL)),
+                        InlineKeyboardButton("▶️ YouTube", web_app=WebAppInfo(url="https://youtube.com/@Filmy_Flip"))
+                    ]
+                ])
+                
                 payload = m.command[1] if len(m.command) > 1 else None
                 
                 if not payload: 
@@ -780,6 +786,7 @@ async def start_clone_bots():
                 if not decoded_payload: 
                     return await m.reply("❌ Invalid Link")
                 
+                # BATCH FILES LOGIC
                 if decoded_payload.startswith("batch_"):
                     try:
                         _, oid, start_id, end_id = decoded_payload.split("_")
@@ -817,6 +824,7 @@ async def start_clone_bots():
                         print(e)
                         await m.reply("❌ **Batch Not Found!**")
                 
+                # SINGLE FILE LOGIC
                 else:
                     mid = extract_msg_id(decoded_payload)
                     if mid:
@@ -849,13 +857,31 @@ async def start_clone_bots():
         except: 
             pass
 
+    # ==========================================
     # --- CLONE 2: NEHA AI ---
+    # ==========================================
     d2 = await settings_col.find_one({"_id": "clone2_token"})
     if d2:
         try:
             clone2_app = Client("Clone2", api_id=API_ID, api_hash=API_HASH, bot_token=d2["token"])
             
-            # 🔥 SMART PHOTO COMMENT SYSTEM 🔥
+            # 🔥 CHANNEL AUTO-BUTTON EDITOR 🔥
+            @clone2_app.on_message(filters.channel)
+            async def auto_add_buttons_in_channel(c, m):
+                try:
+                    if m.reply_markup:
+                        return
+                    mini_app_btn = InlineKeyboardMarkup([
+                        [
+                            InlineKeyboardButton("📱 Download New", web_app=WebAppInfo(url=FINAL_WEBSITE_URL)),
+                            InlineKeyboardButton("▶️ YouTube", web_app=WebAppInfo(url="https://youtube.com/@FilmyFlipHub"))
+                        ]
+                    ])
+                    await m.edit_reply_markup(reply_markup=mini_app_btn)
+                except Exception as e:
+                    pass
+
+            # 🔥 GROUP PHOTO COMMENT + BUTTONS 🔥
             @clone2_app.on_message(filters.group & filters.photo)
             async def neha_photo_comment(c, m):
                 try: 
@@ -867,7 +893,6 @@ async def start_clone_bots():
                         movie_name = raw_name.replace("File No.", "").replace("File:", "").replace("<b>", "").replace("</b>", "").replace("📂", "").replace("🗂", "").strip()
                         movie_name = movie_name[:35]
                     
-                    import random
                     comments = [
                         "Wow! 😍 Ye movie toh bahut mast lag rahi hai. Upar link par click karo, jaldi se download karo aur batao kaisi lagi! 🍿✨",
                         "Arre waah! Ye wali toh meri favorite hai. ❤️ Link toh diya hua hai, fatatafat dekho aur apna review do yahan! 👇",
@@ -886,7 +911,15 @@ async def start_clone_bots():
                         ])
                     
                     selected_comment = random.choice(comments)
-                    await m.reply(selected_comment, quote=True)
+                    
+                    mini_app_btn = InlineKeyboardMarkup([
+                        [
+                            InlineKeyboardButton("📱 Download New", web_app=WebAppInfo(url=FINAL_WEBSITE_URL)),
+                            InlineKeyboardButton("▶️ YouTube", web_app=WebAppInfo(url="https://youtube.com/@FilmyFlipHub"))
+                        ]
+                    ])
+                    
+                    await m.reply(selected_comment, quote=True, reply_markup=mini_app_btn)
                 except Exception as e: 
                     pass
 
@@ -894,6 +927,7 @@ async def start_clone_bots():
             async def neha_start_pm(c, m): 
                 await m.reply(f"Hi! Main Neha hoon. 😉\n\n👉 **Join Group:** {REAL_GROUP_LINK}")
 
+            # 🔥 AI GROUP CHAT & MOVIE SEARCH 🔥
             @clone2_app.on_message(filters.group & filters.text)
             async def neha_grp_handler(c, m):
                 bot_me = await c.get_me()
@@ -940,6 +974,14 @@ async def start_clone_bots():
                                 await app.copy_message(m.chat.id, DB_CHANNEL_ID, found_msg.id)
                             else: 
                                 await m.reply(f"{success_text}\n👉 {found_msg.link}", reply_to_message_id=found_msg.id, reply_markup=site_btn)
+                        site_btn = InlineKeyboardMarkup([[InlineKeyboardButton("📥 More Movies Here", url=FINAL_WEBSITE_URL)]])
+                        if found_msg:
+                            success_text = "ye lo bro tumhara favourite movie injoy Kro or movies ke niche click kr sakte ho 😉🎬"
+                            if is_from_db: 
+                                await m.reply(success_text, reply_markup=site_btn)
+                                await app.copy_message(m.chat.id, DB_CHANNEL_ID, found_msg.id)
+                            else: 
+                                await m.reply(f"{success_text}\n👉 {found_msg.link}", reply_to_message_id=found_msg.id, reply_markup=site_btn)
                         else:
                             await m.reply("Abhi upload ho raha hai isme time lagega jab Tak yha or movies hai dekh sakte ho 😉🍿", reply_markup=site_btn)
                             try: 
@@ -947,6 +989,7 @@ async def start_clone_bots():
                             except: 
                                 pass
 
+            # 🔥 NEHA PM HANDLER & BOSS MODE 🔥
             @clone2_app.on_message(filters.private & filters.text & ~filters.command("start"))
             async def neha_pm(c, m):
                 uid = m.from_user.id
